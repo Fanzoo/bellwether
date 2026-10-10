@@ -1,0 +1,6 @@
+{"atMs":0,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"arriving"}
+{"atMs":710,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"arriving","alert":"permission: Bash: curl -s https://status.example.com?"}
+{"atMs":1500,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"running","alert":"permission: Bash: curl -s https://status.example.com?"}
+{"atMs":5000,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"error","flavour":"rate_limit"}
+{"atMs":40000,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"thinking"}
+{"atMs":41500,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"done"}

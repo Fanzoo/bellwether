@@ -1,0 +1,15 @@
+# Local state and secrets: never committed.
+.env
+.env.*
+!.env.example
+data/
+data-test/
+config.json
+
+# Build output.
+node_modules/
+shell/node_modules/
+shell/src-tauri/target/
+shell/src-tauri/gen/
+
+.DS_Store

@@ -1,0 +1,6 @@
+{"atMs":0,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"arriving"}
+{"atMs":727,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"arriving","alert":"permission: Bash: touch meadow-approved.txt?"}
+{"atMs":1500,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"running","alert":"permission: Bash: touch meadow-approved.txt?"}
+{"atMs":6733,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"running","alert":"permission: Bash: touch meadow-approved.txt? (confirmed)"}
+{"atMs":10400,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"thinking"}
+{"atMs":12000,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"done"}

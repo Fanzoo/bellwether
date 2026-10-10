@@ -1,0 +1,34 @@
+{"atMs":0,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"arriving"}
+{"atMs":530,"actor":"lamb:Explore:l-38214092dc-a0000000000000031","state":"arriving"}
+{"atMs":680,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000032","state":"arriving"}
+{"atMs":830,"actor":"lamb:Plan:l-38214092dc-a0000000000000033","state":"arriving"}
+{"atMs":980,"actor":"lamb:code-reviewer:l-38214092dc-a0000000000000034","state":"arriving"}
+{"atMs":1130,"actor":"lamb:Explore:l-38214092dc-a0000000000000035","state":"arriving"}
+{"atMs":1500,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"thinking"}
+{"atMs":2100,"actor":"lamb:Explore:l-38214092dc-a0000000000000031","state":"busy","flavour":"reading"}
+{"atMs":2200,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000032","state":"busy","flavour":"reading"}
+{"atMs":2400,"actor":"lamb:Plan:l-38214092dc-a0000000000000033","state":"busy","flavour":"reading"}
+{"atMs":2500,"actor":"lamb:code-reviewer:l-38214092dc-a0000000000000034","state":"busy","flavour":"reading"}
+{"atMs":2700,"actor":"lamb:Explore:l-38214092dc-a0000000000000035","state":"busy","flavour":"reading"}
+{"atMs":3010,"actor":"lamb:Plan:l-38214092dc-a0000000000000033","state":"busy","flavour":"reading","alert":"permission: Bash: ls?"}
+{"atMs":4000,"actor":"lamb:Plan:l-38214092dc-a0000000000000033","state":"busy","flavour":"running","alert":"permission: Bash: ls?"}
+{"atMs":9010,"actor":"lamb:Plan:l-38214092dc-a0000000000000033","state":"busy","flavour":"running","alert":"permission: Bash: ls? (confirmed)"}
+{"atMs":10000,"actor":"lamb:Explore:l-38214092dc-a0000000000000031","state":"busy","flavour":"thinking"}
+{"atMs":10250,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000032","state":"busy","flavour":"thinking"}
+{"atMs":10500,"actor":"lamb:code-reviewer:l-38214092dc-a0000000000000034","state":"busy","flavour":"thinking"}
+{"atMs":10500,"actor":"lamb:Explore:l-38214092dc-a0000000000000035","state":"busy","flavour":"thinking"}
+{"atMs":12000,"actor":"lamb:Explore:l-38214092dc-a0000000000000031","state":"leaving"}
+{"atMs":12500,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000032","state":"leaving"}
+{"atMs":13000,"actor":"lamb:Plan:l-38214092dc-a0000000000000033","state":"busy","flavour":"thinking"}
+{"atMs":13500,"actor":"lamb:test-runner:l-38214092dc-a0000000000000036","state":"busy","flavour":"thinking"}
+{"atMs":13500,"actor":"lamb:Explore:l-38214092dc-a0000000000000031","state":"gone"}
+{"atMs":14000,"actor":"lamb:Plan:l-38214092dc-a0000000000000033","state":"leaving"}
+{"atMs":14000,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000032","state":"gone"}
+{"atMs":14300,"actor":"lamb:code-reviewer:l-38214092dc-a0000000000000034","state":"leaving"}
+{"atMs":14600,"actor":"lamb:Explore:l-38214092dc-a0000000000000035","state":"leaving"}
+{"atMs":14900,"actor":"lamb:test-runner:l-38214092dc-a0000000000000036","state":"leaving"}
+{"atMs":15500,"actor":"lamb:Plan:l-38214092dc-a0000000000000033","state":"gone"}
+{"atMs":16000,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"done"}
+{"atMs":16000,"actor":"lamb:code-reviewer:l-38214092dc-a0000000000000034","state":"gone"}
+{"atMs":16250,"actor":"lamb:Explore:l-38214092dc-a0000000000000035","state":"gone"}
+{"atMs":16500,"actor":"lamb:test-runner:l-38214092dc-a0000000000000036","state":"gone"}

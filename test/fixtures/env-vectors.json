@@ -1,0 +1,176 @@
+{
+  "comment": "How Node v22.14.0 --env-file reads PASTURE_HOOK_TOKEN. Generated from Node itself; checked by test/env-vectors.test.mjs (Node) and settings.rs (the shell). null = not set.",
+  "node": "v22.14.0",
+  "vectors": [
+    {
+      "name": "plain",
+      "text": "PASTURE_HOOK_TOKEN=abc123\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "inline comment with space",
+      "text": "PASTURE_HOOK_TOKEN=abc123 # my token\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "inline comment without space",
+      "text": "PASTURE_HOOK_TOKEN=abc123#rest\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "spaces around the value",
+      "text": "PASTURE_HOOK_TOKEN=   abc123   \n",
+      "expected": "abc123"
+    },
+    {
+      "name": "space before =",
+      "text": "PASTURE_HOOK_TOKEN =abc123\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "leading spaces",
+      "text": "   PASTURE_HOOK_TOKEN=abc123\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "export prefix",
+      "text": "export PASTURE_HOOK_TOKEN=abc123\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "export with indent",
+      "text": "  export PASTURE_HOOK_TOKEN=abc123\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "export with two spaces",
+      "text": "export  PASTURE_HOOK_TOKEN=abc123\n",
+      "expected": null
+    },
+    {
+      "name": "export, spaces around =",
+      "text": "export PASTURE_HOOK_TOKEN = abc123\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "double quotes",
+      "text": "PASTURE_HOOK_TOKEN=\"abc123\"\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "double quotes with # inside",
+      "text": "PASTURE_HOOK_TOKEN=\"abc # 123\"\n",
+      "expected": "abc # 123"
+    },
+    {
+      "name": "double quotes then comment",
+      "text": "PASTURE_HOOK_TOKEN=\"abc123\"   # c\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "single quotes then comment",
+      "text": "PASTURE_HOOK_TOKEN='abc123' # c\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "backticks",
+      "text": "PASTURE_HOOK_TOKEN=`abc 123`\n",
+      "expected": "abc 123"
+    },
+    {
+      "name": "escaped newline in double quotes",
+      "text": "PASTURE_HOOK_TOKEN=\"a\\nb\"\n",
+      "expected": "a\nb"
+    },
+    {
+      "name": "escaped newline in single quotes",
+      "text": "PASTURE_HOOK_TOKEN='a\\nb'\n",
+      "expected": "a\\nb"
+    },
+    {
+      "name": "unterminated double quote",
+      "text": "PASTURE_HOOK_TOKEN=\"abc123 # x\n",
+      "expected": "\"abc123 # x"
+    },
+    {
+      "name": "quotes inside an unquoted value",
+      "text": "PASTURE_HOOK_TOKEN=a\"b\"c\n",
+      "expected": "a\"b\"c"
+    },
+    {
+      "name": "tabs kept",
+      "text": "PASTURE_HOOK_TOKEN=\tabc123\t\n",
+      "expected": "\tabc123\t"
+    },
+    {
+      "name": "CRLF line endings",
+      "text": "OTHER=x\r\nPASTURE_HOOK_TOKEN=abc123\r\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "empty value",
+      "text": "PASTURE_HOOK_TOKEN=\n",
+      "expected": ""
+    },
+    {
+      "name": "empty quotes",
+      "text": "PASTURE_HOOK_TOKEN=\"\"\n",
+      "expected": ""
+    },
+    {
+      "name": "last assignment wins",
+      "text": "PASTURE_HOOK_TOKEN=first\nPASTURE_HOOK_TOKEN=second\n",
+      "expected": "second"
+    },
+    {
+      "name": "commented out",
+      "text": "# PASTURE_HOOK_TOKEN=abc123\n",
+      "expected": null
+    },
+    {
+      "name": "commented, then set",
+      "text": "#PASTURE_HOOK_TOKEN=old\nPASTURE_HOOK_TOKEN=new\n",
+      "expected": "new"
+    },
+    {
+      "name": "longer key name",
+      "text": "XPASTURE_HOOK_TOKEN=abc123\n",
+      "expected": null
+    },
+    {
+      "name": "other keys around it",
+      "text": "A=1\n# note\nPASTURE_HOOK_TOKEN=abc123\nB=\"two words\"\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "no trailing newline",
+      "text": "PASTURE_HOOK_TOKEN=abc123",
+      "expected": "abc123"
+    },
+    {
+      "name": "colon instead of =",
+      "text": "PASTURE_HOOK_TOKEN: abc123\n",
+      "expected": null
+    },
+    {
+      "name": "empty value then a comment",
+      "text": "PASTURE_HOOK_TOKEN= # fill me in\n",
+      "expected": ""
+    },
+    {
+      "name": "set, then emptied later (last wins)",
+      "text": "PASTURE_HOOK_TOKEN=abc123\nPASTURE_HOOK_TOKEN=\n",
+      "expected": ""
+    },
+    {
+      "name": "emptied, then set later (last wins)",
+      "text": "PASTURE_HOOK_TOKEN=\nPASTURE_HOOK_TOKEN=abc123\n",
+      "expected": "abc123"
+    },
+    {
+      "name": "CRLF, empty value",
+      "text": "OTHER=1\r\nPASTURE_HOOK_TOKEN=\r\n",
+      "expected": ""
+    }
+  ]
+}

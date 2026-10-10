@@ -1,0 +1,12 @@
+{"atMs":0,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"arriving"}
+{"atMs":1030,"actor":"lamb:Explore:l-38214092dc-a0000000000000011","state":"arriving"}
+{"atMs":1500,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"thinking"}
+{"atMs":2010,"actor":"lamb:Explore:l-38214092dc-a0000000000000011","state":"arriving","alert":"permission: Bash: npm test?"}
+{"atMs":2750,"actor":"lamb:Explore:l-38214092dc-a0000000000000011","state":"busy","flavour":"running","alert":"permission: Bash: npm test?"}
+{"atMs":3000,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"done"}
+{"atMs":8020,"actor":"lamb:Explore:l-38214092dc-a0000000000000011","state":"busy","flavour":"running","alert":"permission: Bash: npm test? (confirmed)"}
+{"atMs":11000,"actor":"lamb:Explore:l-38214092dc-a0000000000000011","state":"busy","flavour":"thinking"}
+{"atMs":11600,"actor":"lamb:Explore:l-38214092dc-a0000000000000011","state":"leaving"}
+{"atMs":11650,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"thinking"}
+{"atMs":13250,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"done"}
+{"atMs":13250,"actor":"lamb:Explore:l-38214092dc-a0000000000000011","state":"gone"}

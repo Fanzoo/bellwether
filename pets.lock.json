@@ -1,0 +1,11 @@
+{
+  "comment": "Pinned pet files: pasture pets fetch downloads exactly these, and the shell refuses to load a pet whose file doesn't match. Art is never committed; see NOTICE.",
+  "repo": "Adrianotiger/desktopPet",
+  "commit": "1ba33bebed993439f03e502b37e9bd2daf061773",
+  "pets": {
+    "esheep64": {
+      "path": "Pets/esheep64/animations.xml",
+      "sha256": "0e0cc153ec5795dd3c37a7094d2eb912b95544a58fcfb1b9a203707ea96329cf"
+    }
+  }
+}

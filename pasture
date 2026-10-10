@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# Thin shim around the brain CLI. Runnable from anywhere, including through a
+# symlink on PATH, e.g.
+#   ./pasture doctor
+# It runs from the repository root (the CLI loads .env from there), passes the caller's
+# directory as PASTURE_CWD (so relative paths mean what the caller meant), and passes
+# the exit code through (0 ok, 2 not installed / not running, 3 bad config or .env,
+# 1 unexpected).
+
+# Follow symlinks to the real script, so a link in ~/.local/bin still finds brain/.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+AGENT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pasture: node is not installed or not on PATH. Install Node 22.9 or newer: https://nodejs.org" >&2
+  exit 3
+fi
+# pasture needs Node 22.9+ (process.loadEnvFile and other recent APIs); check first so
+# an older Node gets a clear message.
+if ! node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=9)?0:1)'; then
+  echo "pasture: Node 22.9 or newer is required (found $(node --version)). https://nodejs.org" >&2
+  exit 3
+fi
+
+PASTURE_CWD="$(pwd)"
+export PASTURE_CWD
+cd "$AGENT_DIR" || exit 1
+exec node brain/cli.mjs "$@"

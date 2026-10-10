@@ -1,0 +1,20 @@
+{
+  "name": "pasture",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Desktop-pet overlay for Claude Code sessions. This package is the brain: hook listener, state, doctor and hook installer.",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "serve": "node brain/cli.mjs serve",
+    "record": "node brain/cli.mjs record",
+    "doctor": "node brain/cli.mjs doctor",
+    "hooks": "node brain/cli.mjs hooks",
+    "status": "node brain/cli.mjs status",
+    "replay": "node brain/cli.mjs replay",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  }
+}

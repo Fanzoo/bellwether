@@ -1,0 +1,19 @@
+/* The strip is transparent everywhere except where a sheep is drawn. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

@@ -1,0 +1,82 @@
+{
+  "port": 47417,
+  "brain": {
+    "nodePath": "node"
+  },
+  "strip": {
+    "placement": "terminal",
+    "fallbackMonitor": "primary",
+    "relocateSec": 60,
+    "heightPx": 140,
+    "homeWanderPx": 120,
+    "slotWidthPx": 110
+  },
+  "pets": {
+    "default": "esheep64",
+    "lambScale": 0.6,
+    "tint": "horns",
+    "scale": 1.5,
+    "palette": ["#FF8C00", "#1F5BFF", "#202020", "#E8202A", "#00C2D4", "#8B4513", "#12A84A", "#FF4FB0"],
+    "byAgentType": {},
+    "animationMap": {
+      "esheep64": {
+        "walk": "walk",
+        "run": "run",
+        "graze": "eat",
+        "sleep": ["sleep1a", "sleep1b"],
+        "alert": "boing",
+        "turn": "rotate1a",
+        "trip": "fall soft",
+        "sit": "sync",
+        "dizzy": "sleep2a",
+        "chew": "eat",
+        "arrive": "walk",
+        "leave": "run",
+        "hop": "jump",
+        "lie": "sleep3a"
+      }
+    }
+  },
+  "behaviour": {
+    "busyWindowSec": 8,
+    "grazeAfterSec": 20,
+    "sleepAfterMin": 10,
+    "minDwellMs": 1500,
+    "reapAfterHours": 12,
+    "maxLambsShown": 5,
+    "thinkingTimeoutSec": 120,
+    "lambTimeoutMin": 30,
+    "toolTimeoutMin": 30
+  },
+  "bubble": {
+    "detail": "full",
+    "maxChars": 60,
+    "redactPatterns": ["(?i)(token|secret|password|api[_-]?key)=\\S+"]
+  },
+  "privacy": {
+    "captureExclusion": true,
+    "hideWhenSharing": true,
+    "sharingProcesses": {
+      "darwin": ["CptHost", "zoom.us Screen Share"],
+      "win32": ["CptHost.exe"],
+      "linux": []
+    },
+    "hideWhenFullscreen": true
+  },
+  "fade": {
+    "radiusPx": 90,
+    "opacity": 0.25
+  },
+  "focus": {
+    "enabled": true
+  },
+  "locator": {
+    "strategies": ["herdr", "iterm2", "terminal-app", "windows-terminal", "vscode", "process-tree", "app-activate"],
+    "appleScript": true,
+    "herdrPath": "herdr"
+  },
+  "chaos": {
+    "enabled": false
+  },
+  "autostart": false
+}

@@ -1,0 +1,12 @@
+{"atMs":0,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"arriving"}
+{"atMs":1174,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000001","state":"arriving"}
+{"atMs":1500,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"thinking"}
+{"atMs":2216,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000001","state":"arriving","alert":"permission: Bash: touch meadow-lamb.txt?"}
+{"atMs":2750,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000001","state":"busy","flavour":"running","alert":"permission: Bash: touch meadow-lamb.txt?"}
+{"atMs":3000,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"done"}
+{"atMs":8229,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000001","state":"busy","flavour":"running","alert":"permission: Bash: touch meadow-lamb.txt? (confirmed)"}
+{"atMs":11483,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000001","state":"busy","flavour":"thinking"}
+{"atMs":12177,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000001","state":"leaving"}
+{"atMs":12224,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"busy","flavour":"thinking"}
+{"atMs":13692,"actor":"lamb:general-purpose:l-38214092dc-a0000000000000001","state":"gone"}
+{"atMs":13750,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"done"}

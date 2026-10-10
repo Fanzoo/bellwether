@@ -1,0 +1,4 @@
+{"atMs":0,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"arriving"}
+{"atMs":1500,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"done"}
+{"atMs":1772,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"leaving"}
+{"atMs":3500,"actor":"sheep:herdr:/Users/example/.config/herdr/herdr.sock#w1:p3","state":"gone"}

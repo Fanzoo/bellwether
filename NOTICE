@@ -1,0 +1,58 @@
+Bellwether (the `pasture` command): a desktop-pet overlay for Claude Code sessions
+MIT licence; see LICENSE.
+
+Bellwether is inspired by desktopPet and its eSheep, and plays desktopPet's pet format.
+
+THIRD-PARTY FORMATS, CODE AND ASSETS
+====================================
+
+desktopPet (Adrianotiger/desktopPet), MIT licence
+  https://github.com/Adrianotiger/desktopPet
+  pasture's player reads desktopPet's pet format (animations.xml and its schema,
+  Resources/animations.xsd). The format and schema are used as a reference, with
+  attribution, as the project's README asks ("Please retain attribution ... in any
+  redistributed version"). No desktopPet code is copied into pasture.
+
+Pet art (the sprite sheets inside each animations.xml): NOT included
+  The art is NOT committed to this repository and NOT bundled into any build.
+  `pasture pets fetch` downloads it on each user's machine into data/pets/
+  (gitignored) from desktopPet at the pinned commit
+  1ba33bebed993439f03e502b37e9bd2daf061773, checked against the sha256 in
+  pets.lock.json.
+  The art's licence is unclear: the repository's MIT licence plainly covers code, not
+  obviously the art. The default pet, esheep64, credits "sprites from LiL_Stenly"; the
+  original eSheep is by Tatsutoshi Nomura for Fuji Television. Because of that, this
+  project does not redistribute the art: each user fetches it from its upstream source
+  for their own use. Clearly licensed replacement art is planned.
+
+web-esheep (Adrianotiger/web-esheep), GPL-3.0: NOT vendored
+  https://github.com/Adrianotiger/web-esheep
+  Used only as a behavioural reference for how the pet XML is interpreted. None of its
+  code (esheep.js) is vendored, bundled or copied; pasture's player
+  (shell/src/player/) was written from the desktopPet schema and wiki. Vendoring
+  esheep.js would make the shell a GPL-3.0 derivative.
+
+cjpais/Handy, MIT licence
+  Consulted as a reference for the wlr-layer-shell initialisation order (the planned
+  Linux build). No code copied.
+
+gtk-layer-shell (system C library), LGPL-3.0: not used yet
+  The planned Linux build will link the system's gtk-layer-shell dynamically, through
+  its Rust binding (MIT). Nothing LGPL is in the macOS build.
+
+DEPENDENCIES
+============
+
+Brain (Node): no dependencies at all; Node's built-ins only.
+
+Shell (Rust/Tauri): the crates in shell/src-tauri/Cargo.lock, almost all MIT and/or
+Apache-2.0. A few use other permissive licences (Unicode-3.0, Zlib, BSD-3-Clause,
+Unlicense, 0BSD), and five are MPL-2.0 (cssparser, cssparser-macros, dtoa-short,
+option-ext, selectors). Those are linked unmodified, which MPL-2.0 permits without
+opening pasture's own source. Every crate, version and licence is listed in
+THIRD-PARTY.md, generated offline by `node scripts/third-party.mjs`.
+
+Shell (npm): one devDependency, @tauri-apps/cli (Apache-2.0 OR MIT), used only to
+bundle a .app; it is not part of what runs.
+
+Tauri and wry: Apache-2.0 OR MIT. tao: Apache-2.0 (as its Cargo.toml states).
