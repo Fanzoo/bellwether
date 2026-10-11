@@ -13,35 +13,38 @@ import { renderStatus } from './status.mjs';
 import { fetchPets } from './pets.mjs';
 import { readShellState, shellStateFile, writeShellState } from './privacy.mjs';
 import { tokenInit } from './token.mjs';
+import { migrate } from './migrate.mjs';
 import { envFilePath } from './envpath.mjs';
 import { shellControl } from './shellctl.mjs';
 import { autostart, shellBinary } from './autostart.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { AGENT_DIR, CliError, DATA_DIR, EXIT, USER_SETTINGS, fileStamp, installTokenMask, log, parseArgs } from './util.mjs';
 
-const USAGE = `pasture — Claude Code sessions as sheep (brain CLI)
+const USAGE = `bellwether — Claude Code sessions as sheep (brain CLI)
 
-  pasture serve [--hang | --slow=<ms>]     run the hook listener in the foreground
-  pasture record [--out <file>]            serve, and record event shapes to data/recordings/
-  pasture status [--watch] [--json]        the flock as text (long-polls /state with --watch)
-  pasture token init                       add a PASTURE_HOOK_TOKEN to the .env, only if there is none (never printed)
-  pasture mute | unmute                    do-not-disturb (the same as the tray's Mute; kept across restarts)
-  pasture show | hide                      show or hide the strip (the same as the tray's Hide; kept across restarts)
-  pasture replay <file.jsonl> [--speed N] [--port P] [--tag <pane>]
-  pasture replay --burst <events/s> [--seconds S] [--port P]
-  pasture shell [--dev] [--release]        run the overlay in this terminal (--dev builds it with cargo first)
-  pasture shell start | stop | restart     the strip in the background (through its LaunchAgent when installed)
-  pasture shell dock-permission            ask macOS for Accessibility, so sheep can stand on the Dock (only when you run it)
-  pasture autostart install|uninstall [--write] [--brain-only] | status   start the brain and the strip at login (macOS LaunchAgents); preview by default
-  pasture pets fetch [<pet>]               download the pinned pet art into data/pets/ (sha256-checked)
-  pasture doctor [--json] [--e2e] [--settings <path>]
-  pasture hooks print [--out <file> [--force]]   the hook block, as a settings file for claude --settings
-  pasture hooks install   [--write] [--settings <path>]   dry run unless --write
-  pasture hooks uninstall [--write] [--settings <path>] [--port <old port>]   dry run unless --write
+  bellwether serve [--hang | --slow=<ms>]     run the hook listener in the foreground
+  bellwether record [--out <file>]            serve, and record event shapes to data/recordings/
+  bellwether status [--watch] [--json]        the flock as text (long-polls /state with --watch)
+  bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]
+                                           move a pasture install over: token, config, colours, hooks, LaunchAgents (preview unless --write)
+  bellwether token init                       add a BELLWETHER_HOOK_TOKEN to the .env, only if there is none (never printed)
+  bellwether mute | unmute                    do-not-disturb (the same as the tray's Mute; kept across restarts)
+  bellwether show | hide                      show or hide the strip (the same as the tray's Hide; kept across restarts)
+  bellwether replay <file.jsonl> [--speed N] [--port P] [--tag <pane>]
+  bellwether replay --burst <events/s> [--seconds S] [--port P]
+  bellwether shell [--dev] [--release]        run the overlay in this terminal (--dev builds it with cargo first)
+  bellwether shell start | stop | restart     the strip in the background (through its LaunchAgent when installed)
+  bellwether shell dock-permission            ask macOS for Accessibility, so sheep can stand on the Dock (only when you run it)
+  bellwether autostart install|uninstall [--write] [--brain-only] | status   start the brain and the strip at login (macOS LaunchAgents); preview by default
+  bellwether pets fetch [<pet>]               download the pinned pet art into data/pets/ (sha256-checked)
+  bellwether doctor [--json] [--e2e] [--settings <path>]
+  bellwether hooks print [--out <file> [--force]]   the hook block, as a settings file for claude --settings
+  bellwether hooks install   [--write] [--settings <path>]   dry run unless --write
+  bellwether hooks uninstall [--write] [--settings <path>] [--port <old port>]   dry run unless --write
 
 --hang and --slow are debug flags for measuring hook timeouts: --hang accepts /hook
 and never answers; --slow answers after <ms>. Neither ever sends a body.
-Relative paths are relative to the directory you ran pasture from.
+Relative paths are relative to the directory you ran bellwether from.
 Exit codes: 0 ok, 2 not installed or not running, 3 bad config or .env, 1 unexpected.`;
 
 const LATER = {};
@@ -74,6 +77,8 @@ async function main(argv) {
       return pets(args(rest, { booleans: [], values: [], positionals: 2 }));
     case 'doctor':
       return doctor(args(rest, { booleans: ['json', 'e2e'], values: ['settings'] }));
+    case 'migrate':
+      return migrateCommand(args(rest, { booleans: ['write', 'force'], values: ['from', 'env', 'settings'] }));
     case 'hooks':
       return hooks(args(rest, { booleans: ['write', 'force'], values: ['settings', 'out', 'port'], positionals: 1 }));
     case undefined:
@@ -83,7 +88,7 @@ async function main(argv) {
       process.stdout.write(USAGE + '\n');
       return EXIT.OK;
     default:
-      if (LATER[command]) throw new CliError(`\`pasture ${command}\` arrives in Milestone ${LATER[command]}; it isn't built yet.`, EXIT.UNEXPECTED);
+      if (LATER[command]) throw new CliError(`\`bellwether ${command}\` arrives in Milestone ${LATER[command]}; it isn't built yet.`, EXIT.UNEXPECTED);
       throw new CliError(`unknown command "${command}".\n\n${USAGE}`, EXIT.UNEXPECTED);
   }
 }
@@ -116,7 +121,7 @@ function args(argv, { booleans = [], values = [], positionals = 0 }) {
 // The shim runs from the agent directory (for the .env path), so it passes the
 // caller's directory along; relative paths given on the command line resolve there.
 // `npm --prefix <repo> run …` sets INIT_CWD to the caller's directory.
-const CALLER_DIR = process.env.PASTURE_CWD || process.env.INIT_CWD || process.cwd();
+const CALLER_DIR = process.env.BELLWETHER_CWD || process.env.INIT_CWD || process.cwd();
 const userPath = (p) => path.resolve(CALLER_DIR, p);
 
 async function serve(command, args) {
@@ -133,28 +138,28 @@ async function serve(command, args) {
     guardOutFile(recordTo, 'record');
   }
 
-  const brain = await startBrain({ config, token, dataDir: DATA_DIR, hang, slowMs, recordTo, log: (line) => log(line.startsWith('pasture') || /^\d\d:/.test(line) ? line : `pasture: ${line}`) });
+  const brain = await startBrain({ config, token, dataDir: DATA_DIR, hang, slowMs, recordTo, log: (line) => log(line.startsWith('bellwether') || /^\d\d:/.test(line) ? line : `bellwether: ${line}`) });
   const mode = hang ? ' (debug: --hang, /hook never answers)' : slowMs ? ` (debug: --slow=${slowMs})` : '';
-  log(`pasture: listening on http://127.0.0.1:${brain.port}${mode}, pid ${process.pid}`);
-  if (recordTo) log(`pasture: recording to ${recordTo}`);
+  log(`bellwether: listening on http://127.0.0.1:${brain.port}${mode}, pid ${process.pid}`);
+  if (recordTo) log(`bellwether: recording to ${recordTo}`);
 
-  // A brain the shell started carries PASTURE_PARENT_PID: if the shell disappears
+  // A brain the shell started carries BELLWETHER_PARENT_PID: if the shell disappears
   // (even by SIGKILL, which it can't intercept), this brain follows it. The variable
   // is never set for a brain started by autostart or by hand.
-  const parent = Number(process.env.PASTURE_PARENT_PID);
+  const parent = Number(process.env.BELLWETHER_PARENT_PID);
   let orphanWatch = null;
 
   await new Promise((resolve) => {
     if (Number.isInteger(parent) && parent > 1) {
       orphanWatch = setInterval(() => {
         if (process.ppid !== parent) {
-          log(`pasture: the shell that started this brain (pid ${parent}) is gone; stopping`);
+          log(`bellwether: the shell that started this brain (pid ${parent}) is gone; stopping`);
           resolve();
         }
       }, 1000);
     }
     const stop = (sig) => {
-      log(`pasture: ${sig}, stopping (${brain.counters.accepted} events accepted)`);
+      log(`bellwether: ${sig}, stopping (${brain.counters.accepted} events accepted)`);
       resolve();
     };
     process.once('SIGINT', stop);
@@ -212,9 +217,22 @@ async function muteCommand(command) {
   return EXIT.OK;
 }
 
-/** `pasture token init`: a token into the .env (envpath.mjs), only if there isn't one. */
+/** `bellwether token init`: a token into the .env (envpath.mjs), only if there isn't one. */
+/** `bellwether migrate`: see migrate.mjs. Preview unless --write. */
+function migrateCommand(args) {
+  const { lines } = migrate({
+    from: args.from !== undefined ? userPath(args.from) : null,
+    envFrom: args.env !== undefined ? userPath(args.env) : null,
+    settingsFile: args.settings !== undefined ? userPath(args.settings) : USER_SETTINGS,
+    write: args.write === true,
+    force: args.force === true,
+  });
+  process.stdout.write(lines.join('\n') + '\n');
+  return EXIT.OK;
+}
+
 function tokenCommand(args) {
-  if (args._[0] !== 'init') throw new CliError('usage: pasture token init', EXIT.BAD_CONFIG);
+  if (args._[0] !== 'init') throw new CliError('usage: bellwether token init', EXIT.BAD_CONFIG);
   const { message } = tokenInit(envFilePath());
   process.stdout.write(message + '\n');
   return EXIT.OK;
@@ -251,7 +269,7 @@ async function replayCommand(args) {
     lines = burst({ rate, seconds });
     what = `a synthetic burst of ${lines.length} events at ${rate}/s`;
   } else {
-    if (!args._[0]) throw new CliError('usage: pasture replay <file.jsonl> [--speed N] [--port P]  |  pasture replay --burst <events/s> [--seconds S]', EXIT.BAD_CONFIG);
+    if (!args._[0]) throw new CliError('usage: bellwether replay <file.jsonl> [--speed N] [--port P]  |  bellwether replay --burst <events/s> [--seconds S]', EXIT.BAD_CONFIG);
     if (args.seconds !== undefined) throw new CliError('--seconds only goes with --burst', EXIT.BAD_CONFIG);
     lines = readRecording(userPath(args._[0]));
     what = `${lines.length} events from ${args._[0]}`;
@@ -279,7 +297,7 @@ async function replayCommand(args) {
 
 async function autostartCommand(args) {
   const [sub] = args._;
-  if (!['install', 'uninstall', 'status'].includes(sub)) throw new CliError('usage: pasture autostart install | uninstall | status [--write] [--brain-only]', EXIT.BAD_CONFIG);
+  if (!['install', 'uninstall', 'status'].includes(sub)) throw new CliError('usage: bellwether autostart install | uninstall | status [--write] [--brain-only]', EXIT.BAD_CONFIG);
   if (sub === 'status' && args.write) throw new CliError('`autostart status` takes no --write', EXIT.BAD_CONFIG);
   // The brain and the strip, unless --brain-only (Milestone 10).
   const { lines } = autostart(sub, { write: args.write === true, shell: args['brain-only'] !== true });
@@ -288,7 +306,7 @@ async function autostartCommand(args) {
 }
 
 /**
- * `pasture shell`: runs the overlay. Uses the release build if there is one, else the
+ * `bellwether shell`: runs the overlay. Uses the release build if there is one, else the
  * debug build; `--dev` (re)builds the debug binary with cargo first.
  */
 async function shellCommand(args) {
@@ -297,19 +315,19 @@ async function shellCommand(args) {
     // macOS grants Accessibility per binary: ask from the strip's own release binary
     // (the one the LaunchAgent runs), not from node.
     const bin = shellBinary();
-    if (!fs.existsSync(bin)) throw new CliError(`the strip isn't built yet (${bin}). Build it with \`pasture shell --dev --release\``, EXIT.NOT_RUNNING);
+    if (!fs.existsSync(bin)) throw new CliError(`the strip isn't built yet (${bin}). Build it with \`bellwether shell --dev --release\``, EXIT.NOT_RUNNING);
     const r = spawnSync(bin, ['--ax-prompt'], { stdio: 'inherit' });
     return r.status ?? EXIT.UNEXPECTED;
   }
   if (sub !== undefined) {
-    if (args.dev || args.release) throw new CliError('`pasture shell start|stop|restart` takes no --dev or --release (they run the release build)', EXIT.BAD_CONFIG);
+    if (args.dev || args.release) throw new CliError('`bellwether shell start|stop|restart` takes no --dev or --release (they run the release build)', EXIT.BAD_CONFIG);
     const { config } = loadConfig();
-    const { lines } = await shellControl(sub, { brainUp: async () => (await probeHealth(config.port, 1000)).kind === 'pasture' });
+    const { lines } = await shellControl(sub, { brainUp: async () => (await probeHealth(config.port, 1000)).kind === 'bellwether' });
     process.stdout.write(lines.join('\n') + '\n');
     return EXIT.OK;
   }
   const tauriDir = path.join(AGENT_DIR, 'shell', 'src-tauri');
-  const bin = (profile) => path.join(tauriDir, 'target', profile, process.platform === 'win32' ? 'pasture-shell.exe' : 'pasture-shell');
+  const bin = (profile) => path.join(tauriDir, 'target', profile, process.platform === 'win32' ? 'bellwether-shell.exe' : 'bellwether-shell');
   if (args.dev) {
     const build = spawn('cargo', ['build', ...(args.release ? ['--release'] : [])], { cwd: tauriDir, stdio: 'inherit' });
     const code = await new Promise((r) => build.on('close', r));
@@ -317,7 +335,7 @@ async function shellCommand(args) {
   }
   const candidates = args.release ? [bin('release')] : [bin('release'), bin('debug')];
   const found = candidates.find((f) => fs.existsSync(f));
-  if (!found) throw new CliError(`the shell isn't built yet. Build it with \`pasture shell --dev\` or \`cd shell/src-tauri && cargo build --release\``, EXIT.NOT_RUNNING);
+  if (!found) throw new CliError(`the shell isn't built yet. Build it with \`bellwether shell --dev\` or \`cd shell/src-tauri && cargo build --release\``, EXIT.NOT_RUNNING);
   log(`starting ${found}`);
   const child = spawn(found, [], { stdio: 'inherit' });
   return await new Promise((r) => child.on('close', (code) => r(code ?? EXIT.OK)));
@@ -325,7 +343,7 @@ async function shellCommand(args) {
 
 async function pets(args) {
   const [sub, name] = args._;
-  if (sub !== 'fetch') throw new CliError('usage: pasture pets fetch [<pet>]', EXIT.BAD_CONFIG);
+  if (sub !== 'fetch') throw new CliError('usage: bellwether pets fetch [<pet>]', EXIT.BAD_CONFIG);
   const results = await fetchPets(DATA_DIR, { only: name ? [name] : null, log: (l) => log(`pets: ${l}`) });
   for (const r of results) process.stdout.write(`${r.folder}: ${r.status}${r.bytes ? ` (${r.bytes} bytes, sha256 verified)` : ''} -> ${path.join(DATA_DIR, 'pets', r.folder)}\n`);
   return EXIT.OK;
@@ -369,7 +387,7 @@ async function hooks(args) {
     log(`wrote ${out} (mode 0600). Try it with: claude --settings ${out}`);
     return EXIT.OK;
   }
-  if (sub !== 'install' && sub !== 'uninstall') throw new CliError('usage: pasture hooks print [--out <file>] | install | uninstall [--write] [--settings <path>]', EXIT.UNEXPECTED);
+  if (sub !== 'install' && sub !== 'uninstall') throw new CliError('usage: bellwether hooks print [--out <file>] | install | uninstall [--write] [--settings <path>]', EXIT.UNEXPECTED);
   if (args.out !== undefined || args.force) throw new CliError(`\`hooks ${sub}\` takes --settings and --write, not --out or --force`, EXIT.BAD_CONFIG);
 
   const file = args.settings !== undefined ? userPath(args.settings) : USER_SETTINGS;
@@ -385,15 +403,15 @@ async function hooks(args) {
   const sum = (c) => Object.values(c).reduce((a, b) => a + b, 0);
 
   if (!plan.changed) {
-    log(sub === 'install' ? `already installed, no changes (${sum(after)} pasture matcher groups in ${file})` : `nothing to remove: no pasture entries in ${file}`);
+    log(sub === 'install' ? `already installed, no changes (${sum(after)} bellwether matcher groups in ${file})` : `nothing to remove: no bellwether entries in ${file}`);
     return EXIT.OK;
   }
   process.stdout.write(unifiedDiff(plan.oldText, plan.newText, { oldName: `${file} (current)`, newName: `${file} (after ${sub})` }));
   const summary =
-    `pasture matcher groups ${sum(before)} -> ${sum(after)} (${EVENTS.length} events subscribed); ` +
+    `bellwether matcher groups ${sum(before)} -> ${sum(after)} (${EVENTS.length} events subscribed); ` +
     (plan.layoutKept
       ? 'every other line of the file is unchanged.'
-      : 'every other entry keeps its value, BUT this file is not laid out the way pasture writes JSON ' +
+      : 'every other entry keeps its value, BUT this file is not laid out the way bellwether writes JSON ' +
         '(spacing, inline arrays or mixed line endings), so the write also reformats existing lines, as the diff shows. ' +
         'An uninstall afterwards will not restore the original bytes; the backup in data/backups/ keeps them.');
   if (args.write !== true) {
@@ -416,10 +434,10 @@ main(process.argv.slice(2)).then(
   },
   (e) => {
     if (e instanceof CliError) {
-      log(`pasture: ${e.message}`);
+      log(`bellwether: ${e.message}`);
       process.exit(e.exitCode);
     }
-    log(`pasture: unexpected error: ${e?.stack ?? e}`);
+    log(`bellwether: unexpected error: ${e?.stack ?? e}`);
     process.exit(EXIT.UNEXPECTED);
   },
 );

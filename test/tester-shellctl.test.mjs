@@ -10,12 +10,12 @@ import { displayLabels, terminalTag, MAX_LABEL } from '../shell/src/player/label
 import { AGENT_DIR, tempDir } from './helpers.mjs';
 
 /**
- * Tester probes for `pasture shell start|stop|restart`, the palette and the labels.
+ * Tester probes for `bellwether shell start|stop|restart`, the palette and the labels.
  * Fakes and temp HOMEs only: no real process is signalled, launchctl is never reachable,
  * and the user's live strip and LaunchAgents are not touched.
  */
 
-const BIN = '/hub/agents/pasture/shell/src-tauri/target/release/pasture-shell';
+const BIN = '/hub/agents/bellwether/shell/src-tauri/target/release/bellwether-shell';
 const mkEnv = () => {
   const home = tempDir('sc-home-');
   fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
@@ -69,7 +69,7 @@ describe('shell stop signals only the exact release binary (no LaunchAgent, fake
   });
   test('a symlinked or look-alike binary path is never matched: only the exact path string', async () => {
     const e = mkEnv();
-    for (const exe of ['/tmp/link-to-pasture-shell', `${BIN}-evil`, `${BIN}/../pasture-shell`, '/other/target/release/pasture-shell', 'pasture-shell', `${BIN} `]) e.live.set(100 + e.live.size, exe);
+    for (const exe of ['/tmp/link-to-bellwether-shell', `${BIN}-evil`, `${BIN}/../bellwether-shell`, '/other/target/release/bellwether-shell', 'bellwether-shell', `${BIN} `]) e.live.set(100 + e.live.size, exe);
     fs.writeFileSync(path.join(e.dataDir, 'shell.pid'), '100');
     await shellControl('stop', e.o);
     assert.deepEqual(e.calls.kill, []);
@@ -96,7 +96,7 @@ describe('start and restart', () => {
   test('start passes --no-spawn-brain only when a brain answers; otherwise the strip may start its own', async () => {
     for (const [up, args] of [[true, ['--no-spawn-brain']], [false, []]]) {
       const e = mkEnv();
-      const bin = path.join(tempDir('sc-bin-'), 'pasture-shell');
+      const bin = path.join(tempDir('sc-bin-'), 'bellwether-shell');
       fs.writeFileSync(bin, '');
       e.o.shellBin = bin;
       e.o.brainUp = async () => up;
@@ -107,9 +107,9 @@ describe('start and restart', () => {
   });
   test('start refuses without a built binary (exit 2 message) and does not start twice', async () => {
     const e = mkEnv();
-    e.o.shellBin = '/nonexistent/pasture-shell';
+    e.o.shellBin = '/nonexistent/bellwether-shell';
     await assert.rejects(shellControl('start', e.o), /isn't built yet/);
-    const bin = path.join(tempDir('sc-bin-'), 'pasture-shell');
+    const bin = path.join(tempDir('sc-bin-'), 'bellwether-shell');
     fs.writeFileSync(bin, '');
     e.o.shellBin = bin;
     e.live.set(61, bin);
@@ -126,7 +126,7 @@ describe('start and restart', () => {
   });
   test('restart with one running: SIGTERM then a new start, in that order', async () => {
     const e = mkEnv();
-    const bin = path.join(tempDir('sc-bin-'), 'pasture-shell');
+    const bin = path.join(tempDir('sc-bin-'), 'bellwether-shell');
     fs.writeFileSync(bin, '');
     e.o.shellBin = bin;
     e.live.set(61, bin);
@@ -182,13 +182,13 @@ describe('doctor: strip running', () => {
   const run = (o) => {
     const home = tempDir('sc-doc-');
     fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
-    fs.writeFileSync(path.join(home, 'Library', 'LaunchAgents', 'local.pasture.brain.plist'), '<plist/>');
+    fs.writeFileSync(path.join(home, 'Library', 'LaunchAgents', 'local.bellwether.brain.plist'), '<plist/>');
     if (o.strip) fs.writeFileSync(plistPath(home, SHELL_LABEL), '<plist/>');
     const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
     cfg.port = 47999;
     const settings = path.join(home, 's.json');
     fs.writeFileSync(settings, '{}\n');
-    return runDoctor({ settingsFile: settings, env: { PASTURE_HOOK_TOKEN: 'doctorTokenNotReal_0123456789' }, configLoader: () => ({ config: cfg, usingExample: true }), dataDir: tempDir('sc-dd-'), home, isStripRunning: () => o.running, probeTimeoutMs: 300 });
+    return runDoctor({ settingsFile: settings, env: { BELLWETHER_HOOK_TOKEN: 'doctorTokenNotReal_0123456789' }, configLoader: () => ({ config: cfg, usingExample: true }), dataDir: tempDir('sc-dd-'), home, isStripRunning: () => o.running, probeTimeoutMs: 300 });
   };
   test('the agent installed and no strip running: WARN naming `shell start`; running: no such WARN', async () => {
     if (process.platform !== 'darwin') return;
@@ -317,14 +317,14 @@ describe('doctor autostart lines: the branch structure (D1), every combination',
   const run = async ({ brainPlist, stripPlist, running, hooks }) => {
     const home = tempDir('sc-matrix-');
     fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
-    if (brainPlist) fs.writeFileSync(path.join(home, 'Library', 'LaunchAgents', 'local.pasture.brain.plist'), '<plist/>');
+    if (brainPlist) fs.writeFileSync(path.join(home, 'Library', 'LaunchAgents', 'local.bellwether.brain.plist'), '<plist/>');
     if (stripPlist) fs.writeFileSync(plistPath(home, SHELL_LABEL), '<plist/>');
     const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
     cfg.port = 47998;
     const settings = path.join(home, 's.json');
     const { hookBlock } = await import('../brain/hooks.mjs');
     fs.writeFileSync(settings, hooks ? JSON.stringify(hookBlock(cfg.port, 'doctorTokenNotReal_0123456789')) : '{}\n');
-    const r = await runDoctor({ settingsFile: settings, env: { PASTURE_HOOK_TOKEN: 'doctorTokenNotReal_0123456789' }, configLoader: () => ({ config: cfg, usingExample: true }), dataDir: tempDir('sc-mdd-'), home, isStripRunning: () => running, probeTimeoutMs: 300 });
+    const r = await runDoctor({ settingsFile: settings, env: { BELLWETHER_HOOK_TOKEN: 'doctorTokenNotReal_0123456789' }, configLoader: () => ({ config: cfg, usingExample: true }), dataDir: tempDir('sc-mdd-'), home, isStripRunning: () => running, probeTimeoutMs: 300 });
     return r.checks.filter((c) => c.name === 'autostart' || c.name === 'strip running').map((c) => `${c.name} ${c.status}`);
   };
   test('each combination prints one consistent set of lines', async () => {

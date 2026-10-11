@@ -1,4 +1,4 @@
-//! pasture's shell: the strip of sheep. A pure client of the brain:
+//! bellwether's shell: the strip of sheep. A pure client of the brain:
 //! it renders, does click-through, and owns the per-OS window work. It knows nothing
 //! about hooks.
 
@@ -40,7 +40,7 @@ fn verify_pet(folder: &str, bytes: &[u8]) -> Result<(), String> {
         .ok_or_else(|| format!("{folder} is not a pinned pet (pets.lock.json); only pinned pets are loaded"))?;
     let got: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
     if got != want {
-        return Err(format!("data/pets/{folder}/animations.xml doesn't match its pinned sha256 (expected {want}, got {got}); run `pasture pets fetch`"));
+        return Err(format!("data/pets/{folder}/animations.xml doesn't match its pinned sha256 (expected {want}, got {got}); run `bellwether pets fetch`"));
     }
     Ok(())
 }
@@ -94,12 +94,12 @@ fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
         return Err(format!("pets.default {folder:?} must be a plain folder name"));
     }
     let path = shared.data_dir.join("pets").join(&folder).join("animations.xml");
-    let meta = std::fs::metadata(&path).map_err(|_| format!("{} is missing: run `pasture pets fetch`", path.display()))?;
+    let meta = std::fs::metadata(&path).map_err(|_| format!("{} is missing: run `bellwether pets fetch`", path.display()))?;
     if meta.len() > MAX_PET_BYTES {
         return Err(format!("{} is larger than {} MB", path.display(), MAX_PET_BYTES / 1024 / 1024));
     }
     let bytes = std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    // The same pins `pasture pets fetch` uses (pets.lock.json, compiled in): a pet that
+    // The same pins `bellwether pets fetch` uses (pets.lock.json, compiled in): a pet that
     // isn't pinned, or whose file doesn't match, is refused.
     verify_pet(&folder, &bytes).map_err(|e| {
         log(&format!("error: refusing to load pet {folder}: {e}"));
@@ -123,7 +123,7 @@ fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
         "homeWanderPx": num("/strip/homeWanderPx", 120.0),
         "fadeOpacity": shared.config.pointer("/fade/opacity").and_then(Value::as_f64).filter(|v| (0.0..=1.0).contains(v)).unwrap_or(0.25),
         "selftest": shared.selftest,
-        "trace": std::env::var_os("PASTURE_SHELL_TRACE").is_some(),
+        "trace": crate::settings::env_os("SHELL_TRACE").is_some(),
         "snapshotAfterMs": shared.snapshot.as_ref().map(|(_, secs)| secs * 1000.0),
         "snapshotEveryMs": shared.snapshot.as_ref().and(shared.snapshot_every).map(|secs| secs * 1000.0),
     });
@@ -157,7 +157,7 @@ async fn get_snapshot(
         }
         v
     });
-    if std::env::var_os("PASTURE_SHELL_TRACE").is_some() {
+    if crate::settings::env_os("SHELL_TRACE").is_some() {
         let rev = snap.as_ref().and_then(|s| s.get("rev")).and_then(Value::as_i64).unwrap_or(-1);
         log(&format!("get_snapshot(after {after}) -> rev {rev}"));
     }
@@ -168,7 +168,7 @@ async fn get_snapshot(
 #[tauri::command]
 fn report_hitboxes(window: tauri::WebviewWindow, boxes: Vec<Rect>, hitboxes: tauri::State<'_, Hitboxes>) {
     let boxes: Vec<Rect> = boxes.into_iter().filter(|r| [r.x, r.y, r.w, r.h].iter().all(|v| v.is_finite()) && r.w > 0.0 && r.h > 0.0).take(MAX_HITBOXES).collect();
-    if std::env::var_os("PASTURE_SHELL_TRACE").is_some() {
+    if crate::settings::env_os("SHELL_TRACE").is_some() {
         let list: Vec<String> = boxes.iter().map(|r| format!("{:.0},{:.0} {:.0}x{:.0}", r.x, r.y, r.w, r.h)).collect();
         log(&format!("hitboxes {}: {}", window.label(), list.join(" | ")));
     }
@@ -227,7 +227,7 @@ fn shell_log(line: String, app: tauri::AppHandle, shared: tauri::State<'_, Share
 
 /// Debug only (`--snapshot <png>`): writes what the strip's canvas shows, as a PNG
 /// with its transparency. `screencapture` would need the Screen Recording permission,
-/// which pasture never asks for, and on macOS 26 an in-process CoreGraphics capture
+/// which bellwether never asks for, and on macOS 26 an in-process CoreGraphics capture
 /// returns an empty image without it (measured), so the webview hands over its own
 /// pixels instead. Refused unless the shell was started with --snapshot.
 #[tauri::command]
@@ -302,14 +302,14 @@ fn flags() -> Flags {
 }
 
 pub fn run() {
-    // `pasture shell dock-permission`: ask macOS for Accessibility for this very binary
+    // `bellwether shell dock-permission`: ask macOS for Accessibility for this very binary
     // (the one the LaunchAgent runs), then quit. Only ever on the user's request.
     if std::env::args().any(|a| a == "--ax-prompt") {
         let granted = ax::prompt();
         println!("{}", if granted {
-            "Accessibility is already granted to this binary: sheep stand on the Dock's top edge (restart the strip if it was just granted: `pasture shell restart`)"
+            "Accessibility is already granted to this binary: sheep stand on the Dock's top edge (restart the strip if it was just granted: `bellwether shell restart`)"
         } else {
-            "macOS is showing its Accessibility prompt for pasture-shell. Turn it on in System Settings > Privacy & Security > Accessibility, then `pasture shell restart`. After every rebuild of the shell this must be given again (the binary is ad-hoc signed)."
+            "macOS is showing its Accessibility prompt for bellwether-shell. Turn it on in System Settings > Privacy & Security > Accessibility, then `bellwether shell restart`. After every rebuild of the shell this must be given again (the binary is ad-hoc signed)."
         });
         std::process::exit(0);
     }
@@ -317,7 +317,7 @@ pub fn run() {
     let settings = match Settings::load() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("pasture-shell: {e}");
+            eprintln!("bellwether-shell: {e}");
             std::process::exit(3);
         }
     };
@@ -368,7 +368,7 @@ pub fn run() {
     // parsed by the webview's own XML parser), so it is refused while a strip runs.
     if flags.locate.is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
-            log("another pasture shell tried to start; this one keeps running");
+            log("another bellwether shell tried to start; this one keeps running");
         }));
     }
     let app = builder
@@ -407,10 +407,10 @@ pub fn run() {
             app.manage(tray::Switches { kept: std::sync::Mutex::new(kept), data_dir: data_dir.clone(), port, token: token.clone() });
             if !flags.selftest {
                 if let Err(e) = tray::build(&handle, kept, false) {
-                    log(&format!("warning: no tray icon ({e}); use `pasture mute` / `pasture show` instead"));
+                    log(&format!("warning: no tray icon ({e}); use `bellwether mute` / `bellwether show` instead"));
                     if kept.hidden {
                         // Fail open: with no tray, a strip saved hidden would be lost.
-                        log("ERROR: the strip was saved hidden and there is no tray to show it again; showing it (`pasture hide` hides it)");
+                        log("ERROR: the strip was saved hidden and there is no tray to show it again; showing it (`bellwether hide` hides it)");
                         kept.hidden = false;
                         *app.state::<tray::Switches>().kept.lock().unwrap() = kept;
                         let _ = privacy::save_kept(&data_dir, kept);
@@ -458,7 +458,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building the pasture shell");
+        .expect("error while building the bellwether shell");
 
     // SIGINT (Ctrl-C), SIGTERM and SIGHUP go through the same shutdown as a normal
     // quit, so the brain the shell started is stopped (verification M3 verification D1).
@@ -509,7 +509,7 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
     log(&if trusted {
         "dock: Accessibility granted to this binary: sheep stand on the Dock's top edge, within its width".to_string()
     } else {
-        "dock: Accessibility not granted to this binary: the full-width strip is used (`pasture shell dock-permission` asks for it)".to_string()
+        "dock: Accessibility not granted to this binary: the full-width strip is used (`bellwether shell dock-permission` asks for it)".to_string()
     });
     let mut last_trust_check = Instant::now();
     let mut steady = ax::Steady::default();
@@ -527,7 +527,7 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
     let mut last_stamp_check = Instant::now();
     loop {
         let now = Instant::now();
-        // `pasture show` / `pasture hide` (or the file edited by hand) while running.
+        // `bellwether show` / `bellwether hide` (or the file edited by hand) while running.
         if now.duration_since(last_stamp_check) >= std::time::Duration::from_secs(1) {
             last_stamp_check = now;
             let s = privacy::kept_stamp(&data_dir);
@@ -602,7 +602,7 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
                 "strip {}{}",
                 if hidden { "hidden" } else { "shown" },
                 if kept.hidden {
-                    " (Hide the strip is on; to show it again: the tray's Hide the strip, or `pasture show`)"
+                    " (Hide the strip is on; to show it again: the tray's Hide the strip, or `bellwether show`)"
                 } else if hidden {
                     " (sharing)"
                 } else {
@@ -696,7 +696,7 @@ fn monitors_main(app: &tauri::AppHandle) -> Vec<locator::Monitor> {
     let (tx, rx) = std::sync::mpsc::channel();
     let h = app.clone();
     if app.run_on_main_thread(move || {
-        if std::env::var_os("PASTURE_SHELL_TRACE").is_some() {
+        if crate::settings::env_os("SHELL_TRACE").is_some() {
             let a = h.available_monitors();
             let w = h.webview_windows().into_values().next().map(|w| w.available_monitors().map(|v| v.len()));
             log(&format!("trace: available_monitors app {:?} window {:?} primary {:?}", a.as_ref().map(|v| v.len()), w, h.primary_monitor().map(|m| m.map(|m| strips::monitor_name(&m)))));

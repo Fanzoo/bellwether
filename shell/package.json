@@ -1,8 +1,8 @@
 {
-  "name": "pasture-shell",
+  "name": "bellwether-shell",
   "version": "0.1.0",
   "private": true,
-  "description": "pasture's overlay (Tauri 2). The Tauri CLI is needed only to bundle a .app; `cargo build` in src-tauri builds and runs the shell without it.",
+  "description": "bellwether's overlay (Tauri 2). The Tauri CLI is needed only to bundle a .app; `cargo build` in src-tauri builds and runs the shell without it.",
   "scripts": {
     "tauri": "tauri",
     "bundle": "tauri build --bundles app"

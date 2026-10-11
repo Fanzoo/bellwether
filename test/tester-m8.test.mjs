@@ -47,7 +47,7 @@ describe('locator.rs: nothing from a header reaches a shell or a script unvalida
 });
 
 describe('--locate with hostile terminal values (real binary, AppleScript off, fake herdr)', () => {
-  const bin = path.join(AGENT_DIR, 'shell', 'src-tauri', 'target', 'release', 'pasture-shell');
+  const bin = path.join(AGENT_DIR, 'shell', 'src-tauri', 'target', 'release', 'bellwether-shell');
   const skip = !fs.existsSync(bin) || process.platform !== 'darwin';
   const setup = () => {
     const root = tempDir('m8-');
@@ -59,7 +59,7 @@ describe('--locate with hostile terminal values (real binary, AppleScript off, f
     cfg.locator.herdrPath = fake;
     const cfgFile = path.join(root, 'cfg.json');
     fs.writeFileSync(cfgFile, JSON.stringify(cfg));
-    const locate = (terminal) => spawnSync(bin, ['--locate', JSON.stringify(terminal)], { encoding: 'utf8', timeout: 30000, env: { PATH: process.env.PATH, HOME: root, PASTURE_AGENT_DIR: AGENT_DIR, PASTURE_DATA_DIR: root, PASTURE_CONFIG: cfgFile, PASTURE_HOOK_TOKEN: 'm8TestTokenNotReal0123456789' } });
+    const locate = (terminal) => spawnSync(bin, ['--locate', JSON.stringify(terminal)], { encoding: 'utf8', timeout: 30000, env: { PATH: process.env.PATH, HOME: root, BELLWETHER_AGENT_DIR: AGENT_DIR, BELLWETHER_DATA_DIR: root, BELLWETHER_CONFIG: cfgFile, BELLWETHER_HOOK_TOKEN: 'm8TestTokenNotReal0123456789' } });
     const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '');
     return { root, locate, calls };
   };
@@ -121,9 +121,9 @@ describe('the normaliser drops bad herdr values before they reach state', () => 
     return normalise({ hook_event_name: 'Stop', session_id: 's' }, headers, 1).terminal;
   };
   test('bad panes and sockets are dropped, not truncated; good ones are kept', async () => {
-    for (const bad of ['--help', '-x', 'a b', ';id', 'x\ny', 'A'.repeat(65), 'w1:p1/../x', '$(id)']) assert.equal((await norm({ 'x-pasture-herdr-pane': bad })).herdrPane, undefined, bad.slice(0, 20));
-    for (const bad of ['relative.sock', '/tmp/../etc/x', `/tmp/${'a'.repeat(1100)}`, '/tmp/x\u0007y', '/tmp/a b/../c']) assert.equal((await norm({ 'x-pasture-herdr-socket': bad })).herdrSocket, undefined, bad.slice(0, 30));
-    const t = await norm({ 'x-pasture-herdr-pane': 'w4:p2', 'x-pasture-herdr-socket': '/Users/me/.config/herdr/herdr.sock' });
+    for (const bad of ['--help', '-x', 'a b', ';id', 'x\ny', 'A'.repeat(65), 'w1:p1/../x', '$(id)']) assert.equal((await norm({ 'x-bellwether-herdr-pane': bad })).herdrPane, undefined, bad.slice(0, 20));
+    for (const bad of ['relative.sock', '/tmp/../etc/x', `/tmp/${'a'.repeat(1100)}`, '/tmp/x\u0007y', '/tmp/a b/../c']) assert.equal((await norm({ 'x-bellwether-herdr-socket': bad })).herdrSocket, undefined, bad.slice(0, 30));
+    const t = await norm({ 'x-bellwether-herdr-pane': 'w4:p2', 'x-bellwether-herdr-socket': '/Users/me/.config/herdr/herdr.sock' });
     assert.equal(t.herdrPane, 'w4:p2');
     assert.equal(t.herdrSocket, '/Users/me/.config/herdr/herdr.sock');
     void sock;
@@ -131,7 +131,7 @@ describe('the normaliser drops bad herdr values before they reach state', () => 
   test('the identity key never contains a dropped value', async () => {
     const { normalise } = await import('../brain/normalise.mjs');
     const { identityOf } = await import('../brain/identity.mjs');
-    const ev = normalise({ hook_event_name: 'Stop', session_id: 's' }, { 'x-pasture-herdr-pane': '--help', 'x-pasture-herdr-socket': '/tmp/../x' }, 1);
+    const ev = normalise({ hook_event_name: 'Stop', session_id: 's' }, { 'x-bellwether-herdr-pane': '--help', 'x-bellwether-herdr-socket': '/tmp/../x' }, 1);
     assert.equal(identityOf(ev).key, 'session:s');
   });
 });
@@ -143,21 +143,21 @@ describe('doctor: automation and herdr CLI checks', () => {
     return checkLocatorLog(d);
   };
   test('refusals and a missing herdr are named; only the current run counts; a clean log gives nothing', () => {
-    const r = run('1 pasture-shell: starting: x\n2 pasture-shell: locator: Automation for iTerm2 was refused (a)\n3 pasture-shell: locator: herdr CLI not found at "/nope/herdr" (locator.herdrPath); x\n');
+    const r = run('1 bellwether-shell: starting: x\n2 bellwether-shell: locator: Automation for iTerm2 was refused (a)\n3 bellwether-shell: locator: herdr CLI not found at "/nope/herdr" (locator.herdrPath); x\n');
     assert.deepEqual(r.map((c) => c.name), ['automation', 'herdr CLI']);
     assert.match(r[0].detail, /iTerm2/);
-    assert.deepEqual(run('1 pasture-shell: starting: x\n2 pasture-shell: locator: Automation for iTerm2 was refused (a)\n3 pasture-shell: starting: again\n'), []);
+    assert.deepEqual(run('1 bellwether-shell: starting: x\n2 bellwether-shell: locator: Automation for iTerm2 was refused (a)\n3 bellwether-shell: starting: again\n'), []);
     assert.deepEqual(checkLocatorLog(path.join(os.tmpdir(), 'no-such-dir-m8')), []);
   });
   test('a webview line cannot fake a warning, a fake restart line cannot hide a real one, and a malformed prefix is ignored', () => {
-    const real = '1 pasture-shell: starting: x\n2 pasture-shell: locator: Automation for iTerm2 was refused (a)\n';
-    assert.equal(run(real + '3 pasture-shell: webview: starting: fake restart\n').length, 1, 'a webview line hid a real warning');
-    assert.deepEqual(run('1 pasture-shell: starting: x\n2 evil pasture-shell: locator: Automation for Terminal was refused\n'), []);
-    assert.deepEqual(run('1 pasture-shell: starting: x\n2 pasture-shell:   webview: locator: Automation for iTerm2 was refused\n'), []);
-    assert.deepEqual(run('1 pasture-shell: starting: x\n2 pasture-shell: webview: locator: herdr CLI not found at "/x" (y)\n'), []);
+    const real = '1 bellwether-shell: starting: x\n2 bellwether-shell: locator: Automation for iTerm2 was refused (a)\n';
+    assert.equal(run(real + '3 bellwether-shell: webview: starting: fake restart\n').length, 1, 'a webview line hid a real warning');
+    assert.deepEqual(run('1 bellwether-shell: starting: x\n2 evil bellwether-shell: locator: Automation for Terminal was refused\n'), []);
+    assert.deepEqual(run('1 bellwether-shell: starting: x\n2 bellwether-shell:   webview: locator: Automation for iTerm2 was refused\n'), []);
+    assert.deepEqual(run('1 bellwether-shell: starting: x\n2 bellwether-shell: webview: locator: herdr CLI not found at "/x" (y)\n'), []);
   });
   test('a line the webview wrote through shell_log cannot fake a locator warning', () => {
-    const r = run('1 pasture-shell: starting: x\n2 pasture-shell: webview: locator: Automation for iTerm2 was refused (a pet title can say this)\n');
+    const r = run('1 bellwether-shell: starting: x\n2 bellwether-shell: webview: locator: Automation for iTerm2 was refused (a pet title can say this)\n');
     assert.deepEqual(r, [], 'doctor treated a webview log line as a locator refusal');
   });
 });

@@ -85,7 +85,7 @@ describe('replaying fixtures through /hook', () => {
     assert.equal(payload.tool_input.command, 'touch meadow-approved.txt');
     assert.equal(payload.tool_input.description, '«replay:tool_input.description»');
     assert.equal(payload.transcript_path, '«replay:transcript_path»');
-    assert.equal(headers['x-pasture-herdr-pane'], 'w1:p3');
+    assert.equal(headers['x-bellwether-herdr-pane'], 'w1:p3');
   });
 });
 
@@ -99,7 +99,7 @@ describe('/state and /control', () => {
   for (const [what, headers] of [
     ['an Origin header', { Origin: 'https://evil.example' }],
     ['a foreign Host', { Host: 'evil.example' }],
-    ['a wrong token', { 'X-Pasture-Token': 'wrong' }],
+    ['a wrong token', { 'X-Bellwether-Token': 'wrong' }],
   ]) {
     test(`403 and an empty body with ${what}`, async () => {
       const r = await state(brain.port, 'after=-1&wait=0', headers);
@@ -127,7 +127,7 @@ describe('/state and /control', () => {
     const pending = state(brain.port, `after=${rev}&wait=10000`);
     await new Promise((r) => setTimeout(r, 100));
     const t1 = Date.now();
-    await call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body: { hook_event_name: 'UserPromptSubmit', session_id: 'lp', cwd: '/p/longpoll' }, headers: { 'X-Pasture-Herdr-Pane': 'w5:p5' } });
+    await call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body: { hook_event_name: 'UserPromptSubmit', session_id: 'lp', cwd: '/p/longpoll' }, headers: { 'X-Bellwether-Herdr-Pane': 'w5:p5' } });
     const changed = await pending;
     assert.ok(changed.json.rev > rev);
     assert.ok(Date.now() - t1 < 1000, 'answered promptly');
@@ -162,7 +162,7 @@ describe('throughput', () => {
 describe('persistence', () => {
   test('colour and slot survive a brain restart; state.json is 0600', { skip: process.platform === 'win32' }, async () => {
     const dataDir = tempDir();
-    const post = (port, body) => call(port, { method: 'POST', path: '/hook', token: TOKEN, body, headers: { 'X-Pasture-Herdr-Pane': body.pane } });
+    const post = (port, body) => call(port, { method: 'POST', path: '/hook', token: TOKEN, body, headers: { 'X-Bellwether-Herdr-Pane': body.pane } });
     const first = await withBrain(
       async (brain) => {
         await post(brain.port, { hook_event_name: 'UserPromptSubmit', session_id: 'a', cwd: '/p/one', pane: 'w1:p1' });
@@ -201,7 +201,7 @@ describe('the CLI end to end (serve, replay, status)', () => {
   let child;
   let env;
   before(async () => {
-    root = tempDir('pasture-cli-');
+    root = tempDir('bellwether-cli-');
     fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(root, 'brain'), { recursive: true });
     port = await new Promise((res) => {
       const s = net.createServer().listen(0, '127.0.0.1', () => {
@@ -211,7 +211,7 @@ describe('the CLI end to end (serve, replay, status)', () => {
     });
     const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
     fs.writeFileSync(path.join(root, 'config.example.json'), JSON.stringify({ ...cfg, port }));
-    env = { PATH: process.env.PATH, HOME: root, PASTURE_DATA_DIR: path.join(root, 'data'), PASTURE_HOOK_TOKEN: TOKEN };
+    env = { PATH: process.env.PATH, HOME: root, BELLWETHER_DATA_DIR: path.join(root, 'data'), BELLWETHER_HOOK_TOKEN: TOKEN };
     child = spawn(process.execPath, [path.join(root, 'brain', 'cli.mjs'), 'serve'], { env, stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     child.stderr.on('data', (d) => (err += d));
@@ -248,7 +248,7 @@ describe('the CLI end to end (serve, replay, status)', () => {
     assert.equal(JSON.parse(calm.out).flock[0].alert, undefined);
   });
 
-  test('`pasture mute` and `unmute` switch do-not-disturb through the brain; status shows MUTED', async () => {
+  test('`bellwether mute` and `unmute` switch do-not-disturb through the brain; status shows MUTED', async () => {
     const m = await cli(['mute']);
     assert.equal(m.code, 0, m.err);
     assert.match(m.out, /^muted/);
@@ -260,13 +260,13 @@ describe('the CLI end to end (serve, replay, status)', () => {
   });
 
   test('status with the brain down: exit 2 and the reason', () => {
-    const dead = tempDir('pasture-cli-dead-');
+    const dead = tempDir('bellwether-cli-dead-');
     fs.cpSync(path.join(root, 'brain'), path.join(dead, 'brain'), { recursive: true });
     const cfg = JSON.parse(fs.readFileSync(path.join(root, 'config.example.json'), 'utf8'));
     fs.writeFileSync(path.join(dead, 'config.example.json'), JSON.stringify({ ...cfg, port: 1 + ((port + 7) % 60000) + 1024 }));
     const r = spawnSync(process.execPath, [path.join(dead, 'brain', 'cli.mjs'), 'status'], { env, cwd: dead, encoding: 'utf8', timeout: 10000 });
     assert.equal(r.status, 2, r.stderr);
-    assert.match(r.stderr, /brain not running — run `pasture serve`/);
+    assert.match(r.stderr, /brain not running — run `bellwether serve`/);
   });
 });
 
@@ -417,7 +417,7 @@ describe('bubble.detail "tool" over HTTP', () => {
     const dataDir = tempDir();
     const brain = await startBrain({ config: withDefaults({ port: 0, bubble: { detail: 'tool' } }), token: TOKEN, dataDir });
     try {
-      const post = (body) => call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body, headers: { 'X-Pasture-Herdr-Pane': 'w1:p1' } });
+      const post = (body) => call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body, headers: { 'X-Bellwether-Herdr-Pane': 'w1:p1' } });
       const input = { command: 'git push origin main', description: 'Push' };
       await post({ hook_event_name: 'PreToolUse', session_id: 's', cwd: '/p/x', tool_name: 'Bash', tool_use_id: 't1', tool_input: input });
       await post({ hook_event_name: 'PermissionRequest', session_id: 's', cwd: '/p/x', tool_name: 'Bash', tool_input: input });

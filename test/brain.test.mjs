@@ -55,7 +55,7 @@ describe('normalise and record', () => {
     some_future_field: SECRET,
     source: `free text ${SECRET}`,
   };
-  const headers = { 'x-pasture-herdr-pane': 'w1:p2', 'x-pasture-iterm-session': '', 'x-pasture-token': 'tok', 'x-pasture-term-program': 'iTerm.app' };
+  const headers = { 'x-bellwether-herdr-pane': 'w1:p2', 'x-bellwether-iterm-session': '', 'x-bellwether-token': 'tok', 'x-bellwether-term-program': 'iTerm.app' };
 
   test('the normalised event comes from the allowlist only', () => {
     const ev = normalise(payload, headers, 123);
@@ -87,7 +87,7 @@ describe('normalise and record', () => {
     const line = JSON.parse(text);
     assert.ok(line.rawKeys.top.includes('prompt') && line.rawKeys.top.includes('some_future_field'));
     assert.deepEqual(line.rawKeys.tool_input, ['command', 'description']);
-    assert.deepEqual(line.headersPresent, ['x-pasture-herdr-pane', 'x-pasture-term-program']);
+    assert.deepEqual(line.headersPresent, ['x-bellwether-herdr-pane', 'x-bellwether-term-program']);
   });
 });
 
@@ -115,21 +115,21 @@ describe('fixtures', () => {
 });
 
 describe('record --out guard', () => {
-  test('guardOutFile: empty file and pasture recordings may be appended to; anything else is refused', async () => {
-    const { guardOutFile, isPastureRecording } = await import('../brain/outfile.mjs');
+  test('guardOutFile: empty file and bellwether recordings may be appended to; anything else is refused', async () => {
+    const { guardOutFile, isBellwetherRecording } = await import('../brain/outfile.mjs');
     const dir = tempDir();
     const rec = path.join(dir, 'r.jsonl');
     const r = createRecorder(rec);
     r.write({ hook_event_name: 'Stop', session_id: 's' }, {}, 1);
     r.close();
-    assert.ok(isPastureRecording(fs.readFileSync(rec, 'utf8')));
+    assert.ok(isBellwetherRecording(fs.readFileSync(rec, 'utf8')));
     guardOutFile(rec, 'record');
     const empty = path.join(dir, 'empty.jsonl');
     fs.writeFileSync(empty, '');
     guardOutFile(empty, 'record');
     const other = path.join(dir, 'notes.txt');
     fs.writeFileSync(other, 'notes');
-    assert.throws(() => guardOutFile(other, 'record'), (e) => e.exitCode === 3 && /not a pasture recording/.test(e.message));
+    assert.throws(() => guardOutFile(other, 'record'), (e) => e.exitCode === 3 && /not a bellwether recording/.test(e.message));
     assert.throws(() => guardOutFile(dir, 'record'), (e) => e.exitCode === 3 && /is a directory/.test(e.message));
     assert.throws(() => guardOutFile(path.join(dir, '.claude', 'settings.json'), 'record'), (e) => e.exitCode === 3);
   });

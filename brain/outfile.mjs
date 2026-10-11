@@ -7,10 +7,10 @@ import { CliError, EXIT, USER_SETTINGS } from './util.mjs';
  * --out` (replaces the file) and `record --out` (appends to it). A typo there must
  * not destroy data, so:
  *   - a Claude Code settings file is always refused, --force or not (`hooks install`
- *     is the only way pasture edits settings, with a diff and a backup);
+ *     is the only way bellwether edits settings, with a diff and a backup);
  *   - a directory, or anything that isn't a regular file, is refused with a message;
- *   - an existing file is replaced only if it is already a pasture hooks file
- *     (or with --force), and appended to only if it is already a pasture recording.
+ *   - an existing file is replaced only if it is already a bellwether hooks file
+ *     (or with --force), and appended to only if it is already a bellwether recording.
  */
 export function guardOutFile(target, kind, { force = false } = {}) {
   let real = target;
@@ -22,18 +22,18 @@ export function guardOutFile(target, kind, { force = false } = {}) {
     if (e.code !== 'ENOENT') throw new CliError(`cannot use ${target}: ${e.code}`, EXIT.BAD_CONFIG);
   }
   if (isClaudeSettingsPath(target) || isClaudeSettingsPath(real)) {
-    throw new CliError(`refusing to write ${target}: it is a Claude Code settings file. Use \`pasture hooks install\` to change settings (it shows a diff and keeps a backup).`, EXIT.BAD_CONFIG);
+    throw new CliError(`refusing to write ${target}: it is a Claude Code settings file. Use \`bellwether hooks install\` to change settings (it shows a diff and keeps a backup).`, EXIT.BAD_CONFIG);
   }
   if (stat === null) return;
   if (stat.isDirectory()) throw new CliError(`${target} is a directory; give a file path, e.g. ${path.join(target, kind === 'print' ? 'hooks-only.json' : 'recording.jsonl')}`, EXIT.BAD_CONFIG);
   if (!stat.isFile()) throw new CliError(`${target} is not a regular file; refusing to write it`, EXIT.BAD_CONFIG);
   const text = fs.readFileSync(target, 'utf8');
   if (kind === 'print') {
-    if (force || isPastureHooksFile(text)) return;
-    throw new CliError(`${target} already exists and is not a pasture hooks file, so it was left alone. Choose another path, or pass --force to replace it.`, EXIT.BAD_CONFIG);
+    if (force || isBellwetherHooksFile(text)) return;
+    throw new CliError(`${target} already exists and is not a bellwether hooks file, so it was left alone. Choose another path, or pass --force to replace it.`, EXIT.BAD_CONFIG);
   }
-  if (text.length === 0 || isPastureRecording(text)) return;
-  throw new CliError(`${target} already exists and is not a pasture recording, so nothing was appended. Choose another path.`, EXIT.BAD_CONFIG);
+  if (text.length === 0 || isBellwetherRecording(text)) return;
+  throw new CliError(`${target} already exists and is not a bellwether recording, so nothing was appended. Choose another path.`, EXIT.BAD_CONFIG);
 }
 
 /** settings.json / settings.local.json in a .claude directory, managed-settings.json anywhere, or the user file itself. */
@@ -56,8 +56,8 @@ function samePath(a, b) {
   return norm(a) === norm(b);
 }
 
-/** Exactly what `hooks print` writes: only a `hooks` key, and only pasture http handlers in it. */
-export function isPastureHooksFile(text) {
+/** Exactly what `hooks print` writes: only a `hooks` key, and only bellwether http handlers in it. */
+export function isBellwetherHooksFile(text) {
   let v;
   try {
     v = JSON.parse(text);
@@ -69,12 +69,12 @@ export function isPastureHooksFile(text) {
   const handlers = groups.flatMap((g) => (Array.isArray(g) ? g : [null])).flatMap((g) => (Array.isArray(g?.hooks) ? g.hooks : [null]));
   return (
     handlers.length > 0 &&
-    handlers.every((h) => h?.type === 'http' && typeof h.url === 'string' && /^http:\/\/127\.0\.0\.1:\d+\/hook/.test(h.url) && typeof h.headers?.['X-Pasture-Token'] === 'string')
+    handlers.every((h) => h?.type === 'http' && typeof h.url === 'string' && /^http:\/\/127\.0\.0\.1:\d+\/hook/.test(h.url) && typeof (h.headers?.['X-Bellwether-Token'] ?? h.headers?.['X-Pasture-Token']) === 'string')
   );
 }
 
 /** Every line is a recording line: {normalised, rawKeys, headersPresent}. */
-export function isPastureRecording(text) {
+export function isBellwetherRecording(text) {
   const lines = text.split('\n').filter((l) => l.trim() !== '');
   if (lines.length === 0) return false;
   return lines.every((l) => {

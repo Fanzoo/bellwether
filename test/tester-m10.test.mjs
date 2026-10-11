@@ -29,12 +29,12 @@ describe('autostart: both LaunchAgents, temp HOME only', () => {
     return h;
   };
   const fakeBin = () => {
-    const f = path.join(tempDir('m10-bin-'), 'pasture-shell');
+    const f = path.join(tempDir('m10-bin-'), 'bellwether-shell');
     fs.writeFileSync(f, '#!/bin/sh\n', { mode: 0o755 });
     return f;
   };
   test('install --write writes both plists that lint, carry no token, restart only on a crash, and never call launchctl', () => {
-    process.env.PASTURE_HOOK_TOKEN = 'plistCanaryToken_0123456789abcdef';
+    process.env.BELLWETHER_HOOK_TOKEN = 'plistCanaryToken_0123456789abcdef';
     try {
       const home = mkHome();
       const bin = fakeBin();
@@ -47,7 +47,7 @@ describe('autostart: both LaunchAgents, temp HOME only', () => {
       for (const f of files) {
         const t = fs.readFileSync(f, 'utf8');
         assert.equal(lint(t).status, 0, f);
-        assert.doesNotMatch(t, /plistCanaryToken|PASTURE_HOOK_TOKEN/);
+        assert.doesNotMatch(t, /plistCanaryToken|BELLWETHER_HOOK_TOKEN/);
         assert.match(t, /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>/, 'KeepAlive must mean restart on failure only');
         assert.doesNotMatch(t, /<key>KeepAlive<\/key>\s*<true\/>/);
         assert.match(t, /<key>RunAtLoad<\/key>\s*<true\/>/);
@@ -61,15 +61,15 @@ describe('autostart: both LaunchAgents, temp HOME only', () => {
       for (const f of files) assert.equal(fs.existsSync(f), false, `${f} survived uninstall`);
       // uninstall needs no built strip
       autostart('install', { home, write: true, shell: true, shellBin: bin, run: never, uid: 501 });
-      autostart('uninstall', { home, write: true, shell: true, shellBin: '/nonexistent/pasture-shell', run: never, uid: 501 });
+      autostart('uninstall', { home, write: true, shell: true, shellBin: '/nonexistent/bellwether-shell', run: never, uid: 501 });
       assert.deepEqual(fs.readdirSync(path.join(home, 'Library', 'LaunchAgents')), []);
     } finally {
-      delete process.env.PASTURE_HOOK_TOKEN;
+      delete process.env.BELLWETHER_HOOK_TOKEN;
     }
   });
   test('install refuses, writing nothing, when the strip is not built; --brain-only (shell:false) still installs the brain', () => {
     const home = mkHome();
-    assert.throws(() => autostart('install', { home, write: true, shell: true, shellBin: '/nonexistent/pasture-shell', run: never, uid: 501 }), /isn't built yet/);
+    assert.throws(() => autostart('install', { home, write: true, shell: true, shellBin: '/nonexistent/bellwether-shell', run: never, uid: 501 }), /isn't built yet/);
     assert.deepEqual(fs.readdirSync(path.join(home, 'Library', 'LaunchAgents')), [], 'a refused install wrote a plist');
     autostart('install', { home, write: true, run: never, uid: 501 });
     assert.deepEqual(fs.readdirSync(path.join(home, 'Library', 'LaunchAgents')), [`${LABEL}.plist`]);
@@ -91,14 +91,14 @@ describe('autostart: both LaunchAgents, temp HOME only', () => {
     assert.match(calls[2], new RegExp(SHELL_LABEL));
   });
   test('paths with XML metacharacters stay valid in the strip plist', () => {
-    const t = shellPlistText({ shellBin: '/h/a&b <c>/pasture-shell', agentDir: '/h/a&b <c>', dataDir: '/h/a&b <c>/data' });
+    const t = shellPlistText({ shellBin: '/h/a&b <c>/bellwether-shell', agentDir: '/h/a&b <c>', dataDir: '/h/a&b <c>/data' });
     assert.equal(lint(t).status, 0);
     assert.doesNotMatch(t, /a&b <c>/);
     void plistText;
   });
-  test('the CLI under a temp HOME: preview writes nothing, --write writes both, --brain-only writes one, uninstall removes them, bad flags exit 3', { skip: !fs.existsSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'target', 'release', 'pasture-shell')) }, () => {
+  test('the CLI under a temp HOME: preview writes nothing, --write writes both, --brain-only writes one, uninstall removes them, bad flags exit 3', { skip: !fs.existsSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'target', 'release', 'bellwether-shell')) }, () => {
     const home = mkHome();
-    const env = { PATH: process.env.PATH, HOME: home, PASTURE_DATA_DIR: path.join(home, 'data'), PASTURE_HOOK_TOKEN: 'cliCanaryToken_0123456789abcdef' };
+    const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: 'cliCanaryToken_0123456789abcdef' };
     const run = (...a) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'autostart', ...a], { encoding: 'utf8', env });
     const dir = path.join(home, 'Library', 'LaunchAgents');
     assert.equal(run('install').status, 0);
@@ -127,7 +127,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
   };
   before(async () => {
     root = tempDir('m10-walk-');
-    agent = path.join(root, 'agents', 'pasture');
+    agent = path.join(root, 'agents', 'bellwether');
     home = path.join(root, 'home');
     dataDir = path.join(root, 'data');
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
@@ -139,7 +139,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
     cfg.port = port;
     fs.writeFileSync(path.join(agent, 'config.example.json'), JSON.stringify(cfg));
     settings = path.join(home, '.claude', 'settings.json');
-    env = { PATH: process.env.PATH, HOME: home, PASTURE_DATA_DIR: dataDir, PASTURE_HOOK_TOKEN: 'walkTokenNotReal_0123456789abc' };
+    env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: dataDir, BELLWETHER_HOOK_TOKEN: 'walkTokenNotReal_0123456789abc' };
   });
   after(() => {
     brain?.kill('SIGTERM');
@@ -147,9 +147,9 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
   });
 
   test('each state names exactly the right single step, in order, and hooks come last', async () => {
-    const e = (v) => ({ PASTURE_HOOK_TOKEN: v });
+    const e = (v) => ({ BELLWETHER_HOOK_TOKEN: v });
     // 0 nothing: no token
-    assert.match(next({ PASTURE_HOOK_TOKEN: '' }).text, /token/);
+    assert.match(next({ BELLWETHER_HOOK_TOKEN: '' }).text, /token/);
     // 1 token, no pet art
     assert.match(next().text, /pets fetch/);
     // 2 pet art present (the real, hash-pinned file when this machine has it), strip not built
@@ -159,7 +159,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
     fs.copyFileSync(realPet, path.join(dataDir, 'pets', 'esheep64', 'animations.xml'));
     assert.match(next().text, /shell --dev --release/);
     // 3 strip built, no login items
-    const bin = path.join(agent, 'shell', 'src-tauri', 'target', 'release', 'pasture-shell');
+    const bin = path.join(agent, 'shell', 'src-tauri', 'target', 'release', 'bellwether-shell');
     fs.mkdirSync(path.dirname(bin), { recursive: true });
     fs.writeFileSync(bin, '#!/bin/sh\n', { mode: 0o755 });
     assert.match(next().text, /autostart install/);
@@ -195,7 +195,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
     assert.ok(r.checks.some((c) => c.status === 'FAIL'), 'precondition: a FAIL line');
     assert.doesNotMatch(r.text, /all set/, `next said "${r.text}" with a FAIL line present`);
     delete s.disableAllHooks;
-    s.hooks.Stop[0].hooks[0].headers['X-Pasture-Token'] = 'someOtherTokenValue1234567890';
+    s.hooks.Stop[0].hooks[0].headers['X-Bellwether-Token'] = 'someOtherTokenValue1234567890';
     fs.writeFileSync(settings, JSON.stringify(s, null, 2));
     r = next();
     assert.ok(r.checks.some((c) => c.status === 'FAIL'));
@@ -206,7 +206,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
 
   test('another brain token (brain started with a different token) is not "all set"', async () => {
     if (!brain) return;
-    const r = next({ PASTURE_HOOK_TOKEN: 'aDifferentTokenNotReal_0123456789' });
+    const r = next({ BELLWETHER_HOOK_TOKEN: 'aDifferentTokenNotReal_0123456789' });
     assert.ok(r.checks.some((c) => c.status === 'FAIL'));
     assert.doesNotMatch(r.text, /all set/, `next said "${r.text}"`);
   });
@@ -215,15 +215,15 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
 describe('README "First run": every command exists, with the flags shown', () => {
   const readme = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');
   const section = readme.slice(readme.indexOf('## First run'), readme.indexOf('\n## Setup'));
-  const commands = [...section.matchAll(/\.\/pasture ([a-z]+(?: [a-z]+)?(?: --[a-z-]+)*)/g)].map((m) => m[1]);
+  const commands = [...section.matchAll(/\.\/bellwether ([a-z]+(?: [a-z]+)?(?: --[a-z-]+)*)/g)].map((m) => m[1]);
   test('the section names the expected commands', () => {
     for (const c of ['doctor', 'pets fetch', 'shell --dev --release', 'autostart install', 'autostart install --write', 'hooks install', 'hooks install --write', 'hooks uninstall --write', 'autostart uninstall --write']) assert.ok(commands.includes(c), `README does not mention ${c}`);
   });
   test('every one is accepted by the CLI (none is an unknown command or flag), run with a temp HOME and nothing that builds, serves or downloads', () => {
     const home = tempDir('m10-readme-');
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    // PASTURE_ENV keeps `token init` off the repository's real .env.
-    const env = { PATH: process.env.PATH, HOME: home, PASTURE_DATA_DIR: path.join(home, 'data'), PASTURE_HOOK_TOKEN: 'readmeTokenNotReal_0123456789ab', PASTURE_ENV: path.join(home, 'test.env') };
+    // BELLWETHER_ENV keeps `token init` off the repository's real .env.
+    const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: 'readmeTokenNotReal_0123456789ab', BELLWETHER_ENV: path.join(home, 'test.env') };
     for (const c of new Set(commands)) {
       if (/^(pets|shell)/.test(c)) continue; // downloads / builds
       const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...c.split(' ')], { encoding: 'utf8', env, timeout: 30000 });
@@ -234,8 +234,8 @@ describe('README "First run": every command exists, with the flags shown', () =>
     assert.match(usage, /pets fetch/);
     assert.match(usage, /shell \[--dev\] \[--release\]/);
   });
-  test('step 1 is `pasture token init` (no shell append), in First run and in Setup', () => {
-    assert.match(section, /\.\/pasture token init/);
+  test('step 1 is `bellwether token init` (no shell append), in First run and in Setup', () => {
+    assert.match(section, /\.\/bellwether token init/);
     assert.doesNotMatch(section, />> \.env/);
     assert.doesNotMatch(readme.slice(readme.indexOf('## Setup'), readme.indexOf('### 2.')), />> \.env/);
   });
@@ -247,7 +247,7 @@ describe('previews', () => {
     const home = tempDir('m10-prev-');
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{}\n');
-    const env = { PATH: process.env.PATH, HOME: home, PASTURE_DATA_DIR: path.join(home, 'data'), PASTURE_HOOK_TOKEN: T };
+    const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: T };
     const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'hooks', 'install'], { encoding: 'utf8', env });
     assert.equal(r.status, 0);
     assert.ok(!(r.stdout + r.stderr).includes(T), 'the `hooks install` preview prints the token (16 times); previews are meant to be shown and pasted');
@@ -272,7 +272,7 @@ describe('licensing documents', () => {
   });
 });
 
-describe('pasture token init (temp files only; the real .env is never touched)', () => {
+describe('bellwether token init (temp files only; the real .env is never touched)', () => {
   const tokenInit = async (...a) => (await import('../brain/token.mjs')).tokenInit(...a);
   const mk = (text, mode) => {
     const d = tempDir('m10-tok-');
@@ -280,7 +280,7 @@ describe('pasture token init (temp files only; the real .env is never touched)',
     if (text !== null) fs.writeFileSync(f, text, mode ? { mode } : undefined);
     return { d, f };
   };
-  const tokenOf = (f) => /^PASTURE_HOOK_TOKEN=(.*)$/m.exec(fs.readFileSync(f, 'utf8'))?.[1];
+  const tokenOf = (f) => /^BELLWETHER_HOOK_TOKEN=(.*)$/m.exec(fs.readFileSync(f, 'utf8'))?.[1];
   const FIXED = () => 'initTokenFixedValue_0123456789abcdef';
 
   test('no file: created 0600 with the token; a second run changes nothing and prints no token', async () => {
@@ -297,11 +297,11 @@ describe('pasture token init (temp files only; the real .env is never touched)',
     const { f } = mk('A=1\nOTHER_KEY=abc', 0o640);
     fs.chmodSync(f, 0o640);
     await tokenInit(f, { generate: FIXED });
-    assert.equal(fs.readFileSync(f, 'utf8'), `A=1\nOTHER_KEY=abc\nPASTURE_HOOK_TOKEN=${FIXED()}\n`);
+    assert.equal(fs.readFileSync(f, 'utf8'), `A=1\nOTHER_KEY=abc\nBELLWETHER_HOOK_TOKEN=${FIXED()}\n`);
     assert.equal(fs.statSync(f).mode & 0o777, 0o640);
   });
   test('already set in any form Node reads: bare, spaces, export, double and single quotes: left alone', async () => {
-    for (const line of ['PASTURE_HOOK_TOKEN=abcdef0123456789abcdef', 'PASTURE_HOOK_TOKEN = abcdef0123456789abcdef', 'export PASTURE_HOOK_TOKEN=abcdef0123456789abcdef', 'PASTURE_HOOK_TOKEN="abcdef0123456789abcdef"', "PASTURE_HOOK_TOKEN='abcdef0123456789abcdef'", '  PASTURE_HOOK_TOKEN=abcdef0123456789abcdef']) {
+    for (const line of ['BELLWETHER_HOOK_TOKEN=abcdef0123456789abcdef', 'BELLWETHER_HOOK_TOKEN = abcdef0123456789abcdef', 'export BELLWETHER_HOOK_TOKEN=abcdef0123456789abcdef', 'BELLWETHER_HOOK_TOKEN="abcdef0123456789abcdef"', "BELLWETHER_HOOK_TOKEN='abcdef0123456789abcdef'", '  BELLWETHER_HOOK_TOKEN=abcdef0123456789abcdef']) {
       const { f } = mk(`X=1\n${line}\nY=2\n`);
       const before = fs.readFileSync(f, 'utf8');
       assert.equal((await tokenInit(f, { generate: FIXED })).changed, false, line);
@@ -309,35 +309,35 @@ describe('pasture token init (temp files only; the real .env is never touched)',
     }
   });
   test('empty forms are filled in place (bare, quotes, export, spaces); a commented line is not mistaken for the key', async () => {
-    for (const line of ['PASTURE_HOOK_TOKEN=', 'PASTURE_HOOK_TOKEN=""', "PASTURE_HOOK_TOKEN=''", 'PASTURE_HOOK_TOKEN=   ', 'export PASTURE_HOOK_TOKEN=']) {
+    for (const line of ['BELLWETHER_HOOK_TOKEN=', 'BELLWETHER_HOOK_TOKEN=""', "BELLWETHER_HOOK_TOKEN=''", 'BELLWETHER_HOOK_TOKEN=   ', 'export BELLWETHER_HOOK_TOKEN=']) {
       const { f } = mk(`X=1\n${line}\nY=2\n`);
       assert.equal((await tokenInit(f, { generate: FIXED })).changed, true, line);
       assert.equal(tokenOf(f), FIXED(), line);
       assert.match(fs.readFileSync(f, 'utf8'), /^X=1\n.*\nY=2\n$/s);
     }
-    const { f } = mk('# PASTURE_HOOK_TOKEN=\nX=1\n');
+    const { f } = mk('# BELLWETHER_HOOK_TOKEN=\nX=1\n');
     await tokenInit(f, { generate: FIXED });
     assert.equal(tokenOf(f), FIXED());
-    assert.match(fs.readFileSync(f, 'utf8'), /^# PASTURE_HOOK_TOKEN=\n/);
+    assert.match(fs.readFileSync(f, 'utf8'), /^# BELLWETHER_HOOK_TOKEN=\n/);
   });
-  test('an empty value followed by a comment (`PASTURE_HOOK_TOKEN= # fill me in`), which Node reads as empty, is filled', async () => {
-    const { f } = mk('PASTURE_HOOK_TOKEN= # fill me in\n');
+  test('an empty value followed by a comment (`BELLWETHER_HOOK_TOKEN= # fill me in`), which Node reads as empty, is filled', async () => {
+    const { f } = mk('BELLWETHER_HOOK_TOKEN= # fill me in\n');
     const r = await tokenInit(f, { generate: FIXED });
     assert.equal(r.changed, true, 'Node reads this value as empty, but token init says it is already set');
   });
   test('CRLF files stay CRLF: a filled or appended line gets the same line ending', async () => {
-    for (const text of ['A=1\r\nPASTURE_HOOK_TOKEN=\r\nB=2\r\n', 'A=1\r\nB=2\r\n']) {
+    for (const text of ['A=1\r\nBELLWETHER_HOOK_TOKEN=\r\nB=2\r\n', 'A=1\r\nB=2\r\n']) {
       const { f } = mk(text);
       await tokenInit(f, { generate: FIXED });
       const out = fs.readFileSync(f, 'utf8');
       assert.ok(!/(?<!\r)\n/.test(out), `mixed line endings: ${JSON.stringify(out)}`);
     }
   });
-  test('two PASTURE_HOOK_TOKEN lines: Node uses the LAST one, so after token init Node must read a non-empty token in both orders', async () => {
-    for (const text of ['PASTURE_HOOK_TOKEN=\nPASTURE_HOOK_TOKEN=abcdef0123456789abcdef\n', 'PASTURE_HOOK_TOKEN=abcdef0123456789abcdef\nPASTURE_HOOK_TOKEN=\n']) {
+  test('two BELLWETHER_HOOK_TOKEN lines: Node uses the LAST one, so after token init Node must read a non-empty token in both orders', async () => {
+    for (const text of ['BELLWETHER_HOOK_TOKEN=\nBELLWETHER_HOOK_TOKEN=abcdef0123456789abcdef\n', 'BELLWETHER_HOOK_TOKEN=abcdef0123456789abcdef\nBELLWETHER_HOOK_TOKEN=\n']) {
       const { f } = mk(text);
       await tokenInit(f, { generate: FIXED });
-      const r = spawnSync(process.execPath, [`--env-file=${f}`, '-e', 'process.stdout.write(process.env.PASTURE_HOOK_TOKEN ?? "")'], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+      const r = spawnSync(process.execPath, [`--env-file=${f}`, '-e', 'process.stdout.write(process.env.BELLWETHER_HOOK_TOKEN ?? "")'], { encoding: 'utf8', env: { PATH: process.env.PATH } });
       assert.notEqual(r.stdout, '', `Node reads an empty token from ${JSON.stringify(text)} after token init said it was set`);
     }
   });
@@ -349,7 +349,7 @@ describe('pasture token init (temp files only; the real .env is never touched)',
     fs.symlinkSync(target, link);
     await tokenInit(link, { generate: FIXED });
     assert.ok(fs.lstatSync(link).isSymbolicLink());
-    assert.match(fs.readFileSync(target, 'utf8'), /PASTURE_HOOK_TOKEN=initTokenFixed/);
+    assert.match(fs.readFileSync(target, 'utf8'), /BELLWETHER_HOOK_TOKEN=initTokenFixed/);
     const dangling = path.join(d, 'dangling.env');
     fs.symlinkSync(path.join(d, 'new-target.env'), dangling);
     await tokenInit(dangling, { generate: FIXED });
@@ -386,7 +386,7 @@ describe('the token mask (stdout, stderr, serve log, doctor, status, replay, cra
   const run = (file, args) => {
     const home = tempDir('m10-mask-');
     const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
-    return spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args, '--settings', file], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, PASTURE_DATA_DIR: path.join(home, 'd'), PASTURE_HOOK_TOKEN: CUR } });
+    return spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args, '--settings', file], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'd'), BELLWETHER_HOOK_TOKEN: CUR } });
     void cfg;
   };
   const stale = (headerKey, extra = '') => {
@@ -397,20 +397,20 @@ describe('the token mask (stdout, stderr, serve log, doctor, status, replay, cra
   };
   test('the current token is never in a preview, a doctor run or an error, and neither is an old token under the canonical header name', () => {
     for (const args of [['hooks', 'install'], ['hooks', 'uninstall'], ['doctor'], ['doctor', '--json']]) {
-      const r = run(stale('X-Pasture-Token'), args);
+      const r = run(stale('X-Bellwether-Token'), args);
       assert.ok(!(r.stdout + r.stderr).includes(OLD) && !(r.stdout + r.stderr).includes(CUR), args.join(' '));
     }
     const bad = path.join(tempDir('m10-bad-'), 's.json');
-    fs.writeFileSync(bad, `{"hooks":{"Stop":[{"hooks":[{"headers":{"X-Pasture-Token":"${OLD}" "oops":1}}]}]}}`);
+    fs.writeFileSync(bad, `{"hooks":{"Stop":[{"hooks":[{"headers":{"X-Bellwether-Token":"${OLD}" "oops":1}}]}]}}`);
     const r = run(bad, ['hooks', 'install']);
     assert.ok(!(r.stdout + r.stderr).includes(OLD), 'a JSON error message carried the old token');
   });
   test('an old token under a differently-cased header name, or repeated in another header, is masked too', () => {
-    for (const key of ['x-pasture-token', 'X-PASTURE-TOKEN']) {
+    for (const key of ['x-bellwether-token', 'X-BELLWETHER-TOKEN']) {
       const r = run(stale(key), ['hooks', 'install']);
       assert.ok(!(r.stdout + r.stderr).includes(OLD), `old token printed in the diff under ${key}`);
     }
-    const r = run(stale('X-Pasture-Token', 'X-Other'), ['hooks', 'install']);
+    const r = run(stale('X-Bellwether-Token', 'X-Other'), ['hooks', 'install']);
     assert.ok(!(r.stdout + r.stderr).includes(OLD), 'an old token repeated under another header name was printed');
   });
 });

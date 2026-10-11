@@ -942,15 +942,15 @@ pub mod tests {
 
     const ALL: [&str; 6] = ["herdr", "iterm2", "terminal-app", "vscode", "process-tree", "app-activate"];
 
-    // Shaped like a real `ps` recording: herdr 0.9.0 inside iTerm2, paths trimmed.
+    // An invented process table, shaped like `ps -axo pid=,ppid=,uid=,tty=,comm=`: herdr inside iTerm2, and a Terminal.app session.
     const PS: &str = "    1     0     0 ??       /sbin/launchd
- 5636     1   501 ??       /Applications/iTerm.app/Contents/MacOS/iTerm2
- 5639  5636   501 ??       /Users/example/Library/Application Support/iTerm2/iTermServer-3.6.11
-94003  5639     0 ttys001  login
-94004 94003   501 ttys001  -zsh
-11941 94004   501 ttys001  herdr
-11942 11941   501 ??       /Users/example/.local/bin/herdr
-33870 11942   501 ttys005  claude
+ 2100     1   501 ??       /Applications/iTerm.app/Contents/MacOS/iTerm2
+ 2101  2100   501 ??       /Users/example/Library/Application Support/iTerm2/iTermServer-3.0.0
+ 3100  2101     0 ttys003  login
+ 3101  3100   501 ttys003  -zsh
+ 4100  3101   501 ttys003  herdr
+ 4101  4100   501 ??       /Users/example/.local/bin/herdr
+ 5100  4101   501 ttys004  claude
 70001     1   501 ??       /Applications/Utilities/Terminal.app/Contents/MacOS/Terminal
 70002 70001     0 ttys009  login
 70003 70002   501 ttys009  -zsh
@@ -967,7 +967,7 @@ pub mod tests {
     #[test]
     fn herdr_finds_its_host_through_the_client_process_without_any_host_marker() {
         let r = FakeRunner::default().on("herdr pane get w4:p2 [HERDR_SOCKET_PATH=/s/herdr.sock]", PANE).on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS);
-        let (loc, _, _) = locator(r, vec![win(5636, "iTerm2", 2000.0)], &ALL, false);
+        let (loc, _, _) = locator(r, vec![win(2100, "iTerm2", 2000.0)], &ALL, false);
         let l = loc.locate(&herdr_term());
         assert_eq!(l.strategy, "herdr");
         assert_eq!(l.confidence, Confidence::Exact, "one client, one host window");
@@ -977,13 +977,13 @@ pub mod tests {
     #[test]
     fn herdr_with_two_host_windows_is_app_confidence_unless_applescript_finds_the_tty() {
         let r = || FakeRunner::default().on("herdr pane get w4:p2 [HERDR_SOCKET_PATH=/s/herdr.sock]", PANE).on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS);
-        let wins = vec![win(5636, "iTerm2", 0.0), win(5636, "iTerm2", 2000.0)];
+        let wins = vec![win(2100, "iTerm2", 0.0), win(2100, "iTerm2", 2000.0)];
         let (loc, _, _) = locator(r(), wins.clone(), &["herdr"], false);
         assert_eq!(loc.locate(&herdr_term()).confidence, Confidence::App);
-        let (loc, runner, _) = locator(r().on("osascript iTerm2 ttys001", "1800,30,3000,900"), wins, &["herdr"], true);
+        let (loc, runner, _) = locator(r().on("osascript iTerm2 ttys003", "1800,30,3000,900"), wins, &["herdr"], true);
         let l = loc.locate(&herdr_term());
         assert_eq!((l.confidence, l.bounds.unwrap().x), (Confidence::Exact, 1800.0));
-        assert!(runner.calls().iter().any(|c| c == "osascript iTerm2 ttys001"), "asked iTerm2 by the client's tty");
+        assert!(runner.calls().iter().any(|c| c == "osascript iTerm2 ttys003"), "asked iTerm2 by the client's tty");
     }
 
     #[test]
@@ -991,7 +991,7 @@ pub mod tests {
         let mut r = FakeRunner::default().on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS);
         r.missing.insert("herdr".into());
         let t = Terminal { program: Some("iTerm.app".into()), ..herdr_term() };
-        let (loc, _, logs) = locator(r, vec![win(5636, "iTerm2", 0.0)], &ALL, false);
+        let (loc, _, logs) = locator(r, vec![win(2100, "iTerm2", 0.0)], &ALL, false);
         let l = loc.locate(&t);
         assert_eq!(l.strategy, "app-activate");
         assert_eq!(l.confidence, Confidence::App);
@@ -1004,7 +1004,7 @@ pub mod tests {
     fn a_pane_herdr_doesnt_know_falls_through() {
         let r = FakeRunner::default().on("herdr pane get w9:p9 [HERDR_SOCKET_PATH=/s/herdr.sock]", NO_PANE).on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS);
         let t = Terminal { herdr_pane: Some("w9:p9".into()), ..herdr_term() };
-        let (loc, _, logs) = locator(r, vec![win(5636, "iTerm2", 0.0)], &["herdr"], false);
+        let (loc, _, logs) = locator(r, vec![win(2100, "iTerm2", 0.0)], &["herdr"], false);
         assert_eq!(loc.locate(&t).confidence, Confidence::None);
         assert!(logs.lock().unwrap()[0].contains("pane_not_found"));
     }
@@ -1018,7 +1018,7 @@ pub mod tests {
             .on("herdr agent focus w4:p2 [HERDR_SOCKET_PATH=/s/herdr.sock]", "{}")
             .on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS)
             .on("/usr/bin/open -a /Applications/iTerm.app", "");
-        let (loc, runner, _) = locator(r, vec![win(5636, "iTerm2", 0.0)], &ALL, false);
+        let (loc, runner, _) = locator(r, vec![win(2100, "iTerm2", 0.0)], &ALL, false);
         assert_eq!(loc.focus(&herdr_term()), Focus::Focused("herdr (w4:t2, pane w4:p2)".into()));
         let calls = runner.calls();
         let order: Vec<&str> = calls.iter().map(String::as_str).filter(|c| c.starts_with("herdr") || c.starts_with("/usr/bin/open")).collect();
@@ -1029,7 +1029,7 @@ pub mod tests {
     fn iterm2_by_session_id_is_exact_and_a_refusal_is_logged_once_and_not_retried() {
         let t = Terminal { program: Some("iTerm.app".into()), iterm_session: Some("w0t1p0:0F0E0D0C-AAAA-4BBB-8CCC-000000000001".into()), ..Default::default() };
         let ok = FakeRunner::default().on("osascript iTerm2 0F0E0D0C-AAAA-4BBB-8CCC-000000000001", "100,50,1300,850");
-        let (loc, _, _) = locator(ok, vec![win(5636, "iTerm2", 0.0)], &ALL, true);
+        let (loc, _, _) = locator(ok, vec![win(2100, "iTerm2", 0.0)], &ALL, true);
         let l = loc.locate(&t);
         assert_eq!((l.strategy.as_str(), l.confidence), ("iterm2", Confidence::Exact));
         assert_eq!(l.bounds, Some(Rect { x: 100.0, y: 50.0, w: 1200.0, h: 800.0 }));
@@ -1037,7 +1037,7 @@ pub mod tests {
         let denied = FakeRunner::default()
             .fail("osascript iTerm2 0F0E0D0C-AAAA-4BBB-8CCC-000000000001", "execution error: Not authorized to send Apple events to iTerm2. (-1743)")
             .on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS);
-        let (loc, runner, logs) = locator(denied, vec![win(5636, "iTerm2", 0.0)], &ALL, true);
+        let (loc, runner, logs) = locator(denied, vec![win(2100, "iTerm2", 0.0)], &ALL, true);
         let l = loc.locate(&t);
         assert_eq!(l.strategy, "app-activate", "falls back without Automation");
         loc.locate(&t);
@@ -1052,12 +1052,12 @@ pub mod tests {
         let (loc, runner, _) = locator(FakeRunner::default(), vec![], &["iterm2"], true);
         assert_eq!(loc.locate(&t).confidence, Confidence::None);
         assert!(runner.calls().is_empty(), "iTerm2 isn't running: `tell application` would launch it");
-        let (loc, runner, _) = locator(FakeRunner::default(), vec![win(5636, "iTerm2", 0.0)], &["iterm2"], false);
+        let (loc, runner, _) = locator(FakeRunner::default(), vec![win(2100, "iTerm2", 0.0)], &["iterm2"], false);
         loc.locate(&t);
         assert!(runner.calls().is_empty());
         // Only a hex UUID reaches a script.
         let bad = Terminal { iterm_session: Some("w0t1p0:x\" & do shell script \"rm".into()), ..t };
-        let (loc, runner, _) = locator(FakeRunner::default(), vec![win(5636, "iTerm2", 0.0)], &["iterm2"], true);
+        let (loc, runner, _) = locator(FakeRunner::default(), vec![win(2100, "iTerm2", 0.0)], &["iterm2"], true);
         loc.locate(&bad);
         assert!(runner.calls().is_empty());
     }
@@ -1065,11 +1065,11 @@ pub mod tests {
     #[test]
     fn process_tree_matches_the_claude_process_by_its_markers_and_walks_to_the_window_owner() {
         let t = Terminal { program: Some("Apple_Terminal".into()), term_session: Some("ABC-123".into()), ..Default::default() };
-        let env = "33870 claude HERDR_PANE_ID=w4:p2 TERM_SESSION_ID=other\n70004 claude TERM_PROGRAM=Apple_Terminal TERM_SESSION_ID=ABC-123 SECRET=never-kept\n";
+        let env = "5100 claude HERDR_PANE_ID=w4:p2 TERM_SESSION_ID=other\n70004 claude TERM_PROGRAM=Apple_Terminal TERM_SESSION_ID=ABC-123 SECRET=never-kept\n";
         let r = FakeRunner::default().on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS);
         let ps_env = |r: FakeRunner| {
             // pid order in the -p list follows the HashMap; record both orders.
-            r.on("/bin/ps -Eww -o pid=,command= -p 33870,70004", env).on("/bin/ps -Eww -o pid=,command= -p 70004,33870", env)
+            r.on("/bin/ps -Eww -o pid=,command= -p 5100,70004", env).on("/bin/ps -Eww -o pid=,command= -p 70004,5100", env)
         };
         let (loc, _, _) = locator(ps_env(r), vec![win(70001, "Terminal", 300.0)], &["process-tree"], false);
         let l = loc.locate(&t);
@@ -1084,15 +1084,15 @@ pub mod tests {
     #[test]
     fn two_sessions_that_look_alike_are_not_guessed() {
         let t = Terminal { term_session: Some("SAME".into()), ..Default::default() };
-        let env = "33870 claude TERM_SESSION_ID=SAME\n70004 claude TERM_SESSION_ID=SAME\n";
-        let r = FakeRunner::default().on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS).on("/bin/ps -Eww -o pid=,command= -p 33870,70004", env).on("/bin/ps -Eww -o pid=,command= -p 70004,33870", env);
+        let env = "5100 claude TERM_SESSION_ID=SAME\n70004 claude TERM_SESSION_ID=SAME\n";
+        let r = FakeRunner::default().on("/bin/ps -axo pid=,ppid=,uid=,tty=,comm=", PS).on("/bin/ps -Eww -o pid=,command= -p 5100,70004", env).on("/bin/ps -Eww -o pid=,command= -p 70004,5100", env);
         let (loc, _, _) = locator(r, vec![win(70001, "Terminal", 0.0)], &["process-tree"], false);
         assert_eq!(loc.locate(&t).confidence, Confidence::None);
     }
 
     #[test]
     fn no_terminal_headers_means_the_primary_monitor_and_a_click_just_hops() {
-        let (loc, runner, _) = locator(FakeRunner::default(), vec![win(5636, "iTerm2", 0.0)], &ALL, true);
+        let (loc, runner, _) = locator(FakeRunner::default(), vec![win(2100, "iTerm2", 0.0)], &ALL, true);
         assert_eq!(loc.locate(&Terminal::default()), Located::none());
         assert!(matches!(loc.focus(&Terminal::default()), Focus::Unavailable(_)));
         assert!(runner.calls().is_empty());
@@ -1172,7 +1172,7 @@ pub mod tests {
     #[cfg(unix)]
     #[test]
     fn the_real_socket_check_wants_our_own_socket_not_a_file_or_symlink() {
-        let dir = std::env::temp_dir().join(format!("pasture-sock-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("bellwether-sock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let sock = dir.join("h.sock");
@@ -1194,11 +1194,11 @@ pub mod tests {
     #[test]
     fn ps_lines_with_spaces_in_the_command_parse() {
         let p = parse_ps(PS);
-        assert_eq!(p[&5639].comm, "/Users/example/Library/Application Support/iTerm2/iTermServer-3.6.11");
-        assert_eq!((p[&11941].ppid, p[&11941].tty.as_str()), (94004, "ttys001"));
-        assert_eq!(app_bundle(&p[&5636].comm).as_deref(), Some("/Applications/iTerm.app"));
-        assert_eq!(safe_tty("ttys001"), "ttys001");
-        assert_eq!(safe_tty("ttys001\" & x"), "-");
+        assert_eq!(p[&2101].comm, "/Users/example/Library/Application Support/iTerm2/iTermServer-3.0.0");
+        assert_eq!((p[&4100].ppid, p[&4100].tty.as_str()), (3101, "ttys003"));
+        assert_eq!(app_bundle(&p[&2100].comm).as_deref(), Some("/Applications/iTerm.app"));
+        assert_eq!(safe_tty("ttys003"), "ttys003");
+        assert_eq!(safe_tty("ttys003\" & x"), "-");
     }
 
     #[test]

@@ -118,7 +118,7 @@ describe('alert states through the reducer, as the canvas receives them', () => 
   const config = withDefaults({ port: 0 });
   const term = { herdrPane: 'w1:p1', herdrSocket: '/s' };
   const clean = makeTextCleaner({ maxChars: 60 });
-  const ev = (f, t, event, o = {}) => f.apply(normalise({ hook_event_name: event, session_id: 's', cwd: '/w/meadow', ...o }, { 'x-pasture-herdr-pane': 'w1:p1', 'x-pasture-herdr-socket': '/s' }, t, { clean }));
+  const ev = (f, t, event, o = {}) => f.apply(normalise({ hook_event_name: event, session_id: 's', cwd: '/w/meadow', ...o }, { 'x-bellwether-herdr-pane': 'w1:p1', 'x-bellwether-herdr-socket': '/s' }, t, { clean }));
   test('a permission alert carries a clean one-line text, the label is the project, confirmation flips only `confirmed`, and PostToolUse clears it', () => {
     const f = new Flock({ config, t: 0 });
     ev(f, 1000, 'UserPromptSubmit');

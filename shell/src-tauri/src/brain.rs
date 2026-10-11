@@ -144,11 +144,11 @@ pub fn control(port: u16, token: Option<&str>, action: &str) -> Result<(), Strin
 
 /// POST /control with any message (`placed`, Milestone 8).
 pub fn control_json(port: u16, token: Option<&str>, msg: &Value) -> Result<(), String> {
-    let token = token.ok_or("PASTURE_HOOK_TOKEN is not set")?;
+    let token = token.ok_or("BELLWETHER_HOOK_TOKEN is not set")?;
     let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).http_status_as_error(false).build().new_agent();
     let resp = agent
         .post(&format!("http://127.0.0.1:{port}/control"))
-        .header("X-Pasture-Token", token)
+        .header("X-Bellwether-Token", token)
         .header("Content-Type", "application/json")
         .send(msg.to_string())
         .map_err(|e| e.to_string())?;
@@ -177,7 +177,7 @@ pub fn run(brain: Arc<Brain>, cfg: BrainConfig) {
         .build()
         .new_agent();
     let Some(token) = cfg.token.clone() else {
-        log("error: PASTURE_HOOK_TOKEN is not set (environment or the .env); the strip stays empty");
+        log("error: BELLWETHER_HOOK_TOKEN is not set (environment or the .env); the strip stays empty");
         return;
     };
     let mut rev: i64 = -1;
@@ -185,7 +185,7 @@ pub fn run(brain: Arc<Brain>, cfg: BrainConfig) {
     let mut failures = 0u32;
     loop {
         let url = format!("{base}/state?after={rev}&wait=25000");
-        match agent.get(&url).header("X-Pasture-Token", &token).call() {
+        match agent.get(&url).header("X-Bellwether-Token", &token).call() {
             Ok(mut resp) if resp.status() == 200 => {
                 failures = 0;
                 match resp.body_mut().read_json::<Value>() {
@@ -204,7 +204,7 @@ pub fn run(brain: Arc<Brain>, cfg: BrainConfig) {
             Ok(resp) => {
                 failures += 1;
                 if resp.status() == 403 {
-                    log("error: the brain refused the shell's token (403); the brain and the shell must use the same PASTURE_HOOK_TOKEN");
+                    log("error: the brain refused the shell's token (403); the brain and the shell must use the same BELLWETHER_HOOK_TOKEN");
                     std::thread::sleep(Duration::from_secs(10));
                 } else {
                     log(&format!("warning: /state answered HTTP {}", resp.status()));
@@ -250,7 +250,7 @@ fn spawn(brain: &Brain, cfg: &BrainConfig) {
         // Marks this brain as the shell's: it exits when the shell is gone, even after
         // a SIGKILL that gives the shell no chance to stop it. A brain started by the
         // LaunchAgent or by hand never has this variable.
-        .env("PASTURE_PARENT_PID", std::process::id().to_string())
+        .env("BELLWETHER_PARENT_PID", std::process::id().to_string())
         .stdin(Stdio::null());
     match out {
         Ok(f) => {

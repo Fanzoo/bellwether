@@ -4,17 +4,18 @@ import path from 'node:path';
 import { CliError, EXIT, fileStamp, setOwn } from './util.mjs';
 
 /**
- * pasture's hook block, and the installer that merges it into a Claude Code
+ * bellwether's hook block, and the installer that merges it into a Claude Code
  * settings file.
  *
  * The settings file already holds other tools' hooks (afplay sounds, other tools,
  * herdr). The installer only ever appends its own matcher groups and removes its
- * own handlers. A handler is pasture's if, and only if, it is an http handler whose
+ * own handlers. A handler is bellwether's if, and only if, it is an http handler whose
  * url is exactly http://127.0.0.1:<port>/hook (Decision 13, exact-URL rule since
  * Milestone 2). A foreign `…/hooks` or `…/hook2` is never claimed. Nothing else is
  * touched, reordered or deduplicated, and `assertOthersPreserved` checks that before
- * any write. Entries left on another port after a port change are pasture-like but
- * not pasture's: doctor flags them, and `hooks uninstall --port <old>` removes them.
+ * any write. Entries written by pasture (the name before the rename) are on the same
+ * URL, so they are bellwether's too and get replaced. Entries left on another port after a port change are bellwether-like but
+ * not bellwether's: doctor flags them, and `hooks uninstall --port <old>` removes them.
  */
 
 /**
@@ -47,13 +48,13 @@ export const HTTP_UNSUPPORTED_EVENTS = ['SessionStart', 'Setup'];
 
 /** Header name -> environment variable interpolated by Claude Code at hook time. */
 export const ENV_HEADERS = {
-  'X-Pasture-Term-Program': 'TERM_PROGRAM',
-  'X-Pasture-Iterm-Session': 'ITERM_SESSION_ID',
-  'X-Pasture-Term-Session': 'TERM_SESSION_ID',
-  'X-Pasture-Wt-Session': 'WT_SESSION',
-  'X-Pasture-Tmux-Pane': 'TMUX_PANE',
-  'X-Pasture-Herdr-Pane': 'HERDR_PANE_ID',
-  'X-Pasture-Herdr-Socket': 'HERDR_SOCKET_PATH',
+  'X-Bellwether-Term-Program': 'TERM_PROGRAM',
+  'X-Bellwether-Iterm-Session': 'ITERM_SESSION_ID',
+  'X-Bellwether-Term-Session': 'TERM_SESSION_ID',
+  'X-Bellwether-Wt-Session': 'WT_SESSION',
+  'X-Bellwether-Tmux-Pane': 'TMUX_PANE',
+  'X-Bellwether-Herdr-Pane': 'HERDR_PANE_ID',
+  'X-Bellwether-Herdr-Socket': 'HERDR_SOCKET_PATH',
 };
 
 /** Above this, a hung brain would stall tool calls noticeably. `doctor` enforces it. */
@@ -62,7 +63,7 @@ export const MAX_TIMEOUT_SEC = 2;
 export const hookUrl = (port) => `http://127.0.0.1:${port}/hook`;
 
 export function hookHandler(port, token) {
-  const headers = { 'X-Pasture-Token': token };
+  const headers = { 'X-Bellwether-Token': token };
   for (const [h, env] of Object.entries(ENV_HEADERS)) headers[h] = `$${env}`;
   return {
     type: 'http',
@@ -73,14 +74,14 @@ export function hookHandler(port, token) {
   };
 }
 
-/** A complete settings object holding only pasture's hooks: what `hooks print` emits. */
+/** A complete settings object holding only bellwether's hooks: what `hooks print` emits. */
 export function hookBlock(port, token) {
   const hooks = {};
   for (const event of EVENTS) hooks[event] = [{ hooks: [hookHandler(port, token)] }];
   return { hooks };
 }
 
-export function isPastureHandler(handler, port) {
+export function isBellwetherHandler(handler, port) {
   return (
     !!handler &&
     handler.type === 'http' &&
@@ -88,18 +89,35 @@ export function isPastureHandler(handler, port) {
   );
 }
 
-/** The port of a handler that looks like pasture's on some port, else null. */
-export function pastureLikePort(handler) {
+/** The port of a handler that looks like bellwether's on some port, else null. */
+export function bellwetherLikePort(handler) {
   if (!handler || handler.type !== 'http' || typeof handler.url !== 'string') return null;
   const m = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/hook$/.exec(handler.url);
   if (m) return Number(m[1]);
-  return handler.headers && typeof handler.headers === 'object' && handler.headers['X-Pasture-Token'] !== undefined ? NaN : null;
+  return handlerToken(handler) !== undefined ? NaN : null;
+}
+
+/** The token header's value: X-Bellwether-Token, or X-Pasture-Token on an entry written before the rename. */
+export function handlerToken(handler) {
+  const h = handler?.headers;
+  if (!h || typeof h !== 'object') return undefined;
+  return h['X-Bellwether-Token'] ?? h['X-Pasture-Token'];
 }
 
 /**
- * Returns a new settings object with exactly one pasture matcher group per
- * subscribed event. An event whose only pasture entry is already a lone, current
- * handler is left alone, so a second install is a no-op. Otherwise stale pasture
+ * An entry written by pasture, before the rename: on the exact URL, with the old
+ * X-Pasture-Token header and not the new one. The exact-URL rule already makes it ours,
+ * so `hooks install` replaces it and `hooks uninstall` removes it.
+ */
+export function isLegacyHandler(handler, port) {
+  const h = handler?.headers;
+  return isBellwetherHandler(handler, port) && !!h && typeof h === 'object' && h['X-Pasture-Token'] !== undefined && h['X-Bellwether-Token'] === undefined;
+}
+
+/**
+ * Returns a new settings object with exactly one bellwether matcher group per
+ * subscribed event. An event whose only bellwether entry is already a lone, current
+ * handler is left alone, so a second install is a no-op. Otherwise stale bellwether
  * handlers on that event are removed and a fresh group is appended at the end.
  */
 export function install(settings, port, token) {
@@ -109,7 +127,7 @@ export function install(settings, port, token) {
   if (out.hooks === undefined) out.hooks = {};
   for (const event of EVENTS) {
     const groups = out.hooks[event] ?? [];
-    const ours = groups.filter((g) => isPastureGroup(g, port));
+    const ours = groups.filter((g) => isBellwetherGroup(g, port));
     const current =
       ours.length === 1 &&
       ours[0].matcher === undefined &&
@@ -121,7 +139,7 @@ export function install(settings, port, token) {
     kept.push({ hooks: [cloneJson(wanted)] });
     setOwn(out.hooks, event, kept);
   }
-  // Pasture entries on events it no longer subscribes to (e.g. SessionStart) go.
+  // Bellwether entries on events it no longer subscribes to (e.g. SessionStart) go.
   for (const [event, groups] of Object.entries(out.hooks)) {
     if (EVENTS.includes(event)) continue;
     const kept = removeFromGroups(groups, port);
@@ -133,12 +151,12 @@ export function install(settings, port, token) {
 }
 
 /**
- * Removes every pasture handler from every event (not just the subscribed ones, so
+ * Removes every bellwether handler from every event (not just the subscribed ones, so
  * an event dropped in a later version is cleaned up too). A matcher group is removed
- * only when pasture's removal emptied it. An event key, or the hooks object, that
- * pasture's removal emptied is removed only if pasture created it: `created` comes
+ * only when bellwether's removal emptied it. An event key, or the hooks object, that
+ * bellwether's removal emptied is removed only if bellwether created it: `created` comes
  * from the install record (see installRecord below). Without a record, an emptied
- * key is assumed to be pasture's and removed.
+ * key is assumed to be bellwether's and removed.
  */
 export function uninstall(settings, port, created = null) {
   assertShape(settings);
@@ -162,18 +180,18 @@ export function uninstall(settings, port, created = null) {
 function removeFromGroups(groups, port) {
   const kept = [];
   for (const g of groups) {
-    if (!isPastureGroup(g, port)) {
+    if (!isBellwetherGroup(g, port)) {
       kept.push(g);
       continue;
     }
-    const rest = g.hooks.filter((h) => !isPastureHandler(h, port));
+    const rest = g.hooks.filter((h) => !isBellwetherHandler(h, port));
     if (rest.length > 0) kept.push({ ...g, hooks: rest });
   }
   return kept;
 }
 
-function isPastureGroup(g, port) {
-  return Array.isArray(g?.hooks) && g.hooks.some((h) => isPastureHandler(h, port));
+function isBellwetherGroup(g, port) {
+  return Array.isArray(g?.hooks) && g.hooks.some((h) => isBellwetherHandler(h, port));
 }
 
 /**
@@ -206,13 +224,13 @@ function assertShape(settings) {
 }
 
 /**
- * The guard behind every write: with pasture's handlers removed from both versions,
+ * The guard behind every write: with bellwether's handlers removed from both versions,
  * and empty containers ignored on both sides, they must be deep-equal, including
  * order. Throws otherwise.
  */
 export function assertOthersPreserved(before, after, port) {
   if (!deepEqual(othersOnly(before, port), othersOnly(after, port))) {
-    throw new CliError('internal check failed: the edit would change a non-pasture setting. Nothing was written.', EXIT.UNEXPECTED);
+    throw new CliError('internal check failed: the edit would change a non-bellwether setting. Nothing was written.', EXIT.UNEXPECTED);
   }
 }
 
@@ -228,7 +246,7 @@ function othersOnly(settings, port) {
   return out;
 }
 
-/** Counts pasture matcher groups per event. Tolerates any shape. */
+/** Counts bellwether matcher groups per event. Tolerates any shape. */
 export function countGroups(settings, port) {
   const hooks = isPlainObject(settings?.hooks) ? settings.hooks : {};
   // Object.fromEntries defines own properties, so an event key "__proto__" is counted
@@ -236,13 +254,13 @@ export function countGroups(settings, port) {
   return Object.fromEntries(
     Object.entries(hooks)
       .filter(([, groups]) => Array.isArray(groups))
-      .map(([event, groups]) => [event, groups.filter((g) => isPastureGroup(g, port)).length])
+      .map(([event, groups]) => [event, groups.filter((g) => isBellwetherGroup(g, port)).length])
       .filter(([, n]) => n > 0),
   );
 }
 
 /**
- * The install record, data/installs.json: for each settings file pasture installed
+ * The install record, data/installs.json: for each settings file bellwether installed
  * into, which event keys (and whether the hooks object) the install created. Uninstall
  * uses it so `"Stop": []` or `"hooks": {}` that were already there come back as they
  * were. Contains paths and event names only.
@@ -267,7 +285,7 @@ export function readInstallRecords(dataDir) {
   }
   const all = Object.create(null);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { all, warning: `${f} is not a valid install record; ignoring it (uninstall falls back to removing event keys pasture emptied)` };
+    return { all, warning: `${f} is not a valid install record; ignoring it (uninstall falls back to removing event keys bellwether emptied)` };
   }
   let dropped = 0;
   for (const [k, r] of Object.entries(parsed)) {
@@ -341,7 +359,7 @@ export function planEdit(file, action, { port, token, dataDir = null }) {
     changed,
     oldText,
     newText,
-    // Whether this file was already laid out exactly as pasture writes JSON. When it
+    // Whether this file was already laid out exactly as bellwether writes JSON. When it
     // isn't (key spacing, inline arrays, mixed line endings), a write reformats
     // existing lines too, although every value stays the same.
     layoutKept: bytes === null || serialise(before, oldText) === oldText,
@@ -354,7 +372,7 @@ export function planEdit(file, action, { port, token, dataDir = null }) {
  * Writes a planned edit: back up the original bytes, re-read and compare the hash
  * (another tool may have edited the file meanwhile), then replace the file
  * atomically through a temp file in the same directory. Backups hold the token, so
- * they are 0600; a settings file pasture creates is 0600 too.
+ * they are 0600; a settings file bellwether creates is 0600 too.
  */
 export function applyPlan(plan, backupDir, dataDir = null) {
   if (!plan.changed) return null;
@@ -376,12 +394,12 @@ export function applyPlan(plan, backupDir, dataDir = null) {
     fs.writeFileSync(backup, plan.originalBytes, { flag: 'wx', mode: 0o600 });
     const now = fs.readFileSync(target);
     if (sha256(now) !== plan.originalHash) {
-      throw new CliError(`${plan.file} changed while pasture was editing it. Nothing was written; run the command again.`, EXIT.UNEXPECTED);
+      throw new CliError(`${plan.file} changed while bellwether was editing it. Nothing was written; run the command again.`, EXIT.UNEXPECTED);
     }
   }
   const mode = plan.exists ? fs.statSync(target).mode & 0o777 : 0o600;
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = path.join(path.dirname(target), `.${path.basename(target)}.pasture-${process.pid}.tmp`);
+  const tmp = path.join(path.dirname(target), `.${path.basename(target)}.bellwether-${process.pid}.tmp`);
   fs.writeFileSync(tmp, plan.newText, { mode });
   fs.chmodSync(tmp, mode);
   fs.renameSync(tmp, target);
@@ -394,7 +412,7 @@ export function applyPlan(plan, backupDir, dataDir = null) {
       fs.writeFileSync(rf, recordText, { mode: 0o600 });
       fs.chmodSync(rf, 0o600);
     } catch (e) {
-      plan.warnings.push(`could not update ${path.join(dataDir, 'installs.json')} (${e.code ?? e.message}); a later uninstall falls back to removing event keys pasture emptied`);
+      plan.warnings.push(`could not update ${path.join(dataDir, 'installs.json')} (${e.code ?? e.message}); a later uninstall falls back to removing event keys bellwether emptied`);
     }
   }
   return backup;

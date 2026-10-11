@@ -33,13 +33,13 @@ describe('privacy.sharingProcesses entries that can never match (D2)', () => {
     const dataDir = tempDir();
     writeShellState(dataDir, { hidden: true, showLabels: false });
     const config = { port: 1, ...cfg(['CptHost', 'y'.repeat(40)]) };
-    const r = await runDoctor({ env: { PASTURE_HOOK_TOKEN: TOKEN }, settingsFile: path.join(dataDir, 'none.json'), configLoader: () => ({ config, usingExample: false }), dataDir, probeTimeoutMs: 200 });
+    const r = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: path.join(dataDir, 'none.json'), configLoader: () => ({ config, usingExample: false }), dataDir, probeTimeoutMs: 200 });
     const by = (n) => r.checks.find((c) => c.name === n);
     if (process.platform === 'darwin') {
       assert.equal(by('sharing names').status, 'WARN');
       assert.match(by('sharing names').detail, /longer than 31 bytes/);
     }
-    assert.match(by('strip').detail, /`pasture show` brings it back/);
+    assert.match(by('strip').detail, /`bellwether show` brings it back/);
   });
   test('the shell has the same rules, and logs them at start', () => {
     const rs = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'privacy.rs'), 'utf8');
@@ -50,8 +50,8 @@ describe('privacy.sharingProcesses entries that can never match (D2)', () => {
 });
 
 describe('the way back for a hidden strip (D1)', () => {
-  const cli = (args, dataDir) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args], { env: { ...process.env, PASTURE_DATA_DIR: dataDir, PASTURE_HOOK_TOKEN: TOKEN }, encoding: 'utf8', timeout: 10000 });
-  test('`pasture hide` and `pasture show` write shell-state.json and keep Show labels as it was', () => {
+  const cli = (args, dataDir) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args], { env: { ...process.env, BELLWETHER_DATA_DIR: dataDir, BELLWETHER_HOOK_TOKEN: TOKEN }, encoding: 'utf8', timeout: 10000 });
+  test('`bellwether hide` and `bellwether show` write shell-state.json and keep Show labels as it was', () => {
     const dataDir = tempDir();
     writeShellState(dataDir, { hidden: false, showLabels: true });
     const h = cli(['hide'], dataDir);
@@ -62,7 +62,7 @@ describe('the way back for a hidden strip (D1)', () => {
     assert.equal(s.status, 0, s.stderr);
     assert.deepEqual(readShellState(dataDir), { hidden: false, showLabels: true });
   });
-  test('`pasture show` works with no shell-state.json yet, and a bad file reads as shown', () => {
+  test('`bellwether show` works with no shell-state.json yet, and a bad file reads as shown', () => {
     const dataDir = tempDir();
     assert.equal(cli(['show'], dataDir).status, 0);
     assert.deepEqual(readShellState(dataDir), { hidden: false, showLabels: false });
@@ -72,7 +72,7 @@ describe('the way back for a hidden strip (D1)', () => {
   test('the shell watches the file, names the way back when hidden, and fails open without a tray', () => {
     const lib = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'lib.rs'), 'utf8');
     assert.match(lib, /privacy::kept_stamp\(&data_dir\)/);
-    assert.match(lib, /to show it again: the tray's Hide the strip, or `pasture show`/);
+    assert.match(lib, /to show it again: the tray's Hide the strip, or `bellwether show`/);
     assert.match(lib, /if kept\.hidden \{\s*\/\/ Fail open[\s\S]*?kept\.hidden = false;/);
     // The strip is opened only after the tray decides, so a failed tray never leaves it hidden.
     assert.ok(lib.indexOf('tray::build(&handle') < lib.indexOf('strips::open(&handle'));

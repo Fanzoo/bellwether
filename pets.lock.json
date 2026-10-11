@@ -1,5 +1,5 @@
 {
-  "comment": "Pinned pet files: pasture pets fetch downloads exactly these, and the shell refuses to load a pet whose file doesn't match. Art is never committed; see NOTICE.",
+  "comment": "Pinned pet files: bellwether pets fetch downloads exactly these, and the shell refuses to load a pet whose file doesn't match. Art is never committed; see NOTICE.",
   "repo": "Adrianotiger/desktopPet",
   "commit": "1ba33bebed993439f03e502b37e9bd2daf061773",
   "pets": {

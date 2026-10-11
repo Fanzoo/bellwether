@@ -3,7 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { EVENTS } from './hooks.mjs';
 import { createHookRoute, newCounters } from './hook-route.mjs';
-import { headersPresent, normalise, rawKeys } from './normalise.mjs';
+import { adoptLegacyHeaders, headersPresent, normalise, rawKeys } from './normalise.mjs';
 import { BIND_HOST, CliError, DOCTOR_PING, EXIT, VERSION, clock } from './util.mjs';
 
 /**
@@ -26,13 +26,14 @@ export async function startServer({ port, token, onEvent = () => {}, log = () =>
   let routes = null;
 
   const server = http.createServer((req, res) => {
+    adoptLegacyHeaders(req.headers);
     const url = req.url ?? '/';
     const route = url.split('?')[0];
     if (route === '/hook' && req.method === 'POST') return hookRoute(req, res);
     if (routes && route !== '/hook' && routes(req, res, route, new URLSearchParams(url.split('?')[1] ?? ''))) return;
     if (route === '/health' && req.method === 'GET') {
       const body = Buffer.from(
-        JSON.stringify({ ok: true, name: 'pasture', version: VERSION, pid: process.pid, port: boundPort, lastEventAt, mode: hang ? 'hang' : slowMs ? `slow=${slowMs}` : 'normal', counters }),
+        JSON.stringify({ ok: true, name: 'bellwether', version: VERSION, pid: process.pid, port: boundPort, lastEventAt, mode: hang ? 'hang' : slowMs ? `slow=${slowMs}` : 'normal', counters }),
       );
       res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
       res.end(body);
@@ -54,7 +55,7 @@ export async function startServer({ port, token, onEvent = () => {}, log = () =>
     });
   }).catch((e) => {
     if (e.code === 'EADDRINUSE') {
-      throw new CliError(`port ${port} on ${BIND_HOST} is already in use. Run \`pasture doctor\` to see what holds it.`, EXIT.NOT_RUNNING);
+      throw new CliError(`port ${port} on ${BIND_HOST} is already in use. Run \`bellwether doctor\` to see what holds it.`, EXIT.NOT_RUNNING);
     }
     throw e;
   });
@@ -98,7 +99,7 @@ export function describe(ev) {
 
 /**
  * Appends one line per event to a recording: the normalised event, the field names
- * of the raw payload, and which X-Pasture-* headers were non-empty. Raw values never
+ * of the raw payload, and which X-Bellwether-* headers were non-empty. Raw values never
  * reach the file.
  */
 export function createRecorder(file) {

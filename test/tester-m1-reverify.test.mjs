@@ -9,8 +9,8 @@ import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
 
 /**
  * Tester re-verification of Milestone 1 after the developer's fixes (D1-D7, M1-6..17).
- * Runs the real shim from a temp copy laid out as <root>/agents/pasture, with HOME,
- * PASTURE_DATA_DIR and the port all isolated. Nothing can reach the real settings file.
+ * Runs the real shim from a temp copy laid out as <root>/agents/bellwether, with HOME,
+ * BELLWETHER_DATA_DIR and the port all isolated. Nothing can reach the real settings file.
  */
 
 let root, agent, home, port, env, defaultSettings, caller;
@@ -23,7 +23,7 @@ const freePort = () =>
     });
   });
 
-function pasture(args, { cwd = caller, extraEnv = {}, bin = path.join(agent, 'pasture'), pathEnv } = {}) {
+function bellwether(args, { cwd = caller, extraEnv = {}, bin = path.join(agent, 'bellwether'), pathEnv } = {}) {
   const r = spawnSync('/bin/sh', [bin, ...args], { encoding: 'utf8', cwd, env: { ...env, ...(pathEnv ? { PATH: pathEnv } : {}), ...extraEnv }, timeout: 30000 });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
@@ -31,20 +31,20 @@ const read = (f) => fs.readFileSync(f, 'utf8');
 const dataFile = (n) => path.join(root, 'data', n);
 
 before(async () => {
-  root = tempDir('pasture-reverify-');
-  agent = path.join(root, 'agents', 'pasture');
+  root = tempDir('bellwether-reverify-');
+  agent = path.join(root, 'agents', 'bellwether');
   caller = path.join(root, 'caller dir');
   home = path.join(root, 'home');
   fs.mkdirSync(caller, { recursive: true });
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(agent, 'brain'), { recursive: true });
-  for (const f of ['package.json', 'pasture']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(agent, f));
+  for (const f of ['package.json', 'bellwether']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(agent, f));
   port = await freePort();
   const cfg = JSON.parse(read(path.join(AGENT_DIR, 'config.example.json')));
   cfg.port = port;
   fs.writeFileSync(path.join(agent, 'config.example.json'), JSON.stringify(cfg));
   defaultSettings = path.join(home, '.claude', 'settings.json');
-  env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, PASTURE_DATA_DIR: path.join(root, 'data'), PASTURE_HOOK_TOKEN: TOKEN };
+  env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, BELLWETHER_DATA_DIR: path.join(root, 'data'), BELLWETHER_HOOK_TOKEN: TOKEN };
 });
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -90,10 +90,10 @@ describe('D1: no argument shape reaches the default settings file', () => {
     ['hooks', '--write'],
   ];
   for (const s of shapes) {
-    test(`pasture ${JSON.stringify(s)} leaves the default file alone`, () => {
+    test(`bellwether ${JSON.stringify(s)} leaves the default file alone`, () => {
       fs.writeFileSync(defaultSettings, original);
       fs.rmSync(path.join(root, 'data'), { recursive: true, force: true });
-      const r = pasture(s);
+      const r = bellwether(s);
       assert.equal(read(defaultSettings), original, `default settings changed; exit ${r.code}; ${r.err.slice(0, 200)}`);
       assert.equal(fs.existsSync(path.join(root, 'data', 'backups')), false, 'a backup means a write was attempted');
     });
@@ -101,7 +101,7 @@ describe('D1: no argument shape reaches the default settings file', () => {
 
   test('without --write, a bare invocation is a dry run against the default file and writes nothing', () => {
     fs.writeFileSync(defaultSettings, original);
-    const r = pasture(['hooks', 'install']);
+    const r = bellwether(['hooks', 'install']);
     assert.equal(r.code, 0);
     assert.equal(read(defaultSettings), original);
     assert.match(r.err, /dry run/);
@@ -111,21 +111,21 @@ describe('D1: no argument shape reaches the default settings file', () => {
 describe('M1-7: relative paths mean what the caller typed', () => {
   test('--settings and --out resolve against the caller cwd (which has a space in it)', () => {
     const f = mk('rel.json', j({ theme: 'dark' }));
-    const r = pasture(['hooks', 'install', '--write', '--settings', 'rel.json']);
+    const r = bellwether(['hooks', 'install', '--write', '--settings', 'rel.json']);
     assert.equal(r.code, 0, r.err);
     assert.ok(JSON.parse(read(f)).hooks.Stop);
     assert.equal(fs.existsSync(path.join(agent, 'rel.json')), false);
-    const p = pasture(['hooks', 'print', '--out', 'sub/dir/hooks-only.json']);
+    const p = bellwether(['hooks', 'print', '--out', 'sub/dir/hooks-only.json']);
     assert.equal(p.code, 0, p.err);
     assert.ok(fs.existsSync(path.join(caller, 'sub', 'dir', 'hooks-only.json')));
   });
 
-  test('a stale INIT_CWD or PASTURE_CWD in the environment cannot redirect the shim', () => {
+  test('a stale INIT_CWD or BELLWETHER_CWD in the environment cannot redirect the shim', () => {
     const f = mk('rel2.json', j({ theme: 'dark' }));
     const elsewhere = path.join(root, 'elsewhere');
     fs.mkdirSync(elsewhere);
     fs.writeFileSync(path.join(elsewhere, 'rel2.json'), j({ theme: 'light' }));
-    const r = pasture(['hooks', 'install', '--write', '--settings', 'rel2.json'], { extraEnv: { INIT_CWD: elsewhere, PASTURE_CWD: elsewhere } });
+    const r = bellwether(['hooks', 'install', '--write', '--settings', 'rel2.json'], { extraEnv: { INIT_CWD: elsewhere, BELLWETHER_CWD: elsewhere } });
     assert.equal(r.code, 0, r.err);
     assert.ok(JSON.parse(read(f)).hooks, 'caller file edited');
     assert.equal(JSON.parse(read(path.join(elsewhere, 'rel2.json'))).hooks, undefined, 'the other directory was not touched');
@@ -134,8 +134,8 @@ describe('M1-7: relative paths mean what the caller typed', () => {
   test('a symlink to the shim on PATH works', () => {
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin, { recursive: true });
-    fs.symlinkSync(path.join(agent, 'pasture'), path.join(bin, 'pasture'));
-    const r = pasture(['hooks', 'print'], { bin: path.join(bin, 'pasture') });
+    fs.symlinkSync(path.join(agent, 'bellwether'), path.join(bin, 'bellwether'));
+    const r = bellwether(['hooks', 'print'], { bin: path.join(bin, 'bellwether') });
     assert.equal(r.code, 0, r.err);
     assert.ok(JSON.parse(r.out).hooks.Stop);
   });
@@ -153,7 +153,7 @@ describe('M1-13: Node version floor in the shim', () => {
         `#!/bin/sh\nif [ "$1" = "-e" ]; then V="${v.slice(1)}"; MA=\${V%%.*}; R=\${V#*.}; MI=\${R%%.*}; if [ "$MA" -gt 22 ] || { [ "$MA" -eq 22 ] && [ "$MI" -ge 9 ]; }; then exit 0; else exit 1; fi; fi\nif [ "$1" = "--version" ]; then echo ${v}; exit 0; fi\nexec "${real}" "$@"\n`,
         { mode: 0o755 },
       );
-      const r = pasture(['hooks', 'print'], { pathEnv: `${fake}:/usr/bin:/bin` });
+      const r = bellwether(['hooks', 'print'], { pathEnv: `${fake}:/usr/bin:/bin` });
       if (ok) assert.equal(r.code, 0, r.err);
       else {
         assert.equal(r.code, 3);
@@ -166,9 +166,9 @@ describe('M1-13: Node version floor in the shim', () => {
 describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
   const roundTrip = (name, text, { expectIdentical = true } = {}) => {
     const f = mk(name, text);
-    const a = pasture(['hooks', 'install', '--write', '--settings', f]);
+    const a = bellwether(['hooks', 'install', '--write', '--settings', f]);
     assert.equal(a.code, 0, `${name} install: ${a.err}`);
-    const b = pasture(['hooks', 'uninstall', '--write', '--settings', f]);
+    const b = bellwether(['hooks', 'uninstall', '--write', '--settings', f]);
     assert.equal(b.code, 0, `${name} uninstall: ${b.err}`);
     if (expectIdentical) assert.equal(read(f), text, `${name} not byte-identical`);
     return f;
@@ -190,18 +190,18 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
     roundTrip('numbers.json', text);
   });
 
-  test('numbers inside the part pasture rewrites (an existing stale pasture entry) are not corrupted', () => {
-    const stale = { type: 'http', url: `http://127.0.0.1:${port}/hook`, timeout: 600, headers: { 'X-Pasture-Token': 'old' }, extra: 'KEEPNUM' };
+  test('numbers inside the part bellwether rewrites (an existing stale bellwether entry) are not corrupted', () => {
+    const stale = { type: 'http', url: `http://127.0.0.1:${port}/hook`, timeout: 600, headers: { 'X-Bellwether-Token': 'old' }, extra: 'KEEPNUM' };
     const text = j({ big: 'BIGNUM', hooks: { Stop: [{ hooks: [stale] }] } }).replace('"BIGNUM"', '12345678901234567890').replace('"KEEPNUM"', '12345678901234567890');
     const f = mk('stale-num.json', text);
-    pasture(['hooks', 'install', '--write', '--settings', f]);
+    bellwether(['hooks', 'install', '--write', '--settings', f]);
     assert.match(read(f), /"big": 12345678901234567890/);
   });
 
   test('exotic but valid JSON: __proto__ key, integer-like keys, duplicate keys, escapes, astral chars', () => {
     const text = '{\n  "__proto__": {\n    "x": 1\n  },\n  "b": 1,\n  "2": 2,\n  "1": 3,\n  "dup": 1,\n  "dup": 2,\n  "esc": "\\u00e9\\/\\ud83d\\ude00\\u2028",\n  "lone": "\\ud800"\n}\n';
     const f = mk('exotic.json', text);
-    const a = pasture(['hooks', 'install', '--write', '--settings', f]);
+    const a = bellwether(['hooks', 'install', '--write', '--settings', f]);
     assert.equal(a.code, 0, a.err);
     const after = read(f);
     const lost = [];
@@ -214,10 +214,10 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
 
   test('install -> uninstall on a minified one-line file keeps the values and warns about layout', () => {
     const f = mk('min.json', '{"theme":"dark","n":12345678901234567890}');
-    const dry = pasture(['hooks', 'install', '--settings', f]);
-    assert.match(dry.err, /not laid out the way pasture writes JSON/);
-    pasture(['hooks', 'install', '--write', '--settings', f]);
-    pasture(['hooks', 'uninstall', '--write', '--settings', f]);
+    const dry = bellwether(['hooks', 'install', '--settings', f]);
+    assert.match(dry.err, /not laid out the way bellwether writes JSON/);
+    bellwether(['hooks', 'install', '--write', '--settings', f]);
+    bellwether(['hooks', 'uninstall', '--write', '--settings', f]);
     assert.match(read(f), /12345678901234567890/);
     assert.equal(JSON.parse(read(f)).theme, 'dark');
   });
@@ -226,7 +226,7 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
     const o = { perms: Array.from({ length: 8000 }, (_, i) => `Bash(cmd${i}:*)`), hooks: {} };
     const f = mk('big.json', j(o));
     const t = Date.now();
-    const r = pasture(['hooks', 'install', '--settings', f]);
+    const r = bellwether(['hooks', 'install', '--settings', f]);
     assert.equal(r.code, 0, r.err.slice(0, 300));
     assert.ok(Date.now() - t < 15000, `took ${Date.now() - t} ms`);
   });
@@ -238,13 +238,13 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
 
   test('a missing file: install creates it 0600; uninstall afterwards leaves valid JSON', () => {
     const f = path.join(caller, 'created', 'settings.json');
-    assert.equal(pasture(['hooks', 'install', '--write', '--settings', f]).code, 0);
+    assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
     assert.equal(fs.statSync(f).mode & 0o777, 0o600);
-    assert.equal(pasture(['hooks', 'uninstall', '--write', '--settings', f]).code, 0);
+    assert.equal(bellwether(['hooks', 'uninstall', '--write', '--settings', f]).code, 0);
     JSON.parse(read(f));
   });
 
-  describe('the record cannot make uninstall remove anything that is not pasture\'s', () => {
+  describe('the record cannot make uninstall remove anything that is not bellwether\'s', () => {
     const foreignEvents = Object.fromEntries(['SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'Notification'].map((e) => [e, [{ matcher: 'x', hooks: [{ type: 'command', command: `keep-${e}` }] }]]));
     const original = { statusLine: { type: 'command', command: 's' }, hooks: foreignEvents };
 
@@ -258,15 +258,15 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
     for (const [what, make] of tamper) {
       test(`tampered installs.json (${what}): other tools' entries survive`, () => {
         const f = mk(`tamper-${what.replace(/\W+/g, '-')}.json`, j(original));
-        assert.equal(pasture(['hooks', 'install', '--write', '--settings', f]).code, 0);
+        assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
         fs.writeFileSync(dataFile('installs.json'), JSON.stringify(make(f)));
-        const u = pasture(['hooks', 'uninstall', '--write', '--settings', f]);
+        const u = bellwether(['hooks', 'uninstall', '--write', '--settings', f]);
         assert.equal(u.code, 0, u.err);
         const after = JSON.parse(read(f));
         // a tampered record may leave empty event arrays behind, but must never remove a foreign entry
         for (const [e, groups] of Object.entries(original.hooks)) assert.deepEqual(after.hooks?.[e], groups, e);
         assert.deepEqual(after.statusLine, original.statusLine);
-        assert.equal(JSON.stringify(after).includes('127.0.0.1'), false, 'pasture entries remain');
+        assert.equal(JSON.stringify(after).includes('127.0.0.1'), false, 'bellwether entries remain');
       });
     }
 
@@ -275,10 +275,10 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
         fs.mkdirSync(path.join(root, 'data'), { recursive: true });
         fs.writeFileSync(dataFile('installs.json'), content);
         const f = mk(`corrupt-${what.replace(/\W+/g, '-')}.json`, j(original));
-        const a = pasture(['hooks', 'install', '--write', '--settings', f]);
+        const a = bellwether(['hooks', 'install', '--write', '--settings', f]);
         assert.equal(a.code, 0, `install exit ${a.code}: ${a.err.slice(0, 200)}`);
         assert.doesNotMatch(a.err, /at .*\.mjs:\d+/);
-        const u = pasture(['hooks', 'uninstall', '--write', '--settings', f]);
+        const u = bellwether(['hooks', 'uninstall', '--write', '--settings', f]);
         assert.equal(u.code, 0, `uninstall exit ${u.code}: ${u.err.slice(0, 200)}`);
         assert.deepEqual(JSON.parse(read(f)), original);
       });
@@ -290,7 +290,7 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
       fs.mkdirSync(ro);
       fs.chmodSync(ro, 0o500);
       try {
-        const r = pasture(['hooks', 'install', '--write', '--settings', f], { extraEnv: { PASTURE_DATA_DIR: ro } });
+        const r = bellwether(['hooks', 'install', '--write', '--settings', f], { extraEnv: { BELLWETHER_DATA_DIR: ro } });
         // either it refuses before touching the settings file, or it succeeds; it must not write settings and then crash
         const changed = read(f) !== j(original);
         assert.ok(!(changed && r.code !== 0), `settings were changed but the command failed (exit ${r.code}): ${r.err.slice(0, 200)}`);
@@ -299,13 +299,13 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
       }
     });
 
-    test('a stale record for a replaced file: uninstall still only removes pasture entries', () => {
+    test('a stale record for a replaced file: uninstall still only removes bellwether entries', () => {
       const f = mk('stale-rec.json', j({ hooks: {} }));
-      pasture(['hooks', 'install', '--write', '--settings', f]);
+      bellwether(['hooks', 'install', '--write', '--settings', f]);
       fs.writeFileSync(f, j(original)); // the user replaced the file by hand; the record says hooks/all events were created
       const stale = JSON.parse(read(dataFile('installs.json')));
       assert.ok(Object.keys(stale).length > 0);
-      const u = pasture(['hooks', 'uninstall', '--write', '--settings', f]);
+      const u = bellwether(['hooks', 'uninstall', '--write', '--settings', f]);
       assert.equal(u.code, 0, u.err);
       assert.deepEqual(JSON.parse(read(f)), original);
     });
@@ -313,10 +313,10 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
     test('install/uninstall of file A does not disturb the record or the content of file B', () => {
       const a = mk('A.json', j(original));
       const b = mk('B.json', j({ hooks: { Stop: [] } }));
-      pasture(['hooks', 'install', '--write', '--settings', a]);
-      pasture(['hooks', 'install', '--write', '--settings', b]);
-      pasture(['hooks', 'uninstall', '--write', '--settings', a]);
-      pasture(['hooks', 'uninstall', '--write', '--settings', b]);
+      bellwether(['hooks', 'install', '--write', '--settings', a]);
+      bellwether(['hooks', 'install', '--write', '--settings', b]);
+      bellwether(['hooks', 'uninstall', '--write', '--settings', a]);
+      bellwether(['hooks', 'uninstall', '--write', '--settings', b]);
       assert.deepEqual(JSON.parse(read(a)), original);
       assert.deepEqual(JSON.parse(read(b)), { hooks: { Stop: [] } });
     });
@@ -325,37 +325,37 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
   test('files holding the token are 0600: backups, installs.json, print --out; an existing settings mode is kept', () => {
     const f = mk('modes.json', j({ theme: 'dark' }));
     fs.chmodSync(f, 0o640);
-    const r = pasture(['hooks', 'install', '--write', '--settings', f]);
+    const r = bellwether(['hooks', 'install', '--write', '--settings', f]);
     assert.equal(fs.statSync(f).mode & 0o777, 0o640);
     const backup = r.err.match(/backup of the previous file: (.+)/)[1].trim();
     assert.equal(fs.statSync(backup).mode & 0o777, 0o600);
     assert.equal(fs.statSync(dataFile('installs.json')).mode & 0o777, 0o600);
-    pasture(['hooks', 'print', '--out', 'modes-print.json']);
+    bellwether(['hooks', 'print', '--out', 'modes-print.json']);
     assert.equal(fs.statSync(path.join(caller, 'modes-print.json')).mode & 0o777, 0o600);
   });
 });
 
 describe('new write paths: hooks print --out and record --out', () => {
-  test('hooks print --out refuses to overwrite the user settings file (or any existing non-pasture file)', () => {
+  test('hooks print --out refuses to overwrite the user settings file (or any existing non-bellwether file)', () => {
     const precious = j({ theme: 'dark', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'precious' }] }] } });
     fs.writeFileSync(defaultSettings, precious);
-    const r = pasture(['hooks', 'print', '--out', defaultSettings]);
+    const r = bellwether(['hooks', 'print', '--out', defaultSettings]);
     assert.equal(read(defaultSettings), precious, `hooks print --out replaced settings.json; exit ${r.code}`);
     const other = mk('notes.txt', 'important notes');
-    pasture(['hooks', 'print', '--out', other]);
+    bellwether(['hooks', 'print', '--out', other]);
     assert.equal(read(other), 'important notes', 'hooks print --out overwrote an arbitrary existing file');
   });
 
   test('hooks print --out to a directory gives a message, not a stack', () => {
-    const r = pasture(['hooks', 'print', '--out', caller]);
+    const r = bellwether(['hooks', 'print', '--out', caller]);
     assert.notEqual(r.code, 0);
     assert.doesNotMatch(r.err, /at .*\.mjs:\d+/);
   });
 
-  test('record --out refuses a file that is not a pasture recording', () => {
+  test('record --out refuses a file that is not a bellwether recording', () => {
     const precious = j({ theme: 'dark' });
     fs.writeFileSync(defaultSettings, precious);
-    const child = spawn('/bin/sh', [path.join(agent, 'pasture'), 'record', '--out', defaultSettings], { cwd: caller, env });
+    const child = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'record', '--out', defaultSettings], { cwd: caller, env });
     return new Promise((resolve) => {
       let err = '';
       child.stderr.on('data', (d) => (err += d));
@@ -364,7 +364,7 @@ describe('new write paths: hooks print --out and record --out', () => {
         resolve();
       });
       setTimeout(async () => {
-        await fetch(`http://127.0.0.1:${port}/hook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Pasture-Token': TOKEN }, body: '{"hook_event_name":"Stop","session_id":"s"}' }).catch(() => {});
+        await fetch(`http://127.0.0.1:${port}/hook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bellwether-Token': TOKEN }, body: '{"hook_event_name":"Stop","session_id":"s"}' }).catch(() => {});
         setTimeout(() => child.kill('SIGTERM'), 300);
       }, 1000);
     });
@@ -372,30 +372,30 @@ describe('new write paths: hooks print --out and record --out', () => {
 });
 
 describe('M1-14/15: doctor', () => {
-  const doctor = (extra = {}, args = []) => pasture(['doctor', '--json', '--settings', mk(`d-${Math.random().toString(36).slice(2)}.json`, '{}\n'), ...args], { extraEnv: extra });
+  const doctor = (extra = {}, args = []) => bellwether(['doctor', '--json', '--settings', mk(`d-${Math.random().toString(36).slice(2)}.json`, '{}\n'), ...args], { extraEnv: extra });
   const check = (r, n) => JSON.parse(r.out).checks.find((c) => c.name === n);
 
   test('the old example token is refused by doctor, serve, hooks print and hooks install', () => {
-    const ex = { PASTURE_HOOK_TOKEN: 'q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh' };
+    const ex = { BELLWETHER_HOOK_TOKEN: 'q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh' };
     for (const a of [['doctor'], ['serve'], ['hooks', 'print'], ['hooks', 'install']]) {
-      const r = pasture(a, { extraEnv: ex });
+      const r = bellwether(a, { extraEnv: ex });
       assert.equal(r.code, 3, a.join(' '));
       assert.match(r.out + r.err, /example/);
     }
   });
 
   test('an already-exported token wins over the .env (Node does not override)', () => {
-    fs.writeFileSync(path.join(root, '.env'), 'PASTURE_HOOK_TOKEN=q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh\n');
+    fs.writeFileSync(path.join(root, '.env'), 'BELLWETHER_HOOK_TOKEN=q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh\n');
     try {
-      const r = pasture(['hooks', 'print']);
+      const r = bellwether(['hooks', 'print']);
       assert.equal(r.code, 0, r.err);
       assert.ok(!r.out.includes(TOKEN), 'stdout must be masked (M10-7)');
-      assert.match(r.out, new RegExp(`"X-Pasture-Token": "${TOKEN.slice(0, 4)}…"`));
+      assert.match(r.out, new RegExp(`"X-Bellwether-Token": "${TOKEN.slice(0, 4)}…"`));
       const outFile = path.join(caller, 'exported-wins.json');
-      assert.equal(pasture(['hooks', 'print', '--out', outFile]).code, 0);
+      assert.equal(bellwether(['hooks', 'print', '--out', outFile]).code, 0);
       assert.ok(read(outFile).includes(TOKEN), 'the exported token (not the .env one) is what the --out file holds');
       assert.ok(!read(outFile).includes('q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh'));
-      const n = pasture(['hooks', 'print'], { extraEnv: { PASTURE_HOOK_TOKEN: '' } });
+      const n = bellwether(['hooks', 'print'], { extraEnv: { BELLWETHER_HOOK_TOKEN: '' } });
       assert.equal(n.code, 3, 'an empty exported token must not silently fall through to .env');
     } finally {
       fs.rmSync(path.join(root, '.env'));
@@ -403,7 +403,7 @@ describe('M1-14/15: doctor', () => {
   });
 
   function brainProc(args) {
-    const c = spawn('/bin/sh', [path.join(agent, 'pasture'), 'serve', ...args], { cwd: caller, env });
+    const c = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'serve', ...args], { cwd: caller, env });
     return new Promise((resolve) => {
       let err = '';
       c.stderr.on('data', (d) => {
@@ -414,7 +414,7 @@ describe('M1-14/15: doctor', () => {
   }
   const doctorAsync = (args) =>
     new Promise((resolve) => {
-      const c = spawn('/bin/sh', [path.join(agent, 'pasture'), ...args], { cwd: caller, env });
+      const c = spawn('/bin/sh', [path.join(agent, 'bellwether'), ...args], { cwd: caller, env });
       let out = '';
       c.stdout.on('data', (d) => (out += d));
       c.on('close', (code) => resolve({ code, out }));
@@ -448,11 +448,11 @@ describe('M1-14/15: doctor', () => {
 describe('M1-16: event names', () => {
   test('a non-identifier hook_event_name is recorded and logged as unknown', async () => {
     const rec = path.join(caller, 'ev.jsonl');
-    const c = spawn('/bin/sh', [path.join(agent, 'pasture'), 'record', '--out', rec], { cwd: caller, env });
+    const c = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'record', '--out', rec], { cwd: caller, env });
     let err = '';
     await new Promise((r) => { c.stderr.on('data', (d) => { err += d; if (err.includes('recording to')) r(); }); });
     const body = JSON.stringify({ hook_event_name: 'Pre\nSECRET_EVENT text', session_id: 's' });
-    await fetch(`http://127.0.0.1:${port}/hook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Pasture-Token': TOKEN }, body });
+    await fetch(`http://127.0.0.1:${port}/hook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bellwether-Token': TOKEN }, body });
     await new Promise((r) => setTimeout(r, 300));
     c.kill('SIGTERM');
     await new Promise((r) => c.once('exit', r));

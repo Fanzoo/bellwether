@@ -8,7 +8,7 @@ export const AGENT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url
 export const FIXTURES = path.join(AGENT_DIR, 'test', 'fixtures');
 export const TOKEN = 'testTokenNotReal_abcdefghijklmnop';
 
-export function tempDir(prefix = 'pasture-test-') {
+export function tempDir(prefix = 'bellwether-test-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
@@ -33,5 +33,5 @@ export function request(port, { method = 'POST', path: p = '/hook', headers = {}
 }
 
 export function hookHeaders(port, extra = {}) {
-  return { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-Pasture-Token': TOKEN, ...extra };
+  return { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-Bellwether-Token': TOKEN, ...extra };
 }

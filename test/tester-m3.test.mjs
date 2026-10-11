@@ -221,8 +221,8 @@ describe('autostart (temp HOME only; launchctl is never run)', () => {
   };
   test('preview writes nothing; --write writes a valid plist with no token, and never calls launchctl for a temp HOME', () => {
     const home = mk();
-    const file = path.join(home, 'Library', 'LaunchAgents', 'local.pasture.brain.plist');
-    process.env.PASTURE_HOOK_TOKEN = 'plistTokenCanary_0123456789abcdef';
+    const file = path.join(home, 'Library', 'LaunchAgents', 'local.bellwether.brain.plist');
+    process.env.BELLWETHER_HOOK_TOKEN = 'plistTokenCanary_0123456789abcdef';
     try {
       const prev = autostart('install', { home, run: never, uid: 501 });
       assert.equal(prev.wrote, false);
@@ -231,7 +231,7 @@ describe('autostart (temp HOME only; launchctl is never run)', () => {
       const w = autostart('install', { home, write: true, run: never, uid: 501 });
       assert.equal(w.wrote, true);
       const text = fs.readFileSync(file, 'utf8');
-      assert.doesNotMatch(text, /plistTokenCanary|PASTURE_HOOK_TOKEN/);
+      assert.doesNotMatch(text, /plistTokenCanary|BELLWETHER_HOOK_TOKEN/);
       assert.match(w.lines.join('\n'), /launchctl not called/);
       const lint = spawnSync('plutil', ['-lint', file], { encoding: 'utf8' });
       assert.equal(lint.status, 0, lint.stdout + lint.stderr);
@@ -242,7 +242,7 @@ describe('autostart (temp HOME only; launchctl is never run)', () => {
       assert.equal(fs.existsSync(file), false);
       assert.match(un.lines.join('\n'), /launchctl not called/);
     } finally {
-      delete process.env.PASTURE_HOOK_TOKEN;
+      delete process.env.BELLWETHER_HOOK_TOKEN;
     }
   });
   test('paths with XML metacharacters and spaces are escaped and the plist stays valid', () => {
@@ -265,7 +265,7 @@ describe('autostart (temp HOME only; launchctl is never run)', () => {
   });
   test('the CLI under a temp HOME: install preview, --write, status and a refused unknown flag', () => {
     const home = mk();
-    const env = { PATH: process.env.PATH, HOME: home, PASTURE_DATA_DIR: path.join(home, 'data'), PASTURE_HOOK_TOKEN: 'cliTokenCanary_0123456789abcdef' };
+    const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: 'cliTokenCanary_0123456789abcdef' };
     // On a fresh clone the strip isn't built: install refuses (exit 2) and says how to
     // go on; the rest then runs with --brain-only, which needs no build.
     const built = fs.existsSync(shellBinary());
@@ -274,7 +274,7 @@ describe('autostart (temp HOME only; launchctl is never run)', () => {
       const refused = cli('install', '--write');
       assert.equal(refused.status, 2, refused.stderr);
       assert.match(refused.stderr, /isn't built yet[\s\S]*--brain-only/);
-      assert.ok(!fs.existsSync(path.join(home, 'Library', 'LaunchAgents', 'local.pasture.brain.plist')), 'nothing written when refused');
+      assert.ok(!fs.existsSync(path.join(home, 'Library', 'LaunchAgents', 'local.bellwether.brain.plist')), 'nothing written when refused');
     }
     const run = (...a) => cli(...a, ...(built || a[0] !== 'install' && a[0] !== 'uninstall' ? [] : ['--brain-only']));
     const p = run('install');
@@ -283,7 +283,7 @@ describe('autostart (temp HOME only; launchctl is never run)', () => {
     const w = run('install', '--write');
     assert.equal(w.status, 0, w.stderr);
     assert.match(w.stdout, /launchctl not called/);
-    assert.ok(fs.existsSync(path.join(home, 'Library', 'LaunchAgents', 'local.pasture.brain.plist')));
+    assert.ok(fs.existsSync(path.join(home, 'Library', 'LaunchAgents', 'local.bellwether.brain.plist')));
     assert.equal(run('install', '--writ').status, 3);
     assert.equal(run('bogus').status, 3);
     assert.equal(run('status', '--write').status, 3);

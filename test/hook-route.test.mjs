@@ -61,9 +61,9 @@ describe('/hook', () => {
     ['a null Origin', { Origin: 'null' }, 'origin'],
     ['Host: evil.example', { Host: 'evil.example' }, 'host'],
     ['Host on another port', { Host: '127.0.0.1:1' }, 'host'],
-    ['no token', { 'X-Pasture-Token': undefined }, 'token'],
-    ['a wrong token', { 'X-Pasture-Token': 'wrong' }, 'token'],
-    ['a token that is a prefix of the real one', { 'X-Pasture-Token': TOKEN.slice(0, -1) }, 'token'],
+    ['no token', { 'X-Bellwether-Token': undefined }, 'token'],
+    ['a wrong token', { 'X-Bellwether-Token': 'wrong' }, 'token'],
+    ['a token that is a prefix of the real one', { 'X-Bellwether-Token': TOKEN.slice(0, -1) }, 'token'],
     ['text/plain', { 'Content-Type': 'text/plain' }, 'contentType'],
     ['no Content-Type', { 'Content-Type': undefined }, 'contentType'],
   ];

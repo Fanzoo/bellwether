@@ -36,7 +36,7 @@ pub fn wanted_names(config: &Value) -> Vec<String> {
 }
 
 /// Why each `privacy.sharingProcesses` entry for this OS can never match (empty if all
-/// can). The same rules as brain/privacy.mjs, which `pasture doctor` uses.
+/// can). The same rules as brain/privacy.mjs, which `bellwether doctor` uses.
 pub fn sharing_warnings(config: &Value) -> Vec<String> {
     let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(windows) { "win32" } else { "linux" };
     let Some(list) = config.pointer(&format!("/privacy/sharingProcesses/{os}")) else { return Vec::new() };
@@ -57,7 +57,7 @@ pub fn sharing_warnings(config: &Value) -> Vec<String> {
         .collect()
 }
 
-/// The file's modification time, to notice `pasture show` / `pasture hide`.
+/// The file's modification time, to notice `bellwether show` / `bellwether hide`.
 pub fn kept_stamp(data_dir: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(kept_path(data_dir)).and_then(|m| m.modified()).ok()
 }
@@ -90,7 +90,7 @@ impl Debounce {
 }
 
 /// What the tray switches keep between runs (data/shell-state.json). Mute is the
-/// brain's (data/state.json), so `pasture mute` and the tray agree.
+/// brain's (data/state.json), so `bellwether mute` and the tray agree.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Kept {
     pub hidden: bool,
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn kept_switches_round_trip_and_default_when_missing_or_bad() {
-        let dir = std::env::temp_dir().join(format!("pasture-kept-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("bellwether-kept-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(load_kept(&dir), Kept::default());
         save_kept(&dir, Kept { hidden: true, show_labels: true }).unwrap();
@@ -243,6 +243,6 @@ mod tests {
         assert_eq!(cached.read(t).len(), cached.read(t + Duration::from_millis(500)).len(), "the cache gives the same list");
         let me = std::env::current_exe().unwrap();
         let mine: String = me.file_name().unwrap().to_string_lossy().chars().take(31).collect();
-        assert!(names.iter().any(|n| *n == mine), "{mine} not in the list: {:?}", names.iter().filter(|n| n.starts_with("pasture")).collect::<Vec<_>>());
+        assert!(names.iter().any(|n| *n == mine), "{mine} not in the list: {:?}", names.iter().filter(|n| n.starts_with("bellwether")).collect::<Vec<_>>());
     }
 }

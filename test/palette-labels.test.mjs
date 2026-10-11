@@ -36,7 +36,7 @@ describe('the sheep palette', () => {
     assert.equal(mine[PALETTE_UPGRADED], undefined);
   });
   test('doctor says so (INFO), without touching config.json', async () => {
-    const r = await runDoctor({ env: { PASTURE_HOOK_TOKEN: TOKEN }, settingsFile: path.join(tempDir(), 'none.json'), configLoader: () => ({ config: withDefaults({ port: 1, pets: { palette: [...OLD_DEFAULT_PALETTE] } }), usingExample: false }), dataDir: tempDir(), home: tempDir(), probeTimeoutMs: 100 });
+    const r = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: path.join(tempDir(), 'none.json'), configLoader: () => ({ config: withDefaults({ port: 1, pets: { palette: [...OLD_DEFAULT_PALETTE] } }), usingExample: false }), dataDir: tempDir(), home: tempDir(), probeTimeoutMs: 100 });
     const p = r.checks.find((c) => c.name === 'palette');
     assert.equal(p?.status, 'INFO');
     assert.match(p.detail, /new default palette is used\. Your config\.json is unchanged/);

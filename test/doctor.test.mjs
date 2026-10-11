@@ -24,7 +24,7 @@ describe('checkSettings', () => {
     const c = byName(checkSettings({ hooks: {} }, { port: PORT, token: TOKEN }), 'hooks installed');
     assert.equal(c.status, 'FAIL');
     assert.equal(c.exitCode, EXIT.NOT_RUNNING);
-    assert.match(c.detail, /pasture hooks install/);
+    assert.match(c.detail, /bellwether hooks install/);
   });
 
   test('a partial install names the missing events', () => {
@@ -49,7 +49,7 @@ describe('checkSettings', () => {
   test('a token that differs from .env fails', () => {
     const c = byName(checkSettings(hookBlock(PORT, 'someOtherTokenValue1'), { port: PORT, token: TOKEN }), 'hook token');
     assert.equal(c.status, 'FAIL');
-    assert.match(c.detail, /differs from PASTURE_HOOK_TOKEN/);
+    assert.match(c.detail, /differs from BELLWETHER_HOOK_TOKEN/);
   });
 
   test('disableAllHooks: true fails', () => {
@@ -57,7 +57,7 @@ describe('checkSettings', () => {
     assert.equal(c.status, 'FAIL');
   });
 
-  test('allowedHttpHookUrls without pasture fails; with a matching pattern passes', () => {
+  test('allowedHttpHookUrls without bellwether fails; with a matching pattern passes', () => {
     const without = byName(checkSettings({ ...hookBlock(PORT, TOKEN), allowedHttpHookUrls: ['https://example.com/*'] }, { port: PORT, token: TOKEN }), 'allowedHttpHookUrls');
     assert.equal(without.status, 'FAIL');
     const withIt = byName(checkSettings({ ...hookBlock(PORT, TOKEN), allowedHttpHookUrls: ['http://127.0.0.1:*'] }, { port: PORT, token: TOKEN }), 'allowedHttpHookUrls');
@@ -107,9 +107,9 @@ describe('runDoctor', () => {
     fs.writeFileSync(file, JSON.stringify(obj));
     return file;
   };
-  const env = { PASTURE_HOOK_TOKEN: TOKEN };
+  const env = { BELLWETHER_HOOK_TOKEN: TOKEN };
 
-  test('brain down: exit 2 with "brain not running — run `pasture serve`"', async () => {
+  test('brain down: exit 2 with "brain not running — run `bellwether serve`"', async () => {
     // Bind and release a port so nothing is listening on it.
     const probe = http.createServer();
     await new Promise((r) => probe.listen(0, '127.0.0.1', r));
@@ -118,7 +118,7 @@ describe('runDoctor', () => {
     const r = await runDoctor({ env, settingsFile: settingsWith(hookBlock(port, TOKEN)), configLoader: () => ({ config: { port }, usingExample: false }) });
     const brain = byName(r.checks, 'brain');
     assert.equal(brain.status, 'FAIL');
-    assert.match(brain.detail, /^brain not running — run `pasture serve`/);
+    assert.match(brain.detail, /^brain not running — run `bellwether serve`/);
     assert.equal(r.exitCode, EXIT.NOT_RUNNING);
     assert.match(byName(r.checks, 'hook errors').detail, /visible .*hook error/);
   });
@@ -161,7 +161,7 @@ describe('runDoctor', () => {
   });
 
   test('a published example token is refused, exit 3', async () => {
-    const r = await runDoctor({ env: { PASTURE_HOOK_TOKEN: 'q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh' }, settingsFile: settingsWith({}), configLoader: () => ({ config: { port: 1 }, usingExample: false }) });
+    const r = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: 'q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh' }, settingsFile: settingsWith({}), configLoader: () => ({ config: { port: 1 }, usingExample: false }) });
     const t = byName(r.checks, 'token');
     assert.equal(t.status, 'FAIL');
     assert.match(t.detail, /published example/);
@@ -186,7 +186,7 @@ describe('runDoctor', () => {
     const r = await runDoctor({ env: {}, settingsFile: settingsWith({}), configLoader: () => ({ config: { port: 1 }, usingExample: false }) });
     const t = byName(r.checks, 'token');
     assert.equal(t.status, 'FAIL');
-    assert.match(t.detail, /pasture token init/);
+    assert.match(t.detail, /bellwether token init/);
     assert.equal(r.exitCode, EXIT.BAD_CONFIG);
   });
 
@@ -223,7 +223,7 @@ describe('other settings levels (project, local, managed)', async () => {
     assert.equal(c.status, 'FAIL');
     assert.match(c.detail, /disableAllHooks/);
   });
-  test('local allowedHttpHookUrls without pasture: FAIL on the merged list; with it: no FAIL', () => {
+  test('local allowedHttpHookUrls without bellwether: FAIL on the merged list; with it: no FAIL', () => {
     assert.equal(by(checkOtherLevels({ projectDir: project({ 'settings.local.json': { allowedHttpHookUrls: ['https://ci.example/*'] } }), port: PORT }), 'allowedHttpHookUrls (merged)').status, 'FAIL');
     const ok = checkOtherLevels({ projectDir: project({ 'settings.local.json': { allowedHttpHookUrls: ['https://ci.example/*'] }, 'settings.json': { allowedHttpHookUrls: ['http://127.0.0.1:*/hook'] } }), port: PORT });
     assert.equal(by(ok, 'allowedHttpHookUrls (merged)'), undefined);
@@ -249,15 +249,15 @@ describe('doctor --e2e (fake claude)', () => {
     fs.writeFileSync(file, JSON.stringify(obj));
     return file;
   };
-  const env = { PASTURE_HOOK_TOKEN: TOKEN };
+  const env = { BELLWETHER_HOOK_TOKEN: TOKEN };
   const postHook = (port, body) =>
     new Promise((res) => {
       const data = JSON.stringify(body);
-      const q = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/hook', headers: { 'Content-Type': 'application/json', 'X-Pasture-Token': TOKEN, 'Content-Length': Buffer.byteLength(data) } }, (r) => (r.resume(), r.on('end', res)));
+      const q = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/hook', headers: { 'Content-Type': 'application/json', 'X-Bellwether-Token': TOKEN, 'Content-Length': Buffer.byteLength(data) } }, (r) => (r.resume(), r.on('end', res)));
       q.end(data);
     });
 
-  test('PASS when the run delivers its events; the hooks file it used holds pasture\'s block', async () => {
+  test('PASS when the run delivers its events; the hooks file it used holds bellwether\'s block', async () => {
     const brain = await startServer({ port: 0, token: TOKEN });
     try {
       let sawHooks = null;
@@ -297,22 +297,22 @@ describe('doctor --e2e (fake claude)', () => {
   });
 });
 
-describe('doctor wording for entries that are not quite pasture\'s', () => {
-  test('a pasture-style URL on another port: "pasture-like" only with X-Pasture-Token, else another tool\'s hook', () => {
-    const withToken = { type: 'http', url: 'http://127.0.0.1:47500/hook', headers: { 'X-Pasture-Token': 'x' } };
+describe('doctor wording for entries that are not quite bellwether\'s', () => {
+  test('a bellwether-style URL on another port: "bellwether-like" only with X-Bellwether-Token, else another tool\'s hook', () => {
+    const withToken = { type: 'http', url: 'http://127.0.0.1:47500/hook', headers: { 'X-Bellwether-Token': 'x' } };
     const without = { type: 'http', url: 'http://127.0.0.1:47501/hook' };
     const checks = checkSettings({ hooks: { Stop: [{ hooks: [withToken, without] }] } }, { port: PORT, token: TOKEN });
-    assert.match(byName(checks, 'hooks stray').detail, /pasture-like .*47500/);
+    assert.match(byName(checks, 'hooks stray').detail, /bellwether-like .*47500/);
     assert.doesNotMatch(byName(checks, 'hooks stray').detail, /47501/);
     assert.match(byName(checks, 'hooks foreign').detail, /another tool's hook .*47501/);
   });
 
-  test('pasture\'s exact URL without the token header is flagged as probably another tool\'s', () => {
+  test('bellwether\'s exact URL without the token header is flagged as probably another tool\'s', () => {
     const block = hookBlock(PORT, TOKEN);
-    delete block.hooks.Stop[0].hooks[0].headers['X-Pasture-Token'];
+    delete block.hooks.Stop[0].hooks[0].headers['X-Bellwether-Token'];
     const c = checkSettings(block, { port: PORT, token: TOKEN }).find((x) => x.name === 'hooks foreign');
     assert.equal(c.status, 'WARN');
-    assert.match(c.detail, /another tool's hook on pasture's port/);
+    assert.match(c.detail, /another tool's hook on bellwether's port/);
   });
 
   test('--e2e says why claude -p failed, redacted', async () => {
@@ -321,7 +321,7 @@ describe('doctor wording for entries that are not quite pasture\'s', () => {
       const file = path.join(tempDir(), 'settings.json');
       fs.writeFileSync(file, JSON.stringify(hookBlock(brain.port, TOKEN)));
       const r = await runDoctor({
-        env: { PASTURE_HOOK_TOKEN: TOKEN },
+        env: { BELLWETHER_HOOK_TOKEN: TOKEN },
         e2e: true,
         settingsFile: file,
         configLoader: () => ({ config: { port: brain.port }, usingExample: false }),

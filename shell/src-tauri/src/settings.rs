@@ -1,4 +1,4 @@
-//! Where pasture lives, its config, and the token. Read-only: the shell never writes
+//! Where bellwether lives, its config, and the token. Read-only: the shell never writes
 //! config.json or the .env.
 
 use serde_json::Value;
@@ -15,18 +15,18 @@ pub struct Settings {
 
 impl Settings {
     pub fn load() -> Result<Settings, String> {
-        // PASTURE_AGENT_DIR wins; otherwise the agent directory this binary was built
+        // BELLWETHER_AGENT_DIR wins; otherwise the agent directory this binary was built
         // from: the shell runs from a checkout, next to its brain and config.
-        let agent_dir = std::env::var_os("PASTURE_AGENT_DIR")
+        let agent_dir = env_os("AGENT_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(".."));
         let agent_dir = agent_dir.canonicalize().map_err(|e| format!("agent directory {}: {e}", agent_dir.display()))?;
-        let data_dir = std::env::var_os("PASTURE_DATA_DIR").map(PathBuf::from).unwrap_or_else(|| agent_dir.join("data"));
+        let data_dir = env_os("DATA_DIR").map(PathBuf::from).unwrap_or_else(|| agent_dir.join("data"));
 
-        // PASTURE_CONFIG (a test aid, read-only like the rest): another config file,
+        // BELLWETHER_CONFIG (a test aid, read-only like the rest): another config file,
         // e.g. one with a dummy name in privacy.sharingProcesses (Milestone 7 (b)).
         let real = agent_dir.join("config.json");
-        let file = match std::env::var_os("PASTURE_CONFIG") {
+        let file = match env_os("CONFIG") {
             Some(p) => PathBuf::from(p),
             None if real.exists() => real,
             None => agent_dir.join("config.example.json"),
@@ -36,11 +36,11 @@ impl Settings {
         let port = config.get("port").and_then(Value::as_u64).filter(|p| (1024..=65535).contains(p)).ok_or("config: port must be 1024–65535")? as u16;
         let node_path = config.pointer("/brain/nodePath").and_then(Value::as_str).unwrap_or("node").to_string();
 
-        // The token: the environment first (PASTURE_HOOK_TOKEN), then the .env (env_file).
-        let token = std::env::var("PASTURE_HOOK_TOKEN")
-            .ok()
-            .filter(|t| !t.is_empty())
-            .or_else(|| token_from_env_file(&env_file(&agent_dir)));
+        // The token, in the CLI's order (brain/envload.mjs): an exported
+        // BELLWETHER_HOOK_TOKEN, then one in the .env (env_file), then the old name,
+        // exported, then in the .env.
+        let text = std::fs::read_to_string(env_file(&agent_dir)).unwrap_or_default();
+        let token = token_in_order(|k| std::env::var(k).ok(), &text);
 
         Ok(Settings { agent_dir, data_dir, port, node_path, token, config })
     }
@@ -50,13 +50,17 @@ impl Settings {
     }
 }
 
-/// Reads exactly one key from a dotenv file; every other line is ignored and never
-/// kept or logged. Empty means unset.
-/// Which .env holds the token: the same rule as the CLI (brain/envpath.mjs). PASTURE_ENV
+/// `BELLWETHER_<name>` from the environment, or else the name it had before the
+/// rename, `PASTURE_<name>` (read for one release; brain/envpath.mjs does the same).
+pub fn env_os(name: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(format!("BELLWETHER_{name}")).or_else(|| std::env::var_os(format!("PASTURE_{name}")))
+}
+
+/// Which .env holds the token: the same rule as the CLI (brain/envpath.mjs). BELLWETHER_ENV
 /// if set; else the repository's own `.env`; else, when the repository sits at
 /// `agents/<name>` inside a hub and has no `.env` of its own, the hub's.
 pub fn env_file(agent_dir: &Path) -> PathBuf {
-    if let Some(p) = std::env::var_os("PASTURE_ENV").filter(|p| !p.is_empty()) {
+    if let Some(p) = env_os("ENV").filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
     let own = agent_dir.join(".env");
@@ -72,9 +76,20 @@ pub fn env_file(agent_dir: &Path) -> PathBuf {
     own
 }
 
+/// The hook token: an exported BELLWETHER_HOOK_TOKEN, then the .env's, then the old
+/// name exported, then the old name in the .env. Only those keys are read from the
+/// file; every other line is ignored and never kept or logged. Empty means unset.
+fn token_in_order(var: impl Fn(&str) -> Option<String>, env_text: &str) -> Option<String> {
+    let set = |v: Option<String>| v.filter(|v| !v.is_empty());
+    set(var("BELLWETHER_HOOK_TOKEN"))
+        .or_else(|| set(parse_env_value(env_text, "BELLWETHER_HOOK_TOKEN")))
+        .or_else(|| set(var("PASTURE_HOOK_TOKEN")))
+        .or_else(|| set(parse_env_value(env_text, "PASTURE_HOOK_TOKEN")))
+}
+
+#[cfg(test)]
 fn token_from_env_file(path: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(path).ok()?;
-    parse_env_value(&text, "PASTURE_HOOK_TOKEN").filter(|v| !v.is_empty())
+    token_in_order(|_| None, &std::fs::read_to_string(path).ok()?)
 }
 
 /// Reads one key the way Node's `--env-file` does (Node 22.14, which the brain runs
@@ -134,7 +149,7 @@ mod tests {
         for v in vectors {
             let text = v["text"].as_str().unwrap();
             let expected = v["expected"].as_str().map(str::to_string);
-            let got = parse_env_value(text, "PASTURE_HOOK_TOKEN");
+            let got = parse_env_value(text, "BELLWETHER_HOOK_TOKEN");
             if got != expected {
                 failures.push(format!("{}: expected {:?}, got {:?}", v["name"], expected, got));
             }
@@ -144,28 +159,40 @@ mod tests {
 
     #[test]
     fn empty_means_unset_and_other_lines_are_ignored() {
-        let dir = std::env::temp_dir().join(format!("pasture-env-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("bellwether-env-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join(".env");
-        std::fs::write(&f, "OTHER=secret\n# comment\nexport PASTURE_HOOK_TOKEN=\"abc_DEF-123\" # mine\n").unwrap();
+        std::fs::write(&f, "OTHER=secret\n# comment\nexport BELLWETHER_HOOK_TOKEN=\"abc_DEF-123\" # mine\n").unwrap();
         assert_eq!(token_from_env_file(&f).as_deref(), Some("abc_DEF-123"));
-        std::fs::write(&f, "PASTURE_HOOK_TOKEN=\n").unwrap();
+        std::fs::write(&f, "BELLWETHER_HOOK_TOKEN=\n").unwrap();
         assert_eq!(token_from_env_file(&f), None);
+        // the name before the rename is still read, and the new one wins over it
+        std::fs::write(&f, "PASTURE_HOOK_TOKEN=old_TOKEN-123\n").unwrap();
+        assert_eq!(token_from_env_file(&f).as_deref(), Some("old_TOKEN-123"));
+        std::fs::write(&f, "PASTURE_HOOK_TOKEN=old_TOKEN-123\nBELLWETHER_HOOK_TOKEN=new_TOKEN-456\n").unwrap();
+        assert_eq!(token_from_env_file(&f).as_deref(), Some("new_TOKEN-456"));
+        // the order with the environment: exported new, file new, exported old, file old
+        let file_new_and_old = "PASTURE_HOOK_TOKEN=file_old\nBELLWETHER_HOOK_TOKEN=file_new\n";
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        assert_eq!(token_in_order(env(&[("BELLWETHER_HOOK_TOKEN", "env_new"), ("PASTURE_HOOK_TOKEN", "env_old")]), file_new_and_old).as_deref(), Some("env_new"));
+        assert_eq!(token_in_order(env(&[("PASTURE_HOOK_TOKEN", "env_old")]), file_new_and_old).as_deref(), Some("file_new"), "a stale exported old name doesn't beat the .env's new one");
+        assert_eq!(token_in_order(env(&[("PASTURE_HOOK_TOKEN", "env_old")]), "PASTURE_HOOK_TOKEN=file_old\n").as_deref(), Some("env_old"));
+        assert_eq!(token_in_order(env(&[]), "PASTURE_HOOK_TOKEN=file_old\n").as_deref(), Some("file_old"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn the_env_file_is_the_repos_own_then_a_hubs() {
-        let base = std::env::temp_dir().join(format!("pasture-envfile-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("bellwether-envfile-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let alone = base.join("bellwether");
         std::fs::create_dir_all(&alone).unwrap();
         assert_eq!(env_file(&alone), alone.join(".env"), "no .env anywhere: the repo's own (where token init writes)");
-        let agent = base.join("hub").join("agents").join("pasture");
+        let agent = base.join("hub").join("agents").join("bellwether");
         std::fs::create_dir_all(&agent).unwrap();
-        std::fs::write(base.join("hub").join(".env"), "PASTURE_HOOK_TOKEN=x\n").unwrap();
+        std::fs::write(base.join("hub").join(".env"), "BELLWETHER_HOOK_TOKEN=x\n").unwrap();
         assert_eq!(env_file(&agent), agent.join("..").join("..").join(".env"), "inside a hub with no .env of its own");
-        std::fs::write(agent.join(".env"), "PASTURE_HOOK_TOKEN=y\n").unwrap();
+        std::fs::write(agent.join(".env"), "BELLWETHER_HOOK_TOKEN=y\n").unwrap();
         assert_eq!(env_file(&agent), agent.join(".env"), "its own .env wins");
         let _ = std::fs::remove_dir_all(&base);
     }

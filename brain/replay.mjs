@@ -4,7 +4,7 @@ import { READ_FIELDS, SUMMARY_FIELDS, TERMINAL_HEADERS } from './normalise.mjs';
 import { CliError, EXIT } from './util.mjs';
 
 /**
- * `pasture replay`: posts a recording or fixture to a running brain with its original
+ * `bellwether replay`: posts a recording or fixture to a running brain with its original
  * timing (scaled by --speed), so the overlay can be driven without Claude, and
  * measures /hook latency and the snapshot rate while it does.
  *
@@ -54,7 +54,7 @@ export function readRecording(file) {
     try {
       o = JSON.parse(l);
     } catch {
-      throw new CliError(`${file}:${i + 1} is not JSON; replay takes a pasture recording (.jsonl)`, EXIT.BAD_CONFIG);
+      throw new CliError(`${file}:${i + 1} is not JSON; replay takes a bellwether recording (.jsonl)`, EXIT.BAD_CONFIG);
     }
     if (!o?.normalised?.event || typeof o.normalised.receivedAt !== 'number') throw new CliError(`${file}:${i + 1} is not a recording line ({normalised, rawKeys, headersPresent})`, EXIT.BAD_CONFIG);
     return o;
@@ -62,7 +62,7 @@ export function readRecording(file) {
 }
 
 /**
- * Rebuilds a payload and the X-Pasture-* headers from one recording line. With a
+ * Rebuilds a payload and the X-Bellwether-* headers from one recording line. With a
  * `tag`, the line plays as a different session in a different terminal pane (session
  * ids get `-<tag>`, the terminal becomes herdr pane `<tag>`), so several fixtures can
  * drive several sheep at once.
@@ -187,7 +187,7 @@ export async function replay(lines, { port, token, speed = 1, tag = null, log = 
     try {
       r = await call(port, { method: 'POST', path: '/hook', token, body: payload, headers, timeoutMs: 5000 });
     } catch (e) {
-      if (e.code === 'ECONNREFUSED') throw new CliError(`brain not running — run \`pasture serve\` (nothing listening on 127.0.0.1:${port})`, EXIT.NOT_RUNNING);
+      if (e.code === 'ECONNREFUSED') throw new CliError(`brain not running — run \`bellwether serve\` (nothing listening on 127.0.0.1:${port})`, EXIT.NOT_RUNNING);
       failures.push(`line ${i + 1}: ${e.code ?? e.message}`);
       continue;
     }

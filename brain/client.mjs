@@ -30,7 +30,7 @@ function once(port, { method = 'GET', path, token, body = null, headers = {}, ti
         agent: false,
         path,
         timeout: timeoutMs,
-        headers: { ...(token ? { 'X-Pasture-Token': token } : {}), ...(data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {}), ...headers },
+        headers: { ...(token ? { 'X-Bellwether-Token': token } : {}), ...(data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {}), ...headers },
       },
       (res) => {
         const chunks = [];
@@ -57,10 +57,10 @@ export async function getState(port, token, { after = -1, waitMs = 0 } = {}) {
   try {
     r = await call(port, { path: `/state?after=${after}&wait=${waitMs}`, token, timeoutMs: waitMs + 10_000 });
   } catch (e) {
-    if (e.code === 'ECONNREFUSED') throw new CliError(`brain not running — run \`pasture serve\` (nothing listening on ${BIND_HOST}:${port})`, EXIT.NOT_RUNNING);
+    if (e.code === 'ECONNREFUSED') throw new CliError(`brain not running — run \`bellwether serve\` (nothing listening on ${BIND_HOST}:${port})`, EXIT.NOT_RUNNING);
     throw new CliError(`could not reach the brain on port ${port}: ${e.code ?? e.message}`, EXIT.NOT_RUNNING);
   }
-  if (r.status === 403) throw new CliError('the brain refused the token in .env (403); it was started with a different PASTURE_HOOK_TOKEN. Restart `pasture serve`', EXIT.BAD_CONFIG);
+  if (r.status === 403) throw new CliError('the brain refused the token in .env (403); it was started with a different BELLWETHER_HOOK_TOKEN. Restart `bellwether serve`', EXIT.BAD_CONFIG);
   if (r.status !== 200 || !r.json) throw new CliError(`unexpected answer from /state: HTTP ${r.status}`, EXIT.UNEXPECTED);
   return r.json;
 }
@@ -71,10 +71,10 @@ export async function postControl(port, token, msg) {
   try {
     r = await call(port, { method: 'POST', path: '/control', token, body: msg, timeoutMs: 5000 });
   } catch (e) {
-    if (e.code === 'ECONNREFUSED') throw new CliError(`brain not running — run \`pasture serve\` (nothing listening on ${BIND_HOST}:${port})`, EXIT.NOT_RUNNING);
+    if (e.code === 'ECONNREFUSED') throw new CliError(`brain not running — run \`bellwether serve\` (nothing listening on ${BIND_HOST}:${port})`, EXIT.NOT_RUNNING);
     throw new CliError(`could not reach the brain on port ${port}: ${e.code ?? e.message}`, EXIT.NOT_RUNNING);
   }
-  if (r.status === 403) throw new CliError('the brain refused the token in .env (403); it was started with a different PASTURE_HOOK_TOKEN. Restart `pasture serve`', EXIT.BAD_CONFIG);
+  if (r.status === 403) throw new CliError('the brain refused the token in .env (403); it was started with a different BELLWETHER_HOOK_TOKEN. Restart `bellwether serve`', EXIT.BAD_CONFIG);
   if (r.status !== 200 || !r.json?.ok) throw new CliError(`the brain refused ${msg.action}: ${r.json?.error ?? `HTTP ${r.status}`}`, EXIT.UNEXPECTED);
   return r.json;
 }

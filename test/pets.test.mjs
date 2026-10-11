@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { PET_SOURCE, PINNED_PETS, fetchPets, petUrl } from '../brain/pets.mjs';
 import { tempDir } from './helpers.mjs';
 
-/** `pasture pets fetch`, with a fake network: the pinned URL and the sha256 check. */
+/** `bellwether pets fetch`, with a fake network: the pinned URL and the sha256 check. */
 
 const bytes = Buffer.from('<animations>invented test pet</animations>');
 const sha = createHash('sha256').update(bytes).digest('hex');

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { AGENT_DIR, CliError, EXIT } from './util.mjs';
 
 /**
- * `pasture pets fetch`: downloads the pet files pasture draws, at a pinned commit of
+ * `bellwether pets fetch`: downloads the pet files bellwether draws, at a pinned commit of
  * Adrianotiger/desktopPet, and checks each against a pinned sha256 before writing
  * it. The art is never committed to the repository or bundled into a build (see
  * NOTICE): it lives in data/pets/, which is gitignored.
@@ -116,9 +116,9 @@ async function readCapped(res, folder) {
 export function checkPets(dataDir, folder) {
   const entry = Object.hasOwn(PINNED_PETS, folder) ? PINNED_PETS[folder] : undefined;
   const file = path.join(dataDir, 'pets', folder, 'animations.xml');
-  if (!fs.existsSync(file)) return { ok: false, detail: `${file} is missing: run \`pasture pets fetch\`` };
+  if (!fs.existsSync(file)) return { ok: false, detail: `${file} is missing: run \`bellwether pets fetch\`` };
   if (!entry) return { ok: true, detail: `${folder} (not a pinned pet, so not verified)` };
-  return sha256(fs.readFileSync(file)) === entry.sha256 ? { ok: true, detail: `${folder} present, sha256 verified` } : { ok: false, detail: `${file} doesn't match its pinned sha256: run \`pasture pets fetch\` again` };
+  return sha256(fs.readFileSync(file)) === entry.sha256 ? { ok: true, detail: `${folder} present, sha256 verified` } : { ok: false, detail: `${file} doesn't match its pinned sha256: run \`bellwether pets fetch\` again` };
 }
 
 function sha256(bytes) {

@@ -7,8 +7,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const AGENT_DIR = path.resolve(here, '..');
 // Tests point this at a temp directory so they never write into the real data/.
-export const DATA_DIR = process.env.PASTURE_DATA_DIR
-  ? path.resolve(process.env.PASTURE_DATA_DIR)
+export const DATA_DIR = process.env.BELLWETHER_DATA_DIR
+  ? path.resolve(process.env.BELLWETHER_DATA_DIR)
   : path.join(AGENT_DIR, 'data');
 
 export const VERSION = '0.1.0';
@@ -17,7 +17,7 @@ export const VERSION = '0.1.0';
 export const BIND_HOST = '127.0.0.1';
 
 /** The event name `doctor` posts to check the token; the brain counts it but ignores it. */
-export const DOCTOR_PING = 'PastureDoctorPing';
+export const DOCTOR_PING = 'BellwetherDoctorPing';
 
 export const USER_SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 
@@ -46,16 +46,16 @@ export function log(...args) {
 
 /**
  * The hook token never appears in anything a person (or a model reading the output)
- * sees: the current token wherever it occurs, and any X-Pasture-Token header value
+ * sees: the current token wherever it occurs, and any X-Bellwether-Token header value
  * (an old token in a settings diff, say), become their first 4 characters and "…".
- * Only files pasture writes on purpose (`hooks print --out`, `--write`) keep the value.
+ * Only files bellwether writes on purpose (`hooks print --out`, `--write`) keep the value.
  */
-export function maskToken(text, token = process.env.PASTURE_HOOK_TOKEN, seen = SEEN_TOKENS) {
+export function maskToken(text, token = process.env.BELLWETHER_HOOK_TOKEN, seen = SEEN_TOKENS) {
   if (typeof text !== 'string') return text;
   const short = (v) => `${v.slice(0, 4)}…`;
-  // Learn every value written under a pasture token header, whatever the header's case,
-  // in JSON ("X-Pasture-Token": "v") or header form (X-Pasture-Token: v)…
-  for (const m of text.matchAll(/["']?x-pasture-token["']?\s*[:=]\s*["']?([^"'\s,}\\]{5,})/gi)) {
+  // Learn every value written under a bellwether token header, whatever the header's case,
+  // in JSON ("X-Bellwether-Token": "v") or header form (X-Bellwether-Token: v)…
+  for (const m of text.matchAll(/["']?x-(?:bellwether|pasture)-token["']?\s*[:=]\s*["']?([^"'\s,}\\]{5,})/gi)) {
     if (!m[1].endsWith('…')) seen.add(m[1]);
   }
   if (token && token.length >= 8) seen.add(token);
@@ -71,14 +71,14 @@ const SEEN_TOKENS = new Set();
 /** Masks the token in everything this process writes to stdout and stderr. */
 export function installTokenMask() {
   for (const stream of [process.stdout, process.stderr]) {
-    if (stream.__pastureMasked) continue;
+    if (stream.__bellwetherMasked) continue;
     const write = stream.write.bind(stream);
     stream.write = (chunk, ...rest) => {
       if (typeof chunk === 'string') chunk = maskToken(chunk);
       else if (Buffer.isBuffer(chunk)) chunk = Buffer.from(maskToken(chunk.toString('utf8')));
       return write(chunk, ...rest);
     };
-    stream.__pastureMasked = true;
+    stream.__bellwetherMasked = true;
   }
 }
 

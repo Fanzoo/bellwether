@@ -82,8 +82,8 @@ describe('snapshots carry only short, redacted text', () => {
     const flock = new Flock({ config: CONFIG });
     const base = { session_id: 's', cwd: '/p/proj', tool_name: 'Bash' };
     const input = { command: `curl -H "Authorization: Bearer abc.def.ghi" https://u:pw@h.example/x?token=SEKRET1 && echo hunter2 ${'x'.repeat(200)}` };
-    flock.apply(normalise({ ...base, hook_event_name: 'PreToolUse', tool_use_id: 't1', tool_input: input }, { 'x-pasture-herdr-pane': 'w1:p1' }, 0, { clean }));
-    flock.apply(normalise({ ...base, hook_event_name: 'PermissionRequest', tool_input: input }, { 'x-pasture-herdr-pane': 'w1:p1' }, 10, { clean }));
+    flock.apply(normalise({ ...base, hook_event_name: 'PreToolUse', tool_use_id: 't1', tool_input: input }, { 'x-bellwether-herdr-pane': 'w1:p1' }, 0, { clean }));
+    flock.apply(normalise({ ...base, hook_event_name: 'PermissionRequest', tool_input: input }, { 'x-bellwether-herdr-pane': 'w1:p1' }, 10, { clean }));
     const text = JSON.stringify(flock.snapshot());
     for (const secret of ['abc.def.ghi', 'SEKRET1', 'hunter2', 'u:pw']) assert.doesNotMatch(text, new RegExp(secret.replace('.', '\\.')));
     const alert = flock.snapshot().flock[0].alert.text;
@@ -107,12 +107,12 @@ describe('identity', () => {
   });
   test('tmux pane next, then the iTerm2 tab (uuid only)', () => {
     assert.equal(id({ tmuxPane: '%3', itermSession: 'w0t0p0:U' }), 'tmux:%3');
-    assert.equal(id({ itermSession: 'w0t2p0:ECCADBD0-1', termSession: 'w0t2p0:ECCADBD0-1', program: 'iTerm.app' }), 'iterm:ECCADBD0-1');
-    assert.equal(id({ itermSession: 'w1t5p0:ECCADBD0-1' }), 'iterm:ECCADBD0-1', 'moving the tab keeps the sheep');
+    assert.equal(id({ itermSession: 'w0t2p0:5E551011-1', termSession: 'w0t2p0:5E551011-1', program: 'iTerm.app' }), 'iterm:5E551011-1');
+    assert.equal(id({ itermSession: 'w1t5p0:5E551011-1' }), 'iterm:5E551011-1', 'moving the tab keeps the sheep');
   });
   test("Terminal.app's TERM_SESSION_ID counts only with TERM_PROGRAM=Apple_Terminal", () => {
-    assert.equal(id({ program: 'Apple_Terminal', termSession: 'B60A5DA8-1' }), 'term:B60A5DA8-1');
-    assert.equal(id({ program: 'vscode', termSession: 'B60A5DA8-1' }), 'session:s1');
+    assert.equal(id({ program: 'Apple_Terminal', termSession: '7E2A1A22-1' }), 'term:7E2A1A22-1');
+    assert.equal(id({ program: 'vscode', termSession: '7E2A1A22-1' }), 'session:s1');
   });
   test('Windows Terminal, then the session', () => {
     assert.equal(id({ wtSession: 'abc' }), 'wt:abc');
@@ -421,7 +421,7 @@ describe('M2 verification fixes', () => {
 
 describe('M2 re-check fixes', () => {
   test('labels from the folder name and from state.json lose control, bidi and zero-width characters', () => {
-    const ev = normalise({ hook_event_name: 'Stop', session_id: 's', cwd: '/w/a‮b\u0007c​d' }, { 'x-pasture-herdr-pane': 'w1:p1' }, 1);
+    const ev = normalise({ hook_event_name: 'Stop', session_id: 's', cwd: '/w/a‮b\u0007c​d' }, { 'x-bellwether-herdr-pane': 'w1:p1' }, 1);
     assert.equal(ev.projectLabel, 'ab cd', JSON.stringify(ev.projectLabel));
     const f = new Flock({ config: CONFIG, t: 0, persisted: { identities: { 'herdr:#w1:p1': { label: 'x⁦y\nz', slots: {}, lastSeen: 0 } } } });
     assert.equal(f.persistable().identities['herdr:#w1:p1'].label, 'xy z');
@@ -441,7 +441,7 @@ describe('M2 re-check fixes', () => {
     const config = withDefaults({ port: 47417, bubble: { detail: 'tool' } });
     const clean = makeTextCleaner(config.bubble);
     const f = new Flock({ config });
-    const headers = { 'x-pasture-herdr-pane': 'w1:p1' };
+    const headers = { 'x-bellwether-herdr-pane': 'w1:p1' };
     const input = { command: 'git push origin main', description: 'Push' };
     f.apply(normalise({ hook_event_name: 'PreToolUse', session_id: 's', cwd: '/p/x', tool_name: 'Bash', tool_use_id: 't', tool_input: input }, headers, 1, { clean }));
     f.apply(normalise({ hook_event_name: 'PermissionRequest', session_id: 's', cwd: '/p/x', tool_name: 'Bash', tool_input: input }, headers, 2, { clean }));

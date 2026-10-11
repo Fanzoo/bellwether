@@ -1,7 +1,7 @@
 //! The Dock's exact frame, through Accessibility (Milestone 10, Dock-width
 //! confinement). Only read when this binary is already trusted: `AXIsProcessTrusted`
 //! is checked without its prompt; the system prompt appears only when the user runs
-//! `pasture shell dock-permission` (which runs this binary with `--ax-prompt`).
+//! `bellwether shell dock-permission` (which runs this binary with `--ax-prompt`).
 //!
 //! Without the permission nothing changes: the full-width strip, as before.
 //!

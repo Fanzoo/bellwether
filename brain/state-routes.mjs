@@ -1,9 +1,9 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 /**
- * GET /state and POST /control, for the shell and `pasture status`. Same guards as
+ * GET /state and POST /control, for the shell and `bellwether status`. Same guards as
  * /hook: no Origin header, Host must be 127.0.0.1:<port> or localhost:<port>, and
- * X-Pasture-Token must match. They never send CORS headers, so a browser can't read
+ * X-Bellwether-Token must match. They never send CORS headers, so a browser can't read
  * them even by accident.
  *
  *   GET  /state?after=<rev>[&wait=<ms>]  the Snapshot as soon as rev > after, or the
@@ -80,7 +80,7 @@ function json(res, status, value) {
 function rejectionReason(headers, allowedHosts, expected) {
   if (headers.origin !== undefined) return 'origin';
   if (!allowedHosts.has(String(headers.host ?? '').toLowerCase())) return 'host';
-  const given = headers['x-pasture-token'];
+  const given = headers['x-bellwether-token'];
   if (typeof given !== 'string' || !timingSafeEqual(digest(given), expected)) return 'token';
   return null;
 }

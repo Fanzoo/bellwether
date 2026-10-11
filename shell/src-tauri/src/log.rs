@@ -18,7 +18,7 @@ pub fn init(path: PathBuf) {
 
 pub fn log(line: &str) {
     let ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-    let text = format!("{ms} pasture-shell: {line}\n");
+    let text = format!("{ms} bellwether-shell: {line}\n");
     let _ = std::io::stderr().write_all(text.as_bytes());
     if let Some(path) = FILE.lock().unwrap().as_ref() {
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {

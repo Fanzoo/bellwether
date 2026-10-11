@@ -1,5 +1,5 @@
 /**
- * `pasture status`: the flock as text. Also the terminal fallback when there's no
+ * `bellwether status`: the flock as text. Also the terminal fallback when there's no
  * overlay (Wayland, or before the shell exists).
  *
  *   meadow          #7fb3ff  busy·running    ALERT  Bash: git push origin main?
@@ -7,7 +7,7 @@
  */
 export function renderStatus(snap, { palette = [], now = Date.now(), color = false } = {}) {
   const lines = [];
-  const head = `pasture  rev ${snap.rev}  ${snap.flock.length} sheep${snap.muted ? '  MUTED' : ''}`;
+  const head = `bellwether  rev ${snap.rev}  ${snap.flock.length} sheep${snap.muted ? '  MUTED' : ''}`;
   lines.push(head);
   if (!snap.flock.length) lines.push('  (no sessions yet — start or prompt a Claude Code session)');
   for (const s of snap.flock) {

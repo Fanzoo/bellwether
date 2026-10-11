@@ -192,16 +192,16 @@ describe('doctor `dock` line', () => {
     return checkLocatorLog(d).find((c) => c.name === 'dock');
   };
   test('not granted and withdrawn: INFO telling how to grant and that a rebuild needs a re-grant; granted: PASS; none: no line; webview lines cannot fake it', () => {
-    const start = '1 pasture-shell: starting: x\n';
-    const no = run(`${start}2 pasture-shell: dock: Accessibility not granted to this binary: the full-width strip is used\n`);
+    const start = '1 bellwether-shell: starting: x\n';
+    const no = run(`${start}2 bellwether-shell: dock: Accessibility not granted to this binary: the full-width strip is used\n`);
     assert.equal(no.status, 'INFO');
     assert.match(no.detail, /dock-permission/);
     assert.match(no.detail, /after a rebuild it must be given again/);
-    assert.equal(run(`${start}2 pasture-shell: dock: Accessibility granted to this binary: sheep stand\n`).status, 'PASS');
-    assert.equal(run(`${start}2 pasture-shell: dock: Accessibility granted to this binary: x\n3 pasture-shell: dock: Accessibility withdrawn while running\n`).status, 'INFO');
-    assert.equal(run(`${start}2 pasture-shell: dock: Accessibility not granted\n3 pasture-shell: dock: Accessibility granted while running\n`).status, 'PASS');
+    assert.equal(run(`${start}2 bellwether-shell: dock: Accessibility granted to this binary: sheep stand\n`).status, 'PASS');
+    assert.equal(run(`${start}2 bellwether-shell: dock: Accessibility granted to this binary: x\n3 bellwether-shell: dock: Accessibility withdrawn while running\n`).status, 'INFO');
+    assert.equal(run(`${start}2 bellwether-shell: dock: Accessibility not granted\n3 bellwether-shell: dock: Accessibility granted while running\n`).status, 'PASS');
     assert.equal(run(`${start}`), undefined);
-    assert.equal(run(`${start}2 pasture-shell: webview: dock: Accessibility granted\n`), undefined);
+    assert.equal(run(`${start}2 bellwether-shell: webview: dock: Accessibility granted\n`), undefined);
   });
   test('the README says the grant must be repeated after a rebuild, names the command, and no longer claims the strip needs no Accessibility', () => {
     const readme = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');

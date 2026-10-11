@@ -6,14 +6,14 @@ import { SHELL_LABEL, isRealHome, plistPath, shellBinary } from './autostart.mjs
 import { CliError, DATA_DIR, EXIT } from './util.mjs';
 
 /**
- * `pasture shell start | stop | restart`: the strip, without a terminal attached.
+ * `bellwether shell start | stop | restart`: the strip, without a terminal attached.
  *
  * - With the strip's LaunchAgent installed (`autostart install`), launchd owns it:
  *   start is `launchctl kickstart`, restart is `kickstart -k` (which also restarts a
  *   running strip), stop is `launchctl kill TERM` (the strip exits cleanly on SIGTERM,
  *   so KeepAlive leaves it stopped until the next start or login). launchctl is only
  *   called when HOME is the real home, as in autostart.
- * - Without it, pasture runs the release binary itself, detached, and keeps its pid in
+ * - Without it, bellwether runs the release binary itself, detached, and keeps its pid in
  *   data/shell.pid. Stopping signals that pid only, and only after checking that the
  *   process is exactly that binary. Nothing is matched by name or by path, so a strip
  *   started any other way (by launchd, by hand, from another data dir) is never touched.
@@ -35,7 +35,7 @@ export async function shellControl(action, o = {}) {
     brainUp = async () => false,
     platform = process.platform,
   } = o;
-  if (!['start', 'stop', 'restart'].includes(action)) throw new CliError('usage: pasture shell [start | stop | restart]   (no argument: run it in this terminal)', EXIT.BAD_CONFIG);
+  if (!['start', 'stop', 'restart'].includes(action)) throw new CliError('usage: bellwether shell [start | stop | restart]   (no argument: run it in this terminal)', EXIT.BAD_CONFIG);
   const lines = [];
   const target = `gui/${uid}/${SHELL_LABEL}`;
 
@@ -47,14 +47,14 @@ export async function shellControl(action, o = {}) {
     }
     const r = run('launchctl', args);
     if (!r.ok) {
-      const hint = action === 'stop' ? ' (it may not be running)' : '; is it loaded? `pasture autostart status`';
+      const hint = action === 'stop' ? ' (it may not be running)' : '; is it loaded? `bellwether autostart status`';
       throw new CliError(`launchctl ${args.join(' ')} failed: ${r.out}${hint}`, EXIT.NOT_RUNNING);
     }
-    lines.push({ start: 'started the strip (LaunchAgent)', restart: 'restarted the strip (LaunchAgent)', stop: 'stopped the strip (LaunchAgent); `pasture shell start` brings it back, and so does your next login' }[action]);
+    lines.push({ start: 'started the strip (LaunchAgent)', restart: 'restarted the strip (LaunchAgent)', stop: 'stopped the strip (LaunchAgent); `bellwether shell start` brings it back, and so does your next login' }[action]);
     return { lines };
   }
 
-  // No LaunchAgent: pasture's own detached copy.
+  // No LaunchAgent: bellwether's own detached copy.
   const pidFile = path.join(dataDir, 'shell.pid');
   // Only the strip this data dir started: the pid in its own shell.pid, and only while
   // that pid is still exactly the release binary. Never "whatever runs that binary":
@@ -82,7 +82,7 @@ export async function shellControl(action, o = {}) {
     lines.push(`the strip is already running (pid ${ours()})`);
     return { lines };
   }
-  if (!fs.existsSync(shellBin)) throw new CliError(`the strip isn't built yet (${shellBin}). Build it with \`pasture shell --dev --release\``, EXIT.NOT_RUNNING);
+  if (!fs.existsSync(shellBin)) throw new CliError(`the strip isn't built yet (${shellBin}). Build it with \`bellwether shell --dev --release\``, EXIT.NOT_RUNNING);
   const up = await brainUp();
   const pid = spawnDetached(shellBin, up ? ['--no-spawn-brain'] : []);
   fs.mkdirSync(dataDir, { recursive: true });

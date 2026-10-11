@@ -1,5 +1,5 @@
 /**
- * PetModel: the parts of a desktopPet `animations.xml` that pasture uses, as plain
+ * PetModel: the parts of a desktopPet `animations.xml` that bellwether uses, as plain
  * data. `parsePetDocument` reads a parsed XML document (the webview's DOMParser); the
  * rest of the player works on the model alone, so `node --test` covers it with
  * test/fixtures/pet-model.json and no DOM.

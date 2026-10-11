@@ -60,29 +60,29 @@ function findKey(value, key, prefix = '') {
 }
 
 /**
- * PASTURE_HOOK_TOKEN from the environment, which envload.mjs fills from the .env. It
+ * BELLWETHER_HOOK_TOKEN from the environment, which envload.mjs fills from the .env. It
  * is copied into the settings file as a literal header value, so it must survive
  * JSON and HTTP headers unchanged.
  */
 export function readToken(env = process.env) {
-  const token = env.PASTURE_HOOK_TOKEN;
+  const token = env.BELLWETHER_HOOK_TOKEN;
   if (!token) {
     throw new CliError(
-      'PASTURE_HOOK_TOKEN is not set. Add one to the .env in the repository root with\n' +
-        '  ./pasture token init\n' +
+      'BELLWETHER_HOOK_TOKEN is not set. Add one to the .env in the repository root with\n' +
+        '  ./bellwether token init\n' +
         '(it adds one only if there is none, and never prints it).',
       EXIT.BAD_CONFIG,
     );
   }
   if (token.length < 16 || !/^[A-Za-z0-9_-]+$/.test(token)) {
     throw new CliError(
-      'PASTURE_HOOK_TOKEN must be at least 16 characters of [A-Za-z0-9_-] (base64url). Regenerate it with the command in the README.',
+      'BELLWETHER_HOOK_TOKEN must be at least 16 characters of [A-Za-z0-9_-] (base64url). Regenerate it with the command in the README.',
       EXIT.BAD_CONFIG,
     );
   }
   if (KNOWN_EXAMPLE_TOKENS.includes(token)) {
     throw new CliError(
-      'PASTURE_HOOK_TOKEN is a published example value (it appeared in published docs), so anyone can read it. Generate your own with the command in the README.',
+      'BELLWETHER_HOOK_TOKEN is a published example value (it appeared in published docs), so anyone can read it. Generate your own with the command in the README.',
       EXIT.BAD_CONFIG,
     );
   }

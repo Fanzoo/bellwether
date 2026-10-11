@@ -84,7 +84,7 @@ pub fn run<R: Runtime>(app: AppHandle<R>, fade_radius: f64) {
             let over = boxes.get(&label).map_or(false, |b| hit(b, x, y));
             if accepting.get(&label) != Some(&over) {
                 if window.set_ignore_cursor_events(!over).is_ok() {
-                    if std::env::var_os("PASTURE_SHELL_TRACE").is_some() {
+                    if crate::settings::env_os("SHELL_TRACE").is_some() {
                         log(&format!("{label}: cursor {} sprite -> {}", if over { "over" } else { "off" }, if over { "accepting clicks" } else { "click-through" }));
                     }
                     accepting.insert(label.clone(), over);

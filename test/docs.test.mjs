@@ -32,7 +32,7 @@ describe('licensing documents', () => {
   test('the licence reader takes the [package] licence, not a dependency\'s', () => {
     assert.equal(crateLicence('[package]\nname = "a"\nlicense = "MIT OR Apache-2.0"\n[dependencies]\nlicense = "GPL"\n'), 'MIT OR Apache-2.0');
     assert.equal(crateLicence('[package]\nname = "a"\nlicense-file = "LICENSE"\n'), 'see its licence file');
-    assert.deepEqual(lockedCrates('[[package]]\nname = "x"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n\n[[package]]\nname = "pasture-shell"\nversion = "0.1.0"\n'), [{ name: 'x', version: '1.0.0' }]);
+    assert.deepEqual(lockedCrates('[[package]]\nname = "x"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n\n[[package]]\nname = "bellwether-shell"\nversion = "0.1.0"\n'), [{ name: 'x', version: '1.0.0' }]);
   });
 });
 
@@ -46,14 +46,14 @@ describe('repository setup', () => {
   test('.gitignore keeps secrets, local state and build output out; .env.example has the token line, empty', () => {
     const gi = read('.gitignore').split('\n');
     for (const line of ['.env', '.env.*', '!.env.example', 'data/', 'config.json', 'shell/src-tauri/target/', 'shell/src-tauri/gen/']) assert.ok(gi.includes(line), line);
-    assert.match(read('.env.example'), /^PASTURE_HOOK_TOKEN=$/m);
+    assert.match(read('.env.example'), /^BELLWETHER_HOOK_TOKEN=$/m);
   });
   test('the README credits desktopPet, says the art is fetched rather than included, and has no hub paths', () => {
     const r = read('README.md');
     assert.match(r, /^# Bellwether/);
     assert.match(r, /desktopPet[\s\S]*eSheep/);
     assert.match(r, /never committed or bundled/);
-    assert.doesNotMatch(r, /agents\/pasture|PLAN\.md|hub `\.env`|hub-root/);
+    assert.doesNotMatch(r, /agents\/bellwether|PLAN\.md|hub `\.env`|hub-root/);
   });
   test('the README\'s first run puts autostart before hooks, and quitting the trial strip before autostart', () => {
     const r = read('README.md');

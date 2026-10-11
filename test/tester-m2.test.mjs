@@ -141,7 +141,7 @@ describe('recordings, logs, state.json and /health hold no free text', () => {
     const brain = await startBrain({ config, token: TOKEN, dataDir, recordTo: rec, log: (l) => logs.push(l), persistMs: 50 });
     try {
       const post = (payload, headers = {}) => call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body: payload, headers });
-      const T = { 'x-pasture-herdr-pane': 'w1:p1', 'x-pasture-herdr-socket': '/s/herdr.sock', 'x-pasture-term-program': 'iTerm.app' };
+      const T = { 'x-bellwether-herdr-pane': 'w1:p1', 'x-bellwether-herdr-socket': '/s/herdr.sock', 'x-bellwether-term-program': 'iTerm.app' };
       await post({ hook_event_name: 'PreToolUse', session_id: 'sa', cwd: '/w/proj', tool_name: 'Bash', tool_use_id: 'tu1', tool_input: { command: 'echo CANARY_CMD_alpha', description: 'CANARY_DESC' } }, T);
       await post({ hook_event_name: 'PermissionRequest', session_id: 'sa', cwd: '/w/proj', tool_name: 'Bash', tool_input: { command: 'echo CANARY_CMD_alpha', description: 'CANARY_DESC' } }, T);
       await post({ hook_event_name: 'Notification', session_id: 'sa', notification_type: 'permission_prompt', message: 'CANARY_MSG_beta needs you' }, T);
@@ -266,7 +266,7 @@ describe('/clear keeps the same sheep when the terminal identifies it', () => {
     herdr: { herdrPane: 'w1:p4', herdrSocket: '/s/h.sock', program: 'iTerm.app', itermSession: 'w0t1p0:SAMEUUID', termSession: 'w0t1p0:SAMEUUID' },
     tmux: { tmuxPane: '%3', program: 'iTerm.app', itermSession: 'w0t2p0:UUID-T' },
     iterm2: { program: 'iTerm.app', itermSession: 'w0t2p0:UUID-I', termSession: 'w0t2p0:UUID-I' },
-    terminalApp: { program: 'Apple_Terminal', termSession: 'B60A5DA8-1111-2222-3333-444444444444' },
+    terminalApp: { program: 'Apple_Terminal', termSession: '7E2A1A22-1111-2222-3333-444444444444' },
   };
   for (const [name, terminal] of Object.entries(terminals)) {
     test(`${name}: SessionEnd clear then a new session_id = same sheep id, colour and slot, also after a brain restart`, () => {
@@ -370,7 +370,7 @@ describe('thinkingTimeoutSec', () => {
 });
 
 describe('replay markers cannot reach snapshots, even from a REAL (field-names-only) recording', () => {
-  // A line shaped exactly like what `pasture record` writes: no toolSummary, no message.
+  // A line shaped exactly like what `bellwether record` writes: no toolSummary, no message.
   const realLine = (normalised, rawKeys) => ({ normalised: { receivedAt: 1, sessionId: 's', cwd: '/w/p', projectLabel: 'p', terminal: { herdrPane: 'w1:p1' }, ...normalised }, rawKeys, headersPresent: [] });
   test('a recorded Bash PreToolUse/PermissionRequest does not produce a «replay:» bubble', () => {
     const lines = [
@@ -408,7 +408,7 @@ describe('/state and /control over HTTP', () => {
   before(async () => {
     dataDir = tempDir('m2-http-');
     brain = await startBrain({ config, token: TOKEN, dataDir });
-    await call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body: { hook_event_name: 'UserPromptSubmit', session_id: 's', cwd: '/w/p' }, headers: { 'x-pasture-herdr-pane': 'w1:p1', 'x-pasture-herdr-socket': '/s/h.sock' } });
+    await call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body: { hook_event_name: 'UserPromptSubmit', session_id: 's', cwd: '/w/p' }, headers: { 'x-bellwether-herdr-pane': 'w1:p1', 'x-bellwether-herdr-socket': '/s/h.sock' } });
   });
   after(() => brain.close());
 
@@ -427,13 +427,13 @@ describe('/state and /control over HTTP', () => {
     const i = r.indexOf('\r\n\r\n');
     return { head: i < 0 ? r : r.slice(0, i), body: i < 0 ? '' : r.slice(i + 4) };
   };
-  const H = () => ({ Host: `127.0.0.1:${brain.port}`, 'X-Pasture-Token': TOKEN, 'Content-Type': 'application/json' });
+  const H = () => ({ Host: `127.0.0.1:${brain.port}`, 'X-Bellwether-Token': TOKEN, 'Content-Type': 'application/json' });
 
   test('without a valid token, with an Origin, or with a foreign Host: an empty 403 for every method and path variant', async () => {
     const bad = [
-      { ...H(), 'X-Pasture-Token': undefined },
-      { ...H(), 'X-Pasture-Token': 'wrong' },
-      { ...H(), 'X-Pasture-Token': TOKEN.slice(0, -1) },
+      { ...H(), 'X-Bellwether-Token': undefined },
+      { ...H(), 'X-Bellwether-Token': 'wrong' },
+      { ...H(), 'X-Bellwether-Token': TOKEN.slice(0, -1) },
       { ...H(), Origin: 'https://evil.example' },
       { ...H(), Origin: 'null' },
       { ...H(), Host: 'evil.example' },
@@ -501,7 +501,7 @@ describe('/state and /control over HTTP', () => {
     }
     const sockets = [];
     for (let i = 0; i < 1500; i++) {
-      const s = net.connect(brain.port, '127.0.0.1', () => s.write(`GET /state?after=999999&wait=25000 HTTP/1.1\r\nHost: 127.0.0.1:${brain.port}\r\nX-Pasture-Token: ${TOKEN}\r\n\r\n`));
+      const s = net.connect(brain.port, '127.0.0.1', () => s.write(`GET /state?after=999999&wait=25000 HTTP/1.1\r\nHost: 127.0.0.1:${brain.port}\r\nX-Bellwether-Token: ${TOKEN}\r\n\r\n`));
       s.on('error', () => {});
       sockets.push(s);
     }
@@ -527,7 +527,7 @@ describe('data/state.json corruption and persistence', () => {
     const logs = [];
     const brain = await startBrain({ config, token: TOKEN, dataDir, log: (l) => logs.push(l), persistMs: 30 });
     try {
-      const r = await call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body: { hook_event_name: 'UserPromptSubmit', session_id: 's1', cwd: '/w/proj' }, headers: { 'x-pasture-herdr-pane': 'w1:p1', 'x-pasture-herdr-socket': '/s/h.sock' } });
+      const r = await call(brain.port, { method: 'POST', path: '/hook', token: TOKEN, body: { hook_event_name: 'UserPromptSubmit', session_id: 's1', cwd: '/w/proj' }, headers: { 'x-bellwether-herdr-pane': 'w1:p1', 'x-bellwether-herdr-socket': '/s/h.sock' } });
       assert.equal(r.status, 204);
       await new Promise((res) => setTimeout(res, 200));
       const snap = (await call(brain.port, { path: '/state?after=-1&wait=0', token: TOKEN })).json;
@@ -607,27 +607,27 @@ describe('data/state.json corruption and persistence', () => {
 
 let root, agent, home, port, env, caller;
 const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => r(p)); }); });
-function pasture(args, { extraEnv = {}, cwd } = {}) {
-  const r = spawnSync('/bin/sh', [path.join(agent, 'pasture'), ...args], { encoding: 'utf8', cwd: cwd ?? caller, env: { ...env, ...extraEnv }, timeout: 60_000 });
+function bellwether(args, { extraEnv = {}, cwd } = {}) {
+  const r = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), ...args], { encoding: 'utf8', cwd: cwd ?? caller, env: { ...env, ...extraEnv }, timeout: 60_000 });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 const read = (f) => fs.readFileSync(f, 'utf8');
 
 describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () => {
   before(async () => {
-    root = tempDir('pasture-m2cli-');
-    agent = path.join(root, 'agents', 'pasture');
+    root = tempDir('bellwether-m2cli-');
+    agent = path.join(root, 'agents', 'bellwether');
     caller = path.join(root, 'caller');
     home = path.join(root, 'home');
     fs.mkdirSync(caller, { recursive: true });
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(agent, 'brain'), { recursive: true });
-    for (const f of ['package.json', 'pasture']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(agent, f));
+    for (const f of ['package.json', 'bellwether']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(agent, f));
     port = await freePort();
     const cfg = JSON.parse(read(path.join(AGENT_DIR, 'config.example.json')));
     cfg.port = port;
     fs.writeFileSync(path.join(agent, 'config.example.json'), JSON.stringify(cfg));
-    env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, PASTURE_DATA_DIR: path.join(root, 'data'), PASTURE_HOOK_TOKEN: TOKEN };
+    env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, BELLWETHER_DATA_DIR: path.join(root, 'data'), BELLWETHER_HOOK_TOKEN: TOKEN };
   });
   after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -649,47 +649,47 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
     const original = { hooks: { Stop: [{ hooks: [cmd('keep'), ...foreign] }], PreToolUse: [{ matcher: 'Bash', hooks: foreign }] }, theme: 'dark' };
     const f = settings('foreign.json', original);
     const text = read(f);
-    assert.equal(pasture(['hooks', 'install', '--write', '--settings', f]).code, 0);
-    assert.equal(pasture(['hooks', 'uninstall', '--write', '--settings', f]).code, 0);
+    assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
+    assert.equal(bellwether(['hooks', 'uninstall', '--write', '--settings', f]).code, 0);
     assert.equal(read(f), text);
   });
 
   test('--port removes only the exact old-port entries; the configured install is untouched; install/print refuse --port', () => {
     const f = settings('portmove.json', { hooks: { Stop: [{ hooks: [cmd('keep')] }] } });
-    assert.equal(pasture(['hooks', 'install', '--write', '--settings', f]).code, 0);
+    assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
     const withOld = JSON.parse(read(f));
     const oldPort = port + 7;
-    for (const e of Object.keys(withOld.hooks)) withOld.hooks[e].push({ hooks: [{ type: 'http', url: `http://127.0.0.1:${oldPort}/hook`, timeout: 1, headers: { 'X-Pasture-Token': 'old' } }] });
+    for (const e of Object.keys(withOld.hooks)) withOld.hooks[e].push({ hooks: [{ type: 'http', url: `http://127.0.0.1:${oldPort}/hook`, timeout: 1, headers: { 'X-Bellwether-Token': 'old' } }] });
     withOld.hooks.Stop.push({ hooks: [http_(`http://127.0.0.1:${oldPort}/hooks`)] });
     fs.writeFileSync(f, JSON.stringify(withOld, null, 2) + '\n');
-    const doc = pasture(['doctor', '--json', '--settings', f]);
+    const doc = bellwether(['doctor', '--json', '--settings', f]);
     assert.match(doc.out, /hooks stray/);
-    const dry = pasture(['hooks', 'uninstall', '--port', String(oldPort), '--settings', f]);
+    const dry = bellwether(['hooks', 'uninstall', '--port', String(oldPort), '--settings', f]);
     assert.equal(dry.code, 0, dry.err);
     assert.equal(read(f), JSON.stringify(withOld, null, 2) + '\n', 'dry run wrote');
-    assert.equal(pasture(['hooks', 'uninstall', '--port', String(oldPort), '--write', '--settings', f]).code, 0);
+    assert.equal(bellwether(['hooks', 'uninstall', '--port', String(oldPort), '--write', '--settings', f]).code, 0);
     const after = JSON.parse(read(f));
     const urls = Object.values(after.hooks).flat().flatMap((g) => g.hooks).map((h) => h.url).filter(Boolean);
     assert.ok(urls.every((u) => u !== `http://127.0.0.1:${oldPort}/hook`));
     assert.ok(urls.includes(`http://127.0.0.1:${oldPort}/hooks`), 'foreign /hooks on the old port was removed');
     assert.equal(urls.filter((u) => u === `http://127.0.0.1:${port}/hook`).length, 16, 'the configured install was disturbed');
     for (const bad of ['--port', '--port=', '--port=abc', '--port=047417', '--port=1e4', '--port=80', '--port=70000', '--port=-1']) {
-      const r = pasture(['hooks', 'uninstall', '--write', '--settings', f, bad]);
+      const r = bellwether(['hooks', 'uninstall', '--write', '--settings', f, bad]);
       assert.equal(r.code, 3, bad);
     }
-    for (const sub of ['install', 'print']) assert.equal(pasture(['hooks', sub, '--port', '47000', '--settings', f]).code, 3, `${sub} accepted --port`);
+    for (const sub of ['install', 'print']) assert.equal(bellwether(['hooks', sub, '--port', '47000', '--settings', f]).code, 3, `${sub} accepted --port`);
     assert.equal(JSON.parse(read(f)).hooks.Stop.length, after.hooks.Stop.length);
   });
 
   test('--port naming the configured port behaves like a normal uninstall and a foreign tool on another port needs an explicit --port', () => {
     const f = settings('portsame.json', { hooks: { Stop: [{ hooks: [http_('http://127.0.0.1:3000/hook')] }] } });
-    assert.equal(pasture(['hooks', 'install', '--write', '--settings', f]).code, 0);
-    assert.equal(pasture(['hooks', 'uninstall', '--write', '--settings', f]).code, 0);
+    assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
+    assert.equal(bellwether(['hooks', 'uninstall', '--write', '--settings', f]).code, 0);
     assert.ok(read(f).includes('127.0.0.1:3000/hook'), 'a plain uninstall removed another tool\'s localhost hook');
   });
 
   test('status: brain down exits 2 with a cause; wrong token exits 3; JSON mode is valid', () => {
-    const down = pasture(['status']);
+    const down = bellwether(['status']);
     assert.equal(down.code, 2);
     assert.match(down.err, /brain not running/);
   });
@@ -697,11 +697,11 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   test('replay refuses nonsense and cannot be turned into a local DoS by its arguments', () => {
     const notRec = path.join(caller, 'x.jsonl');
     fs.writeFileSync(notRec, '{"a":1}\n');
-    assert.equal(pasture(['replay', notRec]).code, 3);
-    assert.equal(pasture(['replay', path.join(caller, 'missing.jsonl')]).code, 3);
+    assert.equal(bellwether(['replay', notRec]).code, 3);
+    assert.equal(bellwether(['replay', path.join(caller, 'missing.jsonl')]).code, 3);
     for (const a of [['--burst', '1e9'], ['--burst', '100', '--seconds', '1e9'], ['--burst', '-1'], ['--burst', 'NaN'], ['--speed', '0'], ['--speed', '-5'], ['--speed', 'abc']]) {
       const t = Date.now();
-      const r = pasture(['replay', ...(a[0] === '--speed' ? [notRec] : []), ...a]);
+      const r = bellwether(['replay', ...(a[0] === '--speed' ? [notRec] : []), ...a]);
       assert.ok(r.code !== 0 && r.code !== null, a.join(' '));
       assert.ok(Date.now() - t < 5000);
       assert.doesNotMatch(r.err, /at .*\.mjs:\d+/);
@@ -709,18 +709,18 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   });
 
   test('replay and status against a live brain: the S2-shaped flow, and --json', async () => {
-    const child = spawn('/bin/sh', [path.join(agent, 'pasture'), 'serve'], { cwd: caller, env });
+    const child = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'serve'], { cwd: caller, env });
     let err = '';
     await new Promise((r) => { child.stderr.on('data', (d) => { err += d; if (err.includes('listening on')) r(); }); });
     try {
       const fixture = path.join(AGENT_DIR, 'test', 'fixtures', 's2-permission-approve.jsonl');
-      const rep = spawnSync('/bin/sh', [path.join(agent, 'pasture'), 'replay', fixture, '--speed', '50'], { encoding: 'utf8', cwd: caller, env });
+      const rep = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'replay', fixture, '--speed', '50'], { encoding: 'utf8', cwd: caller, env });
       assert.equal(rep.status, 0, rep.stderr);
       assert.match(rep.stdout, /every \/hook answer was an empty 204/);
-      const js = spawnSync('/bin/sh', [path.join(agent, 'pasture'), 'status', '--json'], { encoding: 'utf8', cwd: caller, env });
+      const js = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'status', '--json'], { encoding: 'utf8', cwd: caller, env });
       assert.equal(js.status, 0, js.stderr);
       JSON.parse(js.stdout);
-      const wrong = spawnSync('/bin/sh', [path.join(agent, 'pasture'), 'status'], { encoding: 'utf8', cwd: caller, env: { ...env, PASTURE_HOOK_TOKEN: 'someOtherTokenValue1234567890' } });
+      const wrong = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'status'], { encoding: 'utf8', cwd: caller, env: { ...env, BELLWETHER_HOOK_TOKEN: 'someOtherTokenValue1234567890' } });
       assert.equal(wrong.status, 3);
       assert.match(wrong.stderr, /refused the token/);
     } finally {
@@ -730,16 +730,16 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   });
 
   test('a rejected replay-marker check: a hostile recording line cannot inject a bubble through a field that is not allowlisted', async () => {
-    const child = spawn('/bin/sh', [path.join(agent, 'pasture'), 'serve'], { cwd: caller, env });
+    const child = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'serve'], { cwd: caller, env });
     let err = '';
     await new Promise((r) => { child.stderr.on('data', (d) => { err += d; if (err.includes('listening on')) r(); }); });
     try {
       const line = { normalised: { receivedAt: 1, event: 'PreToolUse', sessionId: 's', toolName: 'Bash', toolUseId: 't', toolFingerprint: 'f', toolSummary: 'echo hi', terminal: {} }, rawKeys: { top: ['tool_input', 'prompt', 'tool_response'], tool_input: ['command'] }, headersPresent: [] };
       const f = path.join(caller, 'hostile.jsonl');
       fs.writeFileSync(f, JSON.stringify(line) + '\n');
-      const rep = spawnSync('/bin/sh', [path.join(agent, 'pasture'), 'replay', f], { encoding: 'utf8', cwd: caller, env });
+      const rep = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'replay', f], { encoding: 'utf8', cwd: caller, env });
       assert.equal(rep.status, 0, rep.stderr);
-      const js = spawnSync('/bin/sh', [path.join(agent, 'pasture'), 'status', '--json'], { encoding: 'utf8', cwd: caller, env });
+      const js = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'status', '--json'], { encoding: 'utf8', cwd: caller, env });
       assert.doesNotMatch(js.stdout, /replay:/);
     } finally {
       child.kill('SIGTERM');

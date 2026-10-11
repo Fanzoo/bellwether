@@ -13,15 +13,15 @@ import { cleanLabel, truncate } from './redact.mjs';
  * Elicitation. The recorder passes no cleaner, so recordings never hold free text.
  */
 
-/** Terminal identity headers set by pasture's own hook block (see hooks.mjs). */
+/** Terminal identity headers set by bellwether's own hook block (see hooks.mjs). */
 export const TERMINAL_HEADERS = {
-  program: 'x-pasture-term-program',
-  itermSession: 'x-pasture-iterm-session',
-  termSession: 'x-pasture-term-session',
-  wtSession: 'x-pasture-wt-session',
-  tmuxPane: 'x-pasture-tmux-pane',
-  herdrPane: 'x-pasture-herdr-pane',
-  herdrSocket: 'x-pasture-herdr-socket',
+  program: 'x-bellwether-term-program',
+  itermSession: 'x-bellwether-iterm-session',
+  termSession: 'x-bellwether-term-session',
+  wtSession: 'x-bellwether-wt-session',
+  tmuxPane: 'x-bellwether-tmux-pane',
+  herdrPane: 'x-bellwether-herdr-pane',
+  herdrSocket: 'x-bellwether-herdr-socket',
 };
 
 /** Payload field -> HookEvent field. Every value must be a short identifier or enum. */
@@ -203,14 +203,29 @@ export function rawKeys(payload) {
   return keys;
 }
 
-/** Names of the X-Pasture-* headers that arrived non-empty. */
+/** Names of the X-Bellwether-* headers that arrived non-empty. */
 export function headersPresent(headers) {
   return Object.keys(headers)
-    .filter((h) => h.startsWith('x-pasture-') && h !== 'x-pasture-token' && String(headers[h]).length > 0)
+    .filter((h) => h.startsWith('x-bellwether-') && h !== 'x-bellwether-token' && String(headers[h]).length > 0)
     .sort();
 }
 
 function str(v, max = MAX_SCALAR) {
   if (typeof v !== 'string' || v.length === 0) return undefined;
   return v.length > max ? v.slice(0, max) : v;
+}
+
+/**
+ * Hook entries written before the rename send X-Pasture-* headers. For one release
+ * they are read as the X-Bellwether-* header of the same name, unless that one is
+ * there too (it wins). Changes `headers` in place (Node lower-cases header names).
+ */
+export function adoptLegacyHeaders(headers) {
+  for (const h of Object.keys(headers)) {
+    if (!h.startsWith('x-pasture-')) continue;
+    const now = `x-bellwether-${h.slice('x-pasture-'.length)}`;
+    if (headers[now] === undefined) headers[now] = headers[h];
+    delete headers[h];
+  }
+  return headers;
 }

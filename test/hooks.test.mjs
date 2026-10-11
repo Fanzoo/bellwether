@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { diffStats } from '../brain/diff.mjs';
-import { EVENTS, HTTP_UNSUPPORTED_EVENTS, countGroups, deepEqual, hookBlock, install, isPastureHandler, planEdit, uninstall } from '../brain/hooks.mjs';
+import { EVENTS, HTTP_UNSUPPORTED_EVENTS, countGroups, deepEqual, hookBlock, install, isBellwetherHandler, planEdit, uninstall } from '../brain/hooks.mjs';
 import { AGENT_DIR, FIXTURES, TOKEN, tempDir } from './helpers.mjs';
 
 /**
@@ -14,7 +14,7 @@ import { AGENT_DIR, FIXTURES, TOKEN, tempDir } from './helpers.mjs';
  */
 
 const PORT = 47417;
-const SAFE_HOME = tempDir('pasture-home-');
+const SAFE_HOME = tempDir('bellwether-home-');
 const fixture = () => JSON.parse(fs.readFileSync(path.join(FIXTURES, 'settings-sample.json'), 'utf8'));
 
 function copyFixture() {
@@ -31,7 +31,7 @@ function cli(args, dataDir) {
     encoding: 'utf8',
     // HOME points at a temp dir, so even a regression that fell back to the default
     // settings path could not reach the real ~/.claude/settings.json.
-    env: { ...process.env, PASTURE_HOOK_TOKEN: TOKEN, PASTURE_DATA_DIR: dataDir, HOME: SAFE_HOME, USERPROFILE: SAFE_HOME, PASTURE_CWD: '' },
+    env: { ...process.env, BELLWETHER_HOOK_TOKEN: TOKEN, BELLWETHER_DATA_DIR: dataDir, HOME: SAFE_HOME, USERPROFILE: SAFE_HOME, BELLWETHER_CWD: '' },
   });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
 }
@@ -48,9 +48,9 @@ describe('hook block', () => {
       assert.equal(h.type, 'http');
       assert.equal(h.url, 'http://127.0.0.1:47417/hook');
       assert.equal(h.timeout, 1);
-      assert.equal(h.headers['X-Pasture-Token'], TOKEN);
+      assert.equal(h.headers['X-Bellwether-Token'], TOKEN);
       for (const [name, value] of Object.entries(h.headers)) {
-        if (name === 'X-Pasture-Token') continue;
+        if (name === 'X-Bellwether-Token') continue;
         assert.ok(h.allowedEnvVars.includes(value.slice(1)), `${name} interpolates an allowed variable`);
       }
     }
@@ -67,10 +67,10 @@ describe('hook block', () => {
   });
 
   test('ownership is by URL prefix only', () => {
-    assert.ok(isPastureHandler({ type: 'http', url: 'http://127.0.0.1:47417/hook' }, PORT));
-    assert.ok(!isPastureHandler({ type: 'http', url: 'http://127.0.0.1:47418/hook' }, PORT));
-    assert.ok(!isPastureHandler({ type: 'http', url: 'http://localhost:47417/hook' }, PORT));
-    assert.ok(!isPastureHandler({ type: 'command', command: 'curl http://127.0.0.1:47417/hook' }, PORT));
+    assert.ok(isBellwetherHandler({ type: 'http', url: 'http://127.0.0.1:47417/hook' }, PORT));
+    assert.ok(!isBellwetherHandler({ type: 'http', url: 'http://127.0.0.1:47418/hook' }, PORT));
+    assert.ok(!isBellwetherHandler({ type: 'http', url: 'http://localhost:47417/hook' }, PORT));
+    assert.ok(!isBellwetherHandler({ type: 'command', command: 'curl http://127.0.0.1:47417/hook' }, PORT));
   });
 });
 
@@ -86,7 +86,7 @@ describe('install / uninstall', () => {
     for (const k of Object.keys(before)) if (k !== 'hooks') assert.deepEqual(after[k], before[k], k);
   });
 
-  test('install removes a pasture entry left on an event it no longer subscribes to', () => {
+  test('install removes a bellwether entry left on an event it no longer subscribes to', () => {
     const stale = structuredClone(fixture());
     stale.hooks.SessionStart.push({ hooks: [{ type: 'http', url: 'http://127.0.0.1:47417/hook', timeout: 1 }] });
     const after = install(stale, PORT, TOKEN);
@@ -117,7 +117,7 @@ describe('install / uninstall', () => {
     assert.deepEqual(uninstall(install(bare, PORT, TOKEN), PORT), bare);
   });
 
-  test('uninstall keeps a foreign handler that shares a group with pasture', () => {
+  test('uninstall keeps a foreign handler that shares a group with bellwether', () => {
     const mixed = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'http', url: 'http://127.0.0.1:47417/hook' }] }] } };
     assert.deepEqual(uninstall(mixed, PORT), { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] } });
   });
@@ -174,7 +174,7 @@ describe('the CLI against a temp copy', () => {
     assert.ok(deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), fixture()), 'semantically identical to the original');
   });
 
-  test('hooks print emits a settings file with only pasture hooks (on stdout the token is masked; --out keeps it)', () => {
+  test('hooks print emits a settings file with only bellwether hooks (on stdout the token is masked; --out keeps it)', () => {
     const r = cli(['hooks', 'print'], tempDir());
     assert.equal(r.code, 0, r.stderr);
     assert.ok(!r.stdout.includes(TOKEN), 'stdout shows the token');
@@ -185,15 +185,15 @@ describe('the CLI against a temp copy', () => {
     assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), hookBlock(PORT, TOKEN));
   });
 
-  test('without PASTURE_HOOK_TOKEN, install refuses with exit 3', () => {
+  test('without BELLWETHER_HOOK_TOKEN, install refuses with exit 3', () => {
     const { dir, file } = copyFixture();
     const r = spawnSync(process.execPath, ['brain/cli.mjs', 'hooks', 'install', '--settings', file], {
       cwd: AGENT_DIR,
       encoding: 'utf8',
-      env: { ...process.env, PASTURE_HOOK_TOKEN: '', PASTURE_DATA_DIR: path.join(dir, 'data') },
+      env: { ...process.env, BELLWETHER_HOOK_TOKEN: '', BELLWETHER_DATA_DIR: path.join(dir, 'data') },
     });
     assert.equal(r.status, 3);
-    assert.match(r.stderr, /PASTURE_HOOK_TOKEN is not set/);
+    assert.match(r.stderr, /BELLWETHER_HOOK_TOKEN is not set/);
   });
 });
 
@@ -277,20 +277,20 @@ describe('layout and fidelity', () => {
     test(`round trip is byte-identical: ${name}`, () => assert.equal(roundTrip(text), text));
   }
 
-  test('a file not in pasture\'s layout says so in the preview instead of "every other line is unchanged"', () => {
+  test('a file not in bellwether\'s layout says so in the preview instead of "every other line is unchanged"', () => {
     const { file, data } = write('{ "theme": "dark", "list": [1, 2] }\n');
     const r = cli(['hooks', 'install', '--settings', file], data);
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stderr, /not laid out the way pasture writes JSON/);
+    assert.match(r.stderr, /not laid out the way bellwether writes JSON/);
     assert.doesNotMatch(r.stderr, /every other line of the file is unchanged/);
   });
 
-  test('a file in pasture\'s layout says every other line is unchanged', () => {
+  test('a file in bellwether\'s layout says every other line is unchanged', () => {
     const { file, data } = write(JSON.stringify(base, null, 2) + '\n');
     assert.match(cli(['hooks', 'install', '--settings', file], data).stderr, /every other line of the file is unchanged/);
   });
 
-  test('without an install record, uninstall still removes the event keys pasture added', () => {
+  test('without an install record, uninstall still removes the event keys bellwether added', () => {
     const { file, data } = write('{\n  "theme": "dark"\n}\n');
     assert.equal(cli(['hooks', 'install', '--write', '--settings', file], data).code, 0);
     fs.rmSync(path.join(data, 'installs.json'));
@@ -367,12 +367,12 @@ describe('--out never destroys data', () => {
     const dir = tempDir();
     const out = path.join(dir, 'hooks-only.json');
     assert.equal(cli(['hooks', 'print', '--out', out], dataDir()).code, 0);
-    assert.equal(cli(['hooks', 'print', '--out', out], dataDir()).code, 0, 'a pasture hooks file can be regenerated');
+    assert.equal(cli(['hooks', 'print', '--out', out], dataDir()).code, 0, 'a bellwether hooks file can be regenerated');
     const notes = path.join(dir, 'notes.json');
     fs.writeFileSync(notes, '{"mine": true}');
     const r = cli(['hooks', 'print', '--out', notes], dataDir());
     assert.equal(r.code, 3);
-    assert.match(r.stderr, /not a pasture hooks file/);
+    assert.match(r.stderr, /not a bellwether hooks file/);
     assert.equal(fs.readFileSync(notes, 'utf8'), '{"mine": true}');
     assert.equal(cli(['hooks', 'print', '--out', notes, '--force'], dataDir()).code, 0);
     assert.deepEqual(JSON.parse(fs.readFileSync(notes, 'utf8')), hookBlock(PORT, TOKEN));
@@ -415,9 +415,9 @@ describe('exact-URL ownership (Decision 13)', () => {
     { type: 'http', url: 'http://127.0.0.1:47417/hook/sub' },
   ];
 
-  test('only the exact URL is pasture\'s', () => {
-    assert.ok(isPastureHandler({ type: 'http', url: 'http://127.0.0.1:47417/hook' }, PORT));
-    for (const h of foreign) assert.ok(!isPastureHandler(h, PORT), h.url);
+  test('only the exact URL is bellwether\'s', () => {
+    assert.ok(isBellwetherHandler({ type: 'http', url: 'http://127.0.0.1:47417/hook' }, PORT));
+    for (const h of foreign) assert.ok(!isBellwetherHandler(h, PORT), h.url);
   });
 
   test('foreign …/hooks, …/hook2, …/hook?x and …/hook/sub survive install and uninstall byte-identical', () => {
@@ -449,7 +449,7 @@ describe('exact-URL ownership (Decision 13)', () => {
     fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
     const stray = checkSettings(settings, { port: PORT, token: TOKEN }).find((c) => c.name === 'hooks stray');
     assert.equal(stray.status, 'WARN');
-    assert.match(stray.detail, /pasture hooks uninstall --port 47500 --write/);
+    assert.match(stray.detail, /bellwether hooks uninstall --port 47500 --write/);
     const data = path.join(dir, 'data');
     // install on the configured port adds its own groups and leaves the old ones
     assert.equal(cli(['hooks', 'install', '--write', '--settings', file], data).code, 0);

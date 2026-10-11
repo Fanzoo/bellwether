@@ -4,14 +4,15 @@ import path from 'node:path';
 import { envAssignments } from './envfile.mjs';
 import { CliError, EXIT } from './util.mjs';
 
-const KEY = 'PASTURE_HOOK_TOKEN';
+const KEY = 'BELLWETHER_HOOK_TOKEN';
+export const OLD_KEY = 'PASTURE_HOOK_TOKEN';
 
 /**
- * `pasture token init`: puts a fresh PASTURE_HOOK_TOKEN into the .env, once. That
+ * `bellwether token init`: puts a fresh BELLWETHER_HOOK_TOKEN into the .env, once. That
  * file holds every account's credentials, so it is never put at risk:
  *
- * - Read the way Node reads it (envfile.mjs): if the *last* PASTURE_HOOK_TOKEN line has
- *   a value, nothing changes. If it is empty (`PASTURE_HOOK_TOKEN=`, or `= # note`), that
+ * - Read the way Node reads it (envfile.mjs): if the *last* BELLWETHER_HOOK_TOKEN line has
+ *   a value, nothing changes. If it is empty (`BELLWETHER_HOOK_TOKEN=`, or `= # note`), that
  *   line is filled in place; otherwise one line is appended, after a line break if the
  *   file doesn't end with one.
  * - CRLF files stay CRLF.
@@ -20,8 +21,12 @@ const KEY = 'PASTURE_HOOK_TOKEN';
  *   The previous contents are kept in `<file>.bak` (mode 0600). A failure leaves the
  *   original untouched and says why, in one line.
  * - A new file is created 0600. The token is never printed.
+ * - A file from before the rename, with only PASTURE_HOOK_TOKEN set, gets that same
+ *   value under the new name (the old line stays), so the hook entries already
+ *   installed keep matching. `value` (from `bellwether migrate`) does the same with a
+ *   token read from elsewhere.
  */
-export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toString('base64url') } = {}) {
+export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toString('base64url'), value = null } = {}) {
   let real = envFile;
   let text = '';
   let mode = 0o600;
@@ -43,10 +48,12 @@ export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toS
   const all = envAssignments(text, KEY);
   const last = all[all.length - 1];
   if (last && last.value !== '') {
-    return { changed: false, message: `${KEY} is already set in ${envFile}; left alone (to replace it, edit the file, then re-run \`pasture hooks install --write\`)` };
+    return { changed: false, message: `${KEY} is already set in ${envFile}; left alone (to replace it, edit the file, then re-run \`bellwether hooks install --write\`)` };
   }
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const token = generate();
+  const old = envAssignments(text, OLD_KEY).at(-1)?.value || null;
+  const from = value ? 'the old install' : old ? `${OLD_KEY} in the same file` : null;
+  const token = value || old || generate();
   const assignment = `${KEY}=${token}`;
   let next;
   if (last) {
@@ -57,7 +64,7 @@ export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toS
     next = text + (text && !text.endsWith('\n') ? eol : '') + assignment + eol;
   }
   const dir = path.dirname(real);
-  const tmp = path.join(dir, `.${path.basename(real)}.pasture-${process.pid}-${Date.now()}.tmp`);
+  const tmp = path.join(dir, `.${path.basename(real)}.bellwether-${process.pid}-${Date.now()}.tmp`);
   try {
     if (exists) {
       const bak = `${real}.bak`;
@@ -79,5 +86,6 @@ export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toS
     } catch {}
     throw new CliError(`can't write ${envFile} (${e.code ?? e.message}); it was not changed`, EXIT.BAD_CONFIG);
   }
-  return { changed: true, message: `added a new ${KEY} to ${envFile}${last ? ' (filled the empty line)' : ''}${exists ? `; the previous contents are in ${real}.bak` : ''}; the value isn't shown` };
+  const what = from ? `${KEY} (the same value as ${from}, so installed hooks keep working)` : `a new ${KEY}`;
+  return { changed: true, message: `added ${what} to ${envFile}${last ? ' (filled the empty line)' : ''}${exists ? `; the previous contents are in ${real}.bak` : ''}; the value isn't shown` };
 }

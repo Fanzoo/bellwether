@@ -104,7 +104,7 @@ pub fn read_prefs() -> DockPrefs {
 mod tests {
     use super::*;
 
-    // A 14-inch MacBook (measured): screen 1728x1117, menu bar 25 pt, Dock 66 pt shown.
+    // Example geometry: screen 1728x1117, menu bar 25 pt, Dock 66 pt shown.
     const SCREEN: Frame = Frame { x: 0.0, y: 0.0, w: 1728.0, h: 1117.0 };
     const WITH_DOCK: Frame = Frame { x: 0.0, y: 25.0, w: 1728.0, h: 1026.0 };
     // Auto-hide: macOS keeps a few points reserved at the bottom for the hidden Dock.
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn a_shown_dock_keeps_the_strip_just_above_it() {
         let r = strip_rect_in(SCREEN, WITH_DOCK, DockPrefs { autohide: false, side: Side::Bottom }, 140.0);
-        assert_eq!(r, Frame { x: 0.0, y: 911.0, w: 1728.0, h: 140.0 }, "today's strip, measured: y 911");
+        assert_eq!(r, Frame { x: 0.0, y: 911.0, w: 1728.0, h: 140.0 }, "the strip above the Dock: y 911");
     }
 
     #[test]

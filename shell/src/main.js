@@ -1,5 +1,5 @@
 // The strip's webview: draws the sheep and reports where they are. It has no network
-// access (CSP connect-src is Tauri's IPC only) and calls only pasture's own commands:
+// access (CSP connect-src is Tauri's IPC only) and calls only bellwether's own commands:
 // get_pet, get_snapshot, report_hitboxes, sprite_clicked, shell_log, and with --snapshot
 // (debug) debug_snapshot.
 
@@ -46,7 +46,7 @@ let display; // config the shell passed: palette, scale, slotWidthPx, homeWander
 const sprites = new Map();
 let hovered = null;
 let dirty = true;
-// Milestone 7. muted: the brain's do-not-disturb (tray Mute, `pasture mute`).
+// Milestone 7. muted: the brain's do-not-disturb (tray Mute, `bellwether mute`).
 // view: the shell's part of each snapshot: hidden (sharing, or the tray's Hide),
 // showLabels (tray), near (sprite keys within fade.radiusPx of the cursor).
 let muted = false;
@@ -850,7 +850,7 @@ async function boot() {
   // requestAnimationFrame, keeps the CPU near zero when nothing moves.
   setInterval(frame, 50);
   if (display.trace) {
-    // PASTURE_SHELL_TRACE: a heartbeat, to tell a busy webview from a throttled one.
+    // BELLWETHER_SHELL_TRACE: a heartbeat, to tell a busy webview from a throttled one.
     let beats = 0;
     setInterval(() => log(`trace: heartbeat ${++beats}, ${sprites.size} sprites, page ${document.visibilityState}`), 1000);
     document.addEventListener('visibilitychange', () => log(`trace: visibility -> ${document.visibilityState}`));

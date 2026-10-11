@@ -67,7 +67,7 @@ const split = (resp) => {
 };
 
 before(async () => {
-  root = tempDir('pasture-br3k-');
+  root = tempDir('bellwether-br3k-');
   home = path.join(root, 'home');
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(root, 'brain'), { recursive: true });
@@ -77,7 +77,7 @@ before(async () => {
   cfg.port = port;
   fs.writeFileSync(path.join(root, 'config.example.json'), JSON.stringify(cfg));
   settingsPath = path.join(home, '.claude', 'settings.json');
-  env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, PASTURE_DATA_DIR: path.join(root, 'data'), PASTURE_HOOK_TOKEN: TOKEN };
+  env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, BELLWETHER_DATA_DIR: path.join(root, 'data'), BELLWETHER_HOOK_TOKEN: TOKEN };
 });
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -112,7 +112,7 @@ describe('hook endpoint: every path and method answers without a body', () => {
     const offenders = [];
     for (const m of methods)
       for (const p of paths) {
-        const good = `Host: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nX-Pasture-Token: ${TOKEN}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}`;
+        const good = `Host: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nX-Bellwether-Token: ${TOKEN}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}`;
         const bad = `Host: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`;
         for (const hdrs of [good, bad]) {
           const { head, body } = split(await raw(port, `${m} ${p} HTTP/1.1\r\n${hdrs}`));
@@ -139,9 +139,9 @@ describe('hook endpoint: every path and method answers without a body', () => {
       'GARBAGE\r\n\r\n',
       `POST /hook HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n`,
       `POST /hook HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n`,
-      `POST /hook HTTP/1.0\r\nContent-Type: application/json\r\nX-Pasture-Token: ${TOKEN}\r\nContent-Length: 2\r\n\r\n{}`,
-      `POST /hook HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nHost: evil.example\r\nContent-Type: application/json\r\nX-Pasture-Token: ${TOKEN}\r\nContent-Length: 2\r\n\r\n{}`,
-      `POST /hook HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nX-Pasture-Token: ${TOKEN}\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n{}`,
+      `POST /hook HTTP/1.0\r\nContent-Type: application/json\r\nX-Bellwether-Token: ${TOKEN}\r\nContent-Length: 2\r\n\r\n{}`,
+      `POST /hook HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nHost: evil.example\r\nContent-Type: application/json\r\nX-Bellwether-Token: ${TOKEN}\r\nContent-Length: 2\r\n\r\n{}`,
+      `POST /hook HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nX-Bellwether-Token: ${TOKEN}\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n{}`,
     ];
     for (const c of cases) {
       const resp = (await raw(port, c)).replace(/^HTTP\/1\.1 100 Continue\r\n\r\n/, '');
@@ -153,7 +153,7 @@ describe('hook endpoint: every path and method answers without a body', () => {
   test('chunked oversize body (9 MiB, no Content-Length) still ends in an empty 204', async () => {
     const chunk = Buffer.alloc(1024 * 1024, 0x20);
     const resp = await new Promise((resolve) => {
-      const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/hook', headers: { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-Pasture-Token': TOKEN, 'Transfer-Encoding': 'chunked' } }, (res) => {
+      const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/hook', headers: { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-Bellwether-Token': TOKEN, 'Transfer-Encoding': 'chunked' } }, (res) => {
         const c = [];
         res.on('data', (d) => c.push(d));
         res.on('end', () => resolve({ status: res.statusCode, len: Buffer.concat(c).length }));
@@ -167,7 +167,7 @@ describe('hook endpoint: every path and method answers without a body', () => {
   test('a good request with a hostile hook_event_name or deeply nested tool_input is still an empty 204, and the brain survives', async () => {
     const deep = '['.repeat(200000) + ']'.repeat(200000);
     for (const body of [JSON.stringify({ hook_event_name: { a: 1 }, session_id: [] }), `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":${deep}}`, '{"__proto__":{"polluted":true},"hook_event_name":"Stop"}']) {
-      const { head, body: b } = split(await raw(port, `POST /hook HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nX-Pasture-Token: ${TOKEN}\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`, { wait: 800 }));
+      const { head, body: b } = split(await raw(port, `POST /hook HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nX-Bellwether-Token: ${TOKEN}\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`, { wait: 800 }));
       assert.match(head, /^HTTP\/1.1 204/);
       assert.equal(b, '');
     }
@@ -178,7 +178,7 @@ describe('hook endpoint: every path and method answers without a body', () => {
 
   test('DNS-rebinding style Hosts are refused even with a valid token', async () => {
     for (const host of [`evil.example:${port}`, `127.0.0.1.evil.example:${port}`, `localhost.evil.example:${port}`, '127.0.0.1', `localhost`, `0.0.0.0:${port}`, `[::1]:${port}`, `127.1:${port}`, `2130706433:${port}`]) {
-      const resp = await raw(port, `POST /hook HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\nX-Pasture-Token: ${TOKEN}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}`);
+      const resp = await raw(port, `POST /hook HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\nX-Bellwether-Token: ${TOKEN}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}`);
       assert.match(resp, /^HTTP\/1.1 403/, `Host: ${host}`);
     }
   });
@@ -226,7 +226,7 @@ describe('recorder keeps no free text', () => {
     for (const e of events) {
       const body = JSON.stringify(e);
       const res = await new Promise((resolve) => {
-        const q = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/hook', headers: hookHeaders(port, { 'Content-Length': Buffer.byteLength(body), 'X-Pasture-Herdr-Pane': 'w1:p1' }) }, (r) => (r.resume(), r.on('end', () => resolve(r.statusCode))));
+        const q = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/hook', headers: hookHeaders(port, { 'Content-Length': Buffer.byteLength(body), 'X-Bellwether-Herdr-Pane': 'w1:p1' }) }, (r) => (r.resume(), r.on('end', () => resolve(r.statusCode))));
         q.end(body);
       });
       assert.equal(res, 204);
@@ -309,7 +309,7 @@ describe('installer ownership and unusual settings shapes', () => {
     assert.equal(backups(), n0, 'a refused file must not leave a backup');
   });
 
-  test('other hooks on the same events: untouched, same order, pasture group appended last', () => {
+  test('other hooks on the same events: untouched, same order, bellwether group appended last', () => {
     const original = { hooks: { PreToolUse: [hookCmd('a'), { matcher: 'Bash', ...hookCmd('b') }, hookCmd('c')], Stop: [hookCmd('d')] }, statusLine: { type: 'command', command: 'x' } };
     const r = run('others', original);
     const after = JSON.parse(sh(r.f));
@@ -328,8 +328,8 @@ describe('installer ownership and unusual settings shapes', () => {
     assert.deepEqual(JSON.parse(sh(r.f)), original);
   });
 
-  test('an existing pasture entry with an old token and a stray matcher is replaced, not duplicated', () => {
-    const old = { type: 'http', url: `http://127.0.0.1:${port}/hook`, timeout: 600, headers: { 'X-Pasture-Token': 'old' } };
+  test('an existing bellwether entry with an old token and a stray matcher is replaced, not duplicated', () => {
+    const old = { type: 'http', url: `http://127.0.0.1:${port}/hook`, timeout: 600, headers: { 'X-Bellwether-Token': 'old' } };
     const r = run('old-entry', { hooks: { Stop: [{ matcher: 'x', hooks: [old] }, hookCmd('mine')] } });
     const s = JSON.parse(sh(r.f));
     const mine = s.hooks.Stop.flatMap((g) => g.hooks).filter((h) => h.url?.startsWith(`http://127.0.0.1:${port}/hook`));
@@ -387,7 +387,7 @@ describe('installer ownership and unusual settings shapes', () => {
     fs.writeFileSync(f, '{\n  "theme": "dark"\n}\n');
     const plan = planEdit(f, 'install', { port, token: TOKEN });
     fs.writeFileSync(f, '{\n  "theme": "light"\n}\n');
-    assert.throws(() => applyPlan(plan, path.join(root, 'data', 'backups-race')), /changed while pasture was editing/);
+    assert.throws(() => applyPlan(plan, path.join(root, 'data', 'backups-race')), /changed while bellwether was editing/);
     assert.match(sh(f), /light/);
   });
 
@@ -395,11 +395,11 @@ describe('installer ownership and unusual settings shapes', () => {
     // The token is masked on stdout by design (M10-7); the real value goes only to --out files.
     const stdout = cli(['hooks', 'print']).out;
     assert.ok(!stdout.includes(TOKEN), 'hooks print wrote the real token to stdout');
-    assert.match(stdout, new RegExp(`"X-Pasture-Token": "${TOKEN.slice(0, 4)}…"`), 'stdout is masked to the first four characters');
+    assert.match(stdout, new RegExp(`"X-Bellwether-Token": "${TOKEN.slice(0, 4)}…"`), 'stdout is masked to the first four characters');
     const outFile = path.join(root, 'print-out.json');
     assert.equal(cli(['hooks', 'print', '--out', outFile]).code, 0);
     const printed = JSON.parse(fs.readFileSync(outFile, 'utf8'));
-    assert.equal(printed.hooks.Stop[0].hooks[0].headers['X-Pasture-Token'], TOKEN);
+    assert.equal(printed.hooks.Stop[0].hooks[0].headers['X-Bellwether-Token'], TOKEN);
     const r = run('print-vs-install', {});
     assert.deepEqual(JSON.parse(sh(r.f)).hooks, printed.hooks);
   });
@@ -418,11 +418,11 @@ describe('doctor', () => {
   };
   const check = (r, name) => JSON.parse(r.out).checks.find((c) => c.name === name);
 
-  test('brain down: exit 2, "brain not running — run `pasture serve`", and no token value in the output', () => {
+  test('brain down: exit 2, "brain not running — run `bellwether serve`", and no token value in the output', () => {
     const f = settingsWith(() => {});
     const r = cli(['doctor', '--settings', f]);
     assert.equal(r.code, 2);
-    assert.match(r.out, /brain not running — run `pasture serve`/);
+    assert.match(r.out, /brain not running — run `bellwether serve`/);
     assert.ok(!(r.out + r.err).includes(TOKEN));
   });
 
@@ -439,7 +439,7 @@ describe('doctor', () => {
     }
   });
 
-  test('a timeout only wrong on a pasture entry that shares a group with another tool is still found', () => {
+  test('a timeout only wrong on a bellwether entry that shares a group with another tool is still found', () => {
     const f = settingsWith((s) => {
       s.hooks.Stop[0].hooks.unshift({ type: 'command', command: 'x', timeout: 600 });
       s.hooks.Stop[0].hooks[1].timeout = 99;
@@ -454,20 +454,20 @@ describe('doctor', () => {
     const bad = path.join(root, 'bad.json');
     fs.writeFileSync(bad, '{ nope');
     assert.match(check(doctor(bad), 'hooks installed').detail, /not valid JSON/);
-    assert.equal(check(doctor(settingsWith((s) => { s.hooks.Stop[0].hooks[0].headers['X-Pasture-Token'] = 'other'; })), 'hook token').status, 'FAIL');
+    assert.equal(check(doctor(settingsWith((s) => { s.hooks.Stop[0].hooks[0].headers['X-Bellwether-Token'] = 'other'; })), 'hook token').status, 'FAIL');
     assert.equal(check(doctor(settingsWith((s) => { s.disableAllHooks = true; })), 'disableAllHooks').status, 'FAIL');
     assert.equal(check(doctor(settingsWith((s) => { s.allowedHttpHookUrls = ['https://example.com/*']; })), 'allowedHttpHookUrls').status, 'FAIL');
     assert.equal(check(doctor(settingsWith((s) => { s.allowedHttpHookUrls = []; })), 'allowedHttpHookUrls').status, 'FAIL');
   });
 
-  test('missing token: exit 3 naming PASTURE_HOOK_TOKEN; short or odd token: exit 3', () => {
+  test('missing token: exit 3 naming BELLWETHER_HOOK_TOKEN; short or odd token: exit 3', () => {
     const f = settingsWith(() => {});
     for (const t of [undefined, '', 'short', 'has space in it-----------', 'quote"quote_quote_quote']) {
       const e = { ...env };
-      if (t === undefined) delete e.PASTURE_HOOK_TOKEN; else e.PASTURE_HOOK_TOKEN = t;
+      if (t === undefined) delete e.BELLWETHER_HOOK_TOKEN; else e.BELLWETHER_HOOK_TOKEN = t;
       const r = spawnSync(process.execPath, [path.join(root, 'brain', 'cli.mjs'), 'doctor', '--settings', f], { encoding: 'utf8', env: e });
       assert.equal(r.status, 3, JSON.stringify(t));
-      assert.match(r.stdout, /PASTURE_HOOK_TOKEN/);
+      assert.match(r.stdout, /BELLWETHER_HOOK_TOKEN/);
     }
   });
 
@@ -501,12 +501,12 @@ describe('doctor', () => {
   });
 
   test('brain with a different token: FAIL "brain token" naming the cause', async () => {
-    const b = await startBrain([], { PASTURE_HOOK_TOKEN: 'someOtherTokenValue1234567890' });
+    const b = await startBrain([], { BELLWETHER_HOOK_TOKEN: 'someOtherTokenValue1234567890' });
     try {
       const r = doctor(settingsWith(() => {}));
       const c = check(r, 'brain token');
       assert.equal(c.status, 'FAIL');
-      assert.match(c.detail, /different PASTURE_HOOK_TOKEN/);
+      assert.match(c.detail, /different BELLWETHER_HOOK_TOKEN/);
     } finally {
       await b.stop();
     }
@@ -552,11 +552,11 @@ describe('doctor', () => {
     }
   });
 
-  test('a fake pasture /health in front of a /hook that never answers is not reported as healthy', async () => {
+  test('a fake bellwether /health in front of a /hook that never answers is not reported as healthy', async () => {
     const s = http.createServer((q, res) => {
       if (q.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, name: 'pasture', pid: 1, version: 'x', counters: {} }));
+        res.end(JSON.stringify({ ok: true, name: 'bellwether', pid: 1, version: 'x', counters: {} }));
       }
     });
     await new Promise((r) => s.listen(port, '127.0.0.1', r));
@@ -602,30 +602,30 @@ describe('fixtures and recordings', () => {
 
 describe('shim', () => {
   test('exits 3 with a message when node is not on PATH, and passes the exit code through otherwise', { skip: process.platform === 'win32' }, () => {
-    const shim = path.join(AGENT_DIR, 'pasture');
+    const shim = path.join(AGENT_DIR, 'bellwether');
     const noNode = spawnSync('/bin/sh', [shim, 'doctor'], { encoding: 'utf8', env: { PATH: '/nonexistent' } });
     assert.equal(noNode.status, 3);
     assert.match(noNode.stderr, /node is not installed/);
-    const unknown = spawnSync('/bin/sh', [shim, 'bogus-command'], { encoding: 'utf8', env: { PATH: process.env.PATH, PASTURE_DATA_DIR: path.join(root, 'd2') }, cwd: os.tmpdir() });
+    const unknown = spawnSync('/bin/sh', [shim, 'bogus-command'], { encoding: 'utf8', env: { PATH: process.env.PATH, BELLWETHER_DATA_DIR: path.join(root, 'd2') }, cwd: os.tmpdir() });
     assert.equal(unknown.status, 1);
     assert.match(unknown.stderr, /unknown command/);
   });
 
   test('works from another directory and from a path with spaces', { skip: process.platform === 'win32' }, () => {
     const spaced = path.join(root, 'dir with spaces');
-    fs.mkdirSync(path.join(spaced, 'agents', 'pasture'), { recursive: true });
-    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(spaced, 'agents', 'pasture', 'brain'), { recursive: true });
-    for (const f of ['pasture', 'package.json', 'config.example.json']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(spaced, 'agents', 'pasture', f));
-    const r = spawnSync('/bin/sh', [path.join(spaced, 'agents', 'pasture', 'pasture'), 'hooks', 'print'], { encoding: 'utf8', cwd: os.tmpdir(), env: { PATH: process.env.PATH, PASTURE_HOOK_TOKEN: TOKEN } });
+    fs.mkdirSync(path.join(spaced, 'agents', 'bellwether'), { recursive: true });
+    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(spaced, 'agents', 'bellwether', 'brain'), { recursive: true });
+    for (const f of ['bellwether', 'package.json', 'config.example.json']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(spaced, 'agents', 'bellwether', f));
+    const r = spawnSync('/bin/sh', [path.join(spaced, 'agents', 'bellwether', 'bellwether'), 'hooks', 'print'], { encoding: 'utf8', cwd: os.tmpdir(), env: { PATH: process.env.PATH, BELLWETHER_HOOK_TOKEN: TOKEN } });
     assert.equal(r.status, 0, r.stderr);
     assert.ok(JSON.parse(r.stdout).hooks.Stop);
   });
 
-  test('pasture.cmd: CRLF, forwards args and exit code, restores the directory', () => {
-    const cmd = fs.readFileSync(path.join(AGENT_DIR, 'pasture.cmd'), 'latin1');
+  test('bellwether.cmd: CRLF, forwards args and exit code, restores the directory', () => {
+    const cmd = fs.readFileSync(path.join(AGENT_DIR, 'bellwether.cmd'), 'latin1');
     assert.ok(cmd.split('\n').filter(Boolean).every((l) => l.endsWith('\r')), 'every line ends in CRLF');
     assert.match(cmd, /node brain\/cli\.mjs %\*/);
-    assert.match(cmd, /exit \/b %PASTURE_EXIT%/);
+    assert.match(cmd, /exit \/b %BELLWETHER_EXIT%/);
     assert.match(cmd, /popd/);
   });
 });

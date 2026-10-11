@@ -1,4 +1,4 @@
-Bellwether (the `pasture` command): a desktop-pet overlay for Claude Code sessions
+Bellwether (formerly pasture): a desktop-pet overlay for Claude Code sessions
 MIT licence; see LICENSE.
 
 Bellwether is inspired by desktopPet and its eSheep, and plays desktopPet's pet format.
@@ -8,14 +8,14 @@ THIRD-PARTY FORMATS, CODE AND ASSETS
 
 desktopPet (Adrianotiger/desktopPet), MIT licence
   https://github.com/Adrianotiger/desktopPet
-  pasture's player reads desktopPet's pet format (animations.xml and its schema,
+  bellwether's player reads desktopPet's pet format (animations.xml and its schema,
   Resources/animations.xsd). The format and schema are used as a reference, with
   attribution, as the project's README asks ("Please retain attribution ... in any
-  redistributed version"). No desktopPet code is copied into pasture.
+  redistributed version"). No desktopPet code is copied into bellwether.
 
 Pet art (the sprite sheets inside each animations.xml): NOT included
   The art is NOT committed to this repository and NOT bundled into any build.
-  `pasture pets fetch` downloads it on each user's machine into data/pets/
+  `bellwether pets fetch` downloads it on each user's machine into data/pets/
   (gitignored) from desktopPet at the pinned commit
   1ba33bebed993439f03e502b37e9bd2daf061773, checked against the sha256 in
   pets.lock.json.
@@ -28,7 +28,7 @@ Pet art (the sprite sheets inside each animations.xml): NOT included
 web-esheep (Adrianotiger/web-esheep), GPL-3.0: NOT vendored
   https://github.com/Adrianotiger/web-esheep
   Used only as a behavioural reference for how the pet XML is interpreted. None of its
-  code (esheep.js) is vendored, bundled or copied; pasture's player
+  code (esheep.js) is vendored, bundled or copied; bellwether's player
   (shell/src/player/) was written from the desktopPet schema and wiki. Vendoring
   esheep.js would make the shell a GPL-3.0 derivative.
 
@@ -49,7 +49,7 @@ Shell (Rust/Tauri): the crates in shell/src-tauri/Cargo.lock, almost all MIT and
 Apache-2.0. A few use other permissive licences (Unicode-3.0, Zlib, BSD-3-Clause,
 Unlicense, 0BSD), and five are MPL-2.0 (cssparser, cssparser-macros, dtoa-short,
 option-ext, selectors). Those are linked unmodified, which MPL-2.0 permits without
-opening pasture's own source. Every crate, version and licence is listed in
+opening bellwether's own source. Every crate, version and licence is listed in
 THIRD-PARTY.md, generated offline by `node scripts/third-party.mjs`.
 
 Shell (npm): one devDependency, @tauri-apps/cli (Apache-2.0 OR MIT), used only to

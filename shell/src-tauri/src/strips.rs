@@ -87,7 +87,7 @@ pub fn open<R: Runtime>(app: &AppHandle<R>, monitor: &Monitor, height_px: f64, i
     let r = strip_rect(monitor, height_px, crate::dock::read_prefs());
     let label = format!("strip-{index}");
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-        .title("pasture")
+        .title("bellwether")
         .decorations(false)
         .transparent(true)
         .shadow(false)

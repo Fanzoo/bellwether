@@ -38,8 +38,8 @@ describe('the horn mask, on every colour esheep64 uses', () => {
 });
 
 const xml = path.join(AGENT_DIR, 'data', 'pets', 'esheep64', 'animations.xml');
-describe('the horn mask, frame by frame on the real sheet', { skip: !fs.existsSync(xml) && 'no pet art here (pasture pets fetch)' }, () => {
-  test('every frame of every animation pasture uses shows horns; the frames without are only bath, flower and black-sheep ones', () => {
+describe('the horn mask, frame by frame on the real sheet', { skip: !fs.existsSync(xml) && 'no pet art here (bellwether pets fetch)' }, () => {
+  test('every frame of every animation bellwether uses shows horns; the frames without are only bath, flower and black-sheep ones', () => {
     const text = fs.readFileSync(xml, 'utf8');
     const sheet = petSheet(text);
     const tilesx = Number(/<tilesx>(\d+)/.exec(text)[1]);
@@ -56,7 +56,7 @@ describe('the horn mask, frame by frame on the real sheet', { skip: !fs.existsSy
     for (const name of used) for (const f of anims[name] ?? []) assert.ok(horny.has(f), `${name} frame ${f} has no horns`);
     const without = Object.entries(anims).filter(([, fs2]) => fs2.some((f) => !horny.has(f))).map(([n]) => n).sort();
     // Horns are hidden only while the sheep is in the bath, behind a flower, or swapped
-    // for the black sheep; none of these is mapped to a pasture behaviour.
+    // for the black sheep; none of these is mapped to a bellwether behaviour.
     assert.ok(without.length > 0 && without.every((n) => /^(bath|flower|blacksheep)/.test(n)), without.join(', '));
   });
 });

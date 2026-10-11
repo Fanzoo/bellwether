@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "pasture",
+  "productName": "Bellwether",
   "version": "0.1.0",
-  "identifier": "local.pasture",
+  "identifier": "local.bellwether",
   "build": {
     "frontendDist": "../src"
   },

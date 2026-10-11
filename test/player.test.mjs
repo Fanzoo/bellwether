@@ -33,10 +33,10 @@ describe('the expression evaluator', () => {
 
   test('hostile or malformed expressions evaluate to 0 with one warning each, and nothing runs', () => {
     const warnings = [];
-    globalThis.__pastureExprPwned = false;
+    globalThis.__bellwetherExprPwned = false;
     const hostile = [
       'alert(1)',
-      "constructor.constructor('globalThis.__pastureExprPwned=true')()",
+      "constructor.constructor('globalThis.__bellwetherExprPwned=true')()",
       'screenW.constructor',
       'imageW;imageH',
       '"text"',
@@ -50,7 +50,7 @@ describe('the expression evaluator', () => {
       '`${1}`',
     ];
     for (const e of hostile) assert.equal(evaluate(e, ENV, (w) => warnings.push(w)), 0, e);
-    assert.equal(globalThis.__pastureExprPwned, false);
+    assert.equal(globalThis.__bellwetherExprPwned, false);
     assert.equal(warnings.length, hostile.length);
     evaluate('alert(1)', ENV, (w) => warnings.push(w));
     assert.equal(warnings.length, hostile.length, 'warned once per expression');

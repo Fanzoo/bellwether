@@ -15,7 +15,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
  *   2. Host not 127.0.0.1:<port> or localhost:<port> -> 403
  *   3. Content-Type not application/json -> 403  (forces a CORS preflight, which
  *      the brain never answers)
- *   4. X-Pasture-Token wrong or missing -> 403, compared in constant time
+ *   4. X-Bellwether-Token wrong or missing -> 403, compared in constant time
  *
  * Everything past the guards fails open and silent: a malformed body, an oversize
  * body, an unknown event or a throwing consumer all still get 204. The answer is
@@ -39,7 +39,7 @@ export function newCounters() {
 /**
  * @param {object} o
  * @param {number} o.port         the port actually bound, for the Host check
- * @param {string} o.token        PASTURE_HOOK_TOKEN
+ * @param {string} o.token        BELLWETHER_HOOK_TOKEN
  * @param {(payload: object, headers: object, receivedAt: number) => void} o.onEvent
  * @param {Set<string>} o.knownEvents
  * @param {object} o.counters     from newCounters()
@@ -125,7 +125,7 @@ function rejectionReason(headers, allowedHosts, expected) {
   if (!allowedHosts.has(String(headers.host ?? '').toLowerCase())) return 'host';
   const mediaType = String(headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
   if (mediaType !== 'application/json') return 'contentType';
-  const given = headers['x-pasture-token'];
+  const given = headers['x-bellwether-token'];
   if (typeof given !== 'string' || !timingSafeEqual(digest(given), expected)) return 'token';
   return null;
 }

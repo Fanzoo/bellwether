@@ -8,25 +8,25 @@ import { AGENT_DIR, FIXTURES, request, tempDir } from './helpers.mjs';
 
 /**
  * Tester full regression (2026-10-09). A copy of the brain on its own port, throwaway
- * token, HOME and PASTURE_DATA_DIR in temp directories, driven the way Claude Code
+ * token, HOME and BELLWETHER_DATA_DIR in temp directories, driven the way Claude Code
  * and a user would drive it. Never touches ~/.claude/settings.json or the real .env.
  */
 
 const TOKEN = 'regressionTokenNotReal_0123456789';
 const PORT = 47000 + (process.pid % 900) + 100;
-const ROOT = tempDir('pasture-reg-');
+const ROOT = tempDir('bellwether-reg-');
 const HUB = path.join(ROOT, 'hub');
-const AGENT = path.join(HUB, 'agents', 'pasture');
+const AGENT = path.join(HUB, 'agents', 'bellwether');
 const DATA = path.join(ROOT, 'data');
 const HOME = path.join(ROOT, 'home');
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');
 const CLI = path.join(AGENT, 'brain', 'cli.mjs');
-const env = { PATH: process.env.PATH, HOME, PASTURE_DATA_DIR: DATA, PASTURE_HOOK_TOKEN: TOKEN };
+const env = { PATH: process.env.PATH, HOME, BELLWETHER_DATA_DIR: DATA, BELLWETHER_HOOK_TOKEN: TOKEN };
 let server;
 let serverErr = '';
 
 const cli = (args, extra = {}) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 30000, env: { ...env, ...extra }, cwd: AGENT });
-const hdr = (extra = {}) => ({ Host: `127.0.0.1:${PORT}`, 'Content-Type': 'application/json', 'X-Pasture-Token': TOKEN, 'X-Pasture-Term-Program': 'iTerm.app', 'X-Pasture-Herdr-Pane': 'w1:p1', 'X-Pasture-Herdr-Socket': '/tmp/regression-not-real.sock', ...extra });
+const hdr = (extra = {}) => ({ Host: `127.0.0.1:${PORT}`, 'Content-Type': 'application/json', 'X-Bellwether-Token': TOKEN, 'X-Bellwether-Term-Program': 'iTerm.app', 'X-Bellwether-Herdr-Pane': 'w1:p1', 'X-Bellwether-Herdr-Socket': '/tmp/regression-not-real.sock', ...extra });
 const post = (payload, headers = hdr()) => request(PORT, { path: '/hook', headers, body: JSON.stringify(payload) });
 const SID = 'aaaaaaaa-1111-4222-8333-000000000001';
 const ev = (name, o = {}) => post({ hook_event_name: name, session_id: SID, cwd: '/Users/example/projects/meadow', permission_mode: 'default', ...o });
@@ -185,7 +185,7 @@ describe('a session, end to end (M1 listener + M2 state + M3 status)', () => {
 
 describe('guards still hold with state and control in the mix (M1 vs M3)', () => {
   test('/hook, /state and /control refuse a missing token, a wrong token, an Origin and a foreign Host, with no body', async () => {
-    const bad = [hdr({ 'X-Pasture-Token': undefined }), hdr({ 'X-Pasture-Token': 'wrong' + TOKEN }), hdr({ Origin: 'http://evil.example' }), hdr({ Host: 'evil.example' })];
+    const bad = [hdr({ 'X-Bellwether-Token': undefined }), hdr({ 'X-Bellwether-Token': 'wrong' + TOKEN }), hdr({ Origin: 'http://evil.example' }), hdr({ Host: 'evil.example' })];
     for (const p of ['/hook', '/state?wait=0', '/control']) {
       for (const h of bad) {
         for (const k of Object.keys(h)) if (h[k] === undefined) delete h[k];
@@ -297,14 +297,14 @@ describe('doctor, with the brain up and with each credential broken (M1, M10)', 
     assert.match(r.stdout, /next/i);
     assert.doesNotMatch(r.stdout + r.stderr, new RegExp(TOKEN));
   });
-  test('no token: exit 3 naming PASTURE_HOOK_TOKEN; token the brain does not know: names the restart', () => {
+  test('no token: exit 3 naming BELLWETHER_HOOK_TOKEN; token the brain does not know: names the restart', () => {
     const e = { ...env };
-    delete e.PASTURE_HOOK_TOKEN;
+    delete e.BELLWETHER_HOOK_TOKEN;
     const a = spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 20000, env: e, cwd: AGENT });
     assert.equal(a.status, 3);
-    assert.match(a.stdout + a.stderr, /PASTURE_HOOK_TOKEN/);
-    const b = cli(['doctor'], { PASTURE_HOOK_TOKEN: 'someOtherTokenNotReal_9876543210' });
-    assert.match(b.stdout + b.stderr, /different PASTURE_HOOK_TOKEN|403|refused/i);
+    assert.match(a.stdout + a.stderr, /BELLWETHER_HOOK_TOKEN/);
+    const b = cli(['doctor'], { BELLWETHER_HOOK_TOKEN: 'someOtherTokenNotReal_9876543210' });
+    assert.match(b.stdout + b.stderr, /different BELLWETHER_HOOK_TOKEN|403|refused/i);
     assert.notEqual(b.status, 0);
   });
   test('a broken config.json is reported with the file named, on every command that reads it', () => {
@@ -326,10 +326,10 @@ describe('doctor, with the brain up and with each credential broken (M1, M10)', 
     try {
       const r = cli(['status']);
       assert.equal(r.status, 2, r.stdout + r.stderr);
-      assert.match(r.stdout + r.stderr, /not running|pasture serve/);
+      assert.match(r.stdout + r.stderr, /not running|bellwether serve/);
       const d = cli(['doctor']);
       assert.equal(d.status, 2);
-      assert.match(d.stdout, /pasture serve|autostart/);
+      assert.match(d.stdout, /bellwether serve|autostart/);
     } finally {
       await startServer();
     }
@@ -337,7 +337,7 @@ describe('doctor, with the brain up and with each credential broken (M1, M10)', 
 });
 
 describe('hooks install against a temp settings file, and the real one stays untouched (M1)', () => {
-  test('dry run changes nothing; --write adds pasture\'s groups and keeps the foreign hook; doctor then passes the hooks check; uninstall restores the bytes', () => {
+  test('dry run changes nothing; --write adds bellwether\'s groups and keeps the foreign hook; doctor then passes the hooks check; uninstall restores the bytes', () => {
     const original = fs.readFileSync(SETTINGS);
     const dry = cli(['hooks', 'install', '--settings', SETTINGS]);
     assert.equal(dry.status, 0, dry.stderr);
@@ -357,15 +357,15 @@ describe('hooks install against a temp settings file, and the real one stays unt
 
 describe('first run, on a fresh clone (M10)', () => {
   test('token init fills a missing .env in the repository root once, never prints the token, and is a no-op the second time', () => {
-    const top = tempDir('pasture-fr-');
+    const top = tempDir('bellwether-fr-');
     const repo = path.join(top, 'bellwether');
     fs.cpSync(AGENT, repo, { recursive: true });
-    const e = { PATH: process.env.PATH, HOME: top, PASTURE_DATA_DIR: path.join(top, 'd') };
+    const e = { PATH: process.env.PATH, HOME: top, BELLWETHER_DATA_DIR: path.join(top, 'd') };
     const run = () => spawnSync(process.execPath, [path.join(repo, 'brain', 'cli.mjs'), 'token', 'init'], { encoding: 'utf8', timeout: 20000, env: e, cwd: top });
     const a = run();
     assert.equal(a.status, 0, a.stderr);
     const text = fs.readFileSync(path.join(repo, '.env'), 'utf8');
-    const tok = /PASTURE_HOOK_TOKEN=(\S+)/.exec(text)?.[1];
+    const tok = /BELLWETHER_HOOK_TOKEN=(\S+)/.exec(text)?.[1];
     assert.ok(tok && tok.length >= 16);
     assert.ok(!(a.stdout + a.stderr).includes(tok), 'token printed');
     const b = run();
@@ -380,17 +380,17 @@ describe('first run, on a fresh clone (M10)', () => {
     fs.rmSync(top, { recursive: true, force: true });
   });
   test('inside a hub (agents/<name>) with a hub .env and none of its own, the hub .env is used and kept', () => {
-    const hub = tempDir('pasture-frhub-');
-    const repo = path.join(hub, 'agents', 'pasture');
+    const hub = tempDir('bellwether-frhub-');
+    const repo = path.join(hub, 'agents', 'bellwether');
     fs.mkdirSync(path.dirname(repo), { recursive: true });
     fs.cpSync(AGENT, repo, { recursive: true });
     fs.writeFileSync(path.join(hub, '.env'), 'OTHER_SECRET=keep-me\n');
-    const e = { PATH: process.env.PATH, HOME: hub, PASTURE_DATA_DIR: path.join(hub, 'd') };
+    const e = { PATH: process.env.PATH, HOME: hub, BELLWETHER_DATA_DIR: path.join(hub, 'd') };
     const a = spawnSync(process.execPath, [path.join(repo, 'brain', 'cli.mjs'), 'token', 'init'], { encoding: 'utf8', timeout: 20000, env: e, cwd: hub });
     assert.equal(a.status, 0, a.stderr);
     const text = fs.readFileSync(path.join(hub, '.env'), 'utf8');
     assert.match(text, /^OTHER_SECRET=keep-me$/m);
-    assert.match(text, /^PASTURE_HOOK_TOKEN=\S{16,}$/m);
+    assert.match(text, /^BELLWETHER_HOOK_TOKEN=\S{16,}$/m);
     assert.equal(fs.existsSync(path.join(repo, '.env')), false, 'no second .env');
     fs.rmSync(hub, { recursive: true, force: true });
   });
@@ -398,7 +398,7 @@ describe('first run, on a fresh clone (M10)', () => {
     const r = cli(['autostart', 'install']);
     // the copy has no built shell, so this is also the "strip not built" failure: exit 2 with a cause
     assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(r.stdout + r.stderr, /shell|build|pasture-shell/i);
+    assert.match(r.stdout + r.stderr, /shell|build|bellwether-shell/i);
     assert.doesNotMatch(r.stderr, /\n\s+at .*\.mjs/);
     assert.equal(fs.existsSync(path.join(HOME, 'Library', 'LaunchAgents')), false);
   });

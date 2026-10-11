@@ -22,11 +22,11 @@ describe('the token is masked in everything a person sees (D1)', () => {
   };
   test('hooks install preview, hooks print to stdout and errors show 4 characters and "…"; print --out and --write keep the value', () => {
     const h = home();
-    const env = { PATH: process.env.PATH, HOME: h, PASTURE_DATA_DIR: path.join(h, 'data'), PASTURE_HOOK_TOKEN: T };
+    const env = { PATH: process.env.PATH, HOME: h, BELLWETHER_DATA_DIR: path.join(h, 'data'), BELLWETHER_HOOK_TOKEN: T };
     const prev = cli(['hooks', 'install'], env);
     assert.equal(prev.status, 0, prev.stderr);
     assert.ok(!(prev.stdout + prev.stderr).includes(T));
-    assert.match(prev.stdout + prev.stderr, /"X-Pasture-Token": "mask…"/);
+    assert.match(prev.stdout + prev.stderr, /"X-Bellwether-Token": "mask…"/);
     const print = cli(['hooks', 'print'], env);
     assert.ok(!(print.stdout + print.stderr).includes(T));
     const out = path.join(h, 'hooks.json');
@@ -38,9 +38,9 @@ describe('the token is masked in everything a person sees (D1)', () => {
     assert.ok(fs.readFileSync(path.join(h, '.claude', 'settings.json'), 'utf8').includes(T), '--write writes the real value');
   });
   test('an old token in the settings diff is masked too, and nothing shorter than 5 characters is touched', () => {
-    assert.equal(maskToken('"X-Pasture-Token": "oldTokenValue123456"', 'currentToken_xyz'), '"X-Pasture-Token": "oldT…"');
+    assert.equal(maskToken('"X-Bellwether-Token": "oldTokenValue123456"', 'currentToken_xyz'), '"X-Bellwether-Token": "oldT…"');
     assert.equal(maskToken('a currentToken_xyz b', 'currentToken_xyz'), 'a curr… b');
-    assert.equal(maskToken('"X-Pasture-Token": "$X"', 't'), '"X-Pasture-Token": "$X"');
+    assert.equal(maskToken('"X-Bellwether-Token": "$X"', 't'), '"X-Bellwether-Token": "$X"');
     assert.equal(maskToken('nothing here', undefined), 'nothing here');
   });
 });
@@ -49,7 +49,7 @@ describe('"all set" only when nothing fails (D2)', () => {
   const home = () => {
     const h = tempDir();
     fs.mkdirSync(path.join(h, 'Library', 'LaunchAgents'), { recursive: true });
-    for (const l of ['brain', 'shell']) fs.writeFileSync(path.join(h, 'Library', 'LaunchAgents', `local.pasture.${l}.plist`), '');
+    for (const l of ['brain', 'shell']) fs.writeFileSync(path.join(h, 'Library', 'LaunchAgents', `local.bellwether.${l}.plist`), '');
     return h;
   };
   const base = [{ name: 'config', status: 'PASS' }, { name: 'token', status: 'PASS' }, { name: 'brain', status: 'PASS' }];
@@ -63,7 +63,7 @@ describe('"all set" only when nothing fails (D2)', () => {
   });
 });
 
-describe('pasture token init (D4)', () => {
+describe('bellwether token init (D4)', () => {
   const env = (text, mode = 0o640) => {
     const f = path.join(tempDir(), '.env');
     if (text !== null) fs.writeFileSync(f, text, { mode });
@@ -72,11 +72,11 @@ describe('pasture token init (D4)', () => {
   test('appends after a last line with no newline, without gluing onto it, and keeps the mode', () => {
     const f = env('OTHER_KEY=abc');
     assert.equal(tokenInit(f, { generate: () => 'TOK_1234567890abcdef' }).changed, true);
-    assert.equal(fs.readFileSync(f, 'utf8'), 'OTHER_KEY=abc\nPASTURE_HOOK_TOKEN=TOK_1234567890abcdef\n');
+    assert.equal(fs.readFileSync(f, 'utf8'), 'OTHER_KEY=abc\nBELLWETHER_HOOK_TOKEN=TOK_1234567890abcdef\n');
     assert.equal(fs.statSync(f).mode & 0o777, 0o640);
   });
   test('safe to run twice: an existing token is left alone, in any of the forms Node reads', () => {
-    for (const text of ['PASTURE_HOOK_TOKEN=abc\n', 'export PASTURE_HOOK_TOKEN="abc"\n', '  PASTURE_HOOK_TOKEN = abc']) {
+    for (const text of ['BELLWETHER_HOOK_TOKEN=abc\n', 'export BELLWETHER_HOOK_TOKEN="abc"\n', '  BELLWETHER_HOOK_TOKEN = abc']) {
       const f = env(text);
       const r = tokenInit(f);
       assert.equal(r.changed, false);
@@ -85,19 +85,19 @@ describe('pasture token init (D4)', () => {
     }
   });
   test('fills an empty line in place (as in .env.example); creates a missing file 0600; never prints the token', () => {
-    const f = env('A=1\nPASTURE_HOOK_TOKEN=\nB=2\n');
+    const f = env('A=1\nBELLWETHER_HOOK_TOKEN=\nB=2\n');
     const r = tokenInit(f, { generate: () => 'TOK_FILLED_0123456789' });
-    assert.equal(fs.readFileSync(f, 'utf8'), 'A=1\nPASTURE_HOOK_TOKEN=TOK_FILLED_0123456789\nB=2\n');
+    assert.equal(fs.readFileSync(f, 'utf8'), 'A=1\nBELLWETHER_HOOK_TOKEN=TOK_FILLED_0123456789\nB=2\n');
     assert.doesNotMatch(r.message, /TOK_FILLED/);
     const g = env(null);
     tokenInit(g, { generate: () => 'TOK_NEW_0123456789ab' });
     assert.equal(fs.statSync(g).mode & 0o777, 0o600);
-    assert.equal(fs.readFileSync(g, 'utf8'), 'PASTURE_HOOK_TOKEN=TOK_NEW_0123456789ab\n');
+    assert.equal(fs.readFileSync(g, 'utf8'), 'BELLWETHER_HOOK_TOKEN=TOK_NEW_0123456789ab\n');
   });
   test('the README\'s first step is `token init`, and the CLI only accepts `token init`', () => {
     const r = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');
     const first = r.slice(r.indexOf('## First run'), r.indexOf('## Setup'));
-    assert.match(first, /\.\/pasture token init/);
+    assert.match(first, /\.\/bellwether token init/);
     assert.doesNotMatch(first, />> \.env/);
     assert.equal(cli(['token', 'bogus'], { PATH: process.env.PATH }).status, 3);
   });
@@ -112,23 +112,23 @@ describe('M10-8: token init never risks the .env, and reads it the way Node does
     return { d, f };
   };
   const G = { generate: () => 'TOK_M108_0123456789ab' };
-  test('the last PASTURE_HOOK_TOKEN line is the one Node uses, and `KEY= # note` counts as empty', async () => {
+  test('the last BELLWETHER_HOOK_TOKEN line is the one Node uses, and `KEY= # note` counts as empty', async () => {
     const { envValue } = await import('../brain/envfile.mjs');
-    for (const text of ['PASTURE_HOOK_TOKEN=abc\nPASTURE_HOOK_TOKEN=\n', 'PASTURE_HOOK_TOKEN= # fill me in\n', 'PASTURE_HOOK_TOKEN=\n']) {
+    for (const text of ['BELLWETHER_HOOK_TOKEN=abc\nBELLWETHER_HOOK_TOKEN=\n', 'BELLWETHER_HOOK_TOKEN= # fill me in\n', 'BELLWETHER_HOOK_TOKEN=\n']) {
       const { f } = env(text);
       assert.equal(tokenInit(f, G).changed, true, JSON.stringify(text));
-      assert.equal(envValue(fs.readFileSync(f, 'utf8'), 'PASTURE_HOOK_TOKEN'), 'TOK_M108_0123456789ab');
+      assert.equal(envValue(fs.readFileSync(f, 'utf8'), 'BELLWETHER_HOOK_TOKEN'), 'TOK_M108_0123456789ab');
     }
-    const { f } = env('PASTURE_HOOK_TOKEN=\nPASTURE_HOOK_TOKEN=set_later\n');
+    const { f } = env('BELLWETHER_HOOK_TOKEN=\nBELLWETHER_HOOK_TOKEN=set_later\n');
     assert.equal(tokenInit(f, G).changed, false, 'the last one is set');
   });
   test('CRLF stays CRLF, filled or appended', () => {
-    const a = env('A=1\r\nPASTURE_HOOK_TOKEN=\r\nB=2\r\n');
+    const a = env('A=1\r\nBELLWETHER_HOOK_TOKEN=\r\nB=2\r\n');
     tokenInit(a.f, G);
-    assert.equal(fs.readFileSync(a.f, 'utf8'), 'A=1\r\nPASTURE_HOOK_TOKEN=TOK_M108_0123456789ab\r\nB=2\r\n');
+    assert.equal(fs.readFileSync(a.f, 'utf8'), 'A=1\r\nBELLWETHER_HOOK_TOKEN=TOK_M108_0123456789ab\r\nB=2\r\n');
     const b = env('A=1\r\nB=2');
     tokenInit(b.f, G);
-    assert.equal(fs.readFileSync(b.f, 'utf8'), 'A=1\r\nB=2\r\nPASTURE_HOOK_TOKEN=TOK_M108_0123456789ab\r\n');
+    assert.equal(fs.readFileSync(b.f, 'utf8'), 'A=1\r\nB=2\r\nBELLWETHER_HOOK_TOKEN=TOK_M108_0123456789ab\r\n');
   });
   test('temp file and rename: same mode, a 0600 .env.bak of the old contents, a symlink stays a symlink, no temp left behind', () => {
     const { d, f } = env('SECRET_A=xyz\n', 0o640);
@@ -145,7 +145,7 @@ describe('M10-8: token init never risks the .env, and reads it the way Node does
     fs.symlinkSync(real, link);
     tokenInit(link, G);
     assert.ok(fs.lstatSync(link).isSymbolicLink());
-    assert.match(fs.readFileSync(real, 'utf8'), /^B=1\nPASTURE_HOOK_TOKEN=/);
+    assert.match(fs.readFileSync(real, 'utf8'), /^B=1\nBELLWETHER_HOOK_TOKEN=/);
   });
   test('a read-only .env is refused with one clean line, and left as it was', () => {
     const { f } = env('A=1\n', 0o444);
@@ -154,7 +154,7 @@ describe('M10-8: token init never risks the .env, and reads it the way Node does
   });
   test('the mask hides an old token under any header case, and wherever the same value repeats', () => {
     const seen = new Set();
-    const out = maskToken('{"x-PASTURE-token": "oldTokenCanary_ZZ99", "X-Other": "oldTokenCanary_ZZ99"}\nX-Pasture-Token: plainHeaderValue_1', 'current_123456789', seen);
+    const out = maskToken('{"x-BELLWETHER-token": "oldTokenCanary_ZZ99", "X-Other": "oldTokenCanary_ZZ99"}\nX-Bellwether-Token: plainHeaderValue_1', 'current_123456789', seen);
     assert.doesNotMatch(out, /oldTokenCanary_ZZ99|plainHeaderValue_1/);
     assert.equal(maskToken('later: oldTokenCanary_ZZ99', 'current_123456789', seen), 'later: oldT…', 'remembered for later output');
   });

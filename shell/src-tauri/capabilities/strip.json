@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "strip",
-  "description": "The strip windows: pasture's own commands and nothing else (debug_snapshot refuses unless the shell was started with --snapshot). No fs, shell, http, opener, clipboard or other plugin permissions.",
+  "description": "The strip windows: bellwether's own commands and nothing else (debug_snapshot refuses unless the shell was started with --snapshot). No fs, shell, http, opener, clipboard or other plugin permissions.",
   "windows": ["strip-*"],
   "permissions": ["allow-get-pet", "allow-get-snapshot", "allow-report-hitboxes", "allow-sprite-clicked", "allow-shell-log", "allow-debug-snapshot"]
 }

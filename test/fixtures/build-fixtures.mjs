@@ -29,7 +29,7 @@ const TERMINAL = {
   herdrPane: 'w1:p3',
   herdrSocket: '/Users/example/.config/herdr/herdr.sock',
 };
-const HEADERS = ['x-pasture-herdr-pane', 'x-pasture-herdr-socket', 'x-pasture-iterm-session', 'x-pasture-term-program', 'x-pasture-term-session'];
+const HEADERS = ['x-bellwether-herdr-pane', 'x-bellwether-herdr-socket', 'x-bellwether-iterm-session', 'x-bellwether-term-program', 'x-bellwether-term-session'];
 const SESSION = '0f0e0d0c-1111-4aaa-8bbb-000000000001';
 const BASE_T = 1_800_000_000_000;
 

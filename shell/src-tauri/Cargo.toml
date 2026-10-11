@@ -1,13 +1,13 @@
 [package]
-name = "pasture-shell"
+name = "bellwether-shell"
 version = "0.1.0"
 edition = "2021"
-description = "pasture's overlay: a transparent click-through strip of sheep, one per Claude Code session"
+description = "bellwether's overlay: a transparent click-through strip of sheep, one per Claude Code session"
 license = "MIT"
 publish = false
 
 [lib]
-name = "pasture_shell_lib"
+name = "bellwether_shell_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]

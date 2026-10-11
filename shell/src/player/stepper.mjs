@@ -39,7 +39,7 @@ export function motionAt(anim, step, total, env, warn) {
 }
 
 /**
- * Chooses the next animation from a `next` list by probability. pasture's sheep live
+ * Chooses the next animation from a `next` list by probability. bellwether's sheep live
  * on the strip above the Dock, so only `only="none"` and `only="taskbar"` entries
  * apply. `allowed` (a Set of ids) narrows the choice to the current behaviour's
  * animations; with nothing allowed it returns null. `rand` is in [0, 1).

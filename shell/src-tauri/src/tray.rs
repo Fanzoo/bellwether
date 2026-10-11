@@ -1,10 +1,10 @@
 //! The menu-bar icon: Mute, Hide the strip, Show labels, Quit.
 //! Everything here runs in Rust; the webview gains no command or permission.
 //!
-//! - Mute is the brain's do-not-disturb (POST /control), the same as `pasture mute`,
+//! - Mute is the brain's do-not-disturb (POST /control), the same as `bellwether mute`,
 //!   so it is kept in data/state.json and the two always agree.
 //! - Hide and Show labels are the shell's own, kept in data/shell-state.json.
-//! - Autostart is not here: `pasture autostart` (Milestone 3) stays the one way to set
+//! - Autostart is not here: `bellwether autostart` (Milestone 3) stays the one way to set
 //!   it up, and the tray doesn't write LaunchAgents (deviation M7-4).
 
 use std::sync::{Arc, Mutex};
@@ -35,12 +35,12 @@ pub fn build(app: &AppHandle<Wry>, kept: Kept, muted: bool) -> tauri::Result<()>
     let mute = CheckMenuItem::with_id(app, "mute", "Mute (do not disturb)", true, muted, None::<&str>)?;
     let hide = CheckMenuItem::with_id(app, "hide", "Hide the strip", true, kept.hidden, None::<&str>)?;
     let labels = CheckMenuItem::with_id(app, "labels", "Show labels", true, kept.show_labels, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit pasture", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Bellwether", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&mute, &hide, &labels, &PredefinedMenuItem::separator(app)?, &quit])?;
-    TrayIconBuilder::with_id("pasture")
+    TrayIconBuilder::with_id("bellwether")
         .icon(icon())
         .icon_as_template(true)
-        .tooltip("pasture")
+        .tooltip("Bellwether")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))

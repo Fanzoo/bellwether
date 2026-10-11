@@ -86,7 +86,7 @@ describe('agent_type is untrusted', () => {
   const clean = makeTextCleaner({ maxChars: 60 });
   const lambOf = (agentType) => {
     const f = new Flock({ config, t: 0 });
-    const n = (event, o) => f.apply(normalise({ hook_event_name: event, session_id: 's', cwd: '/w/p', ...o }, { 'x-pasture-herdr-pane': 'w1:p1', 'x-pasture-herdr-socket': '/s' }, 1000, { clean }));
+    const n = (event, o) => f.apply(normalise({ hook_event_name: event, session_id: 's', cwd: '/w/p', ...o }, { 'x-bellwether-herdr-pane': 'w1:p1', 'x-bellwether-herdr-socket': '/s' }, 1000, { clean }));
     n('UserPromptSubmit', {});
     n('PreToolUse', { agent_id: 'a', agent_type: agentType, tool_name: 'Bash', tool_use_id: 't', tool_input: { command: 'ls' } });
     return f.snapshot().flock[0].lambs[0];

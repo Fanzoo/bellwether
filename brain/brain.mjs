@@ -43,7 +43,7 @@ export async function startBrain({ config, token, dataDir, log = () => {}, hang 
         log,
         control: (msg) => {
           const r = flock.control(msg, Date.now());
-          // Someone asked (the tray, `pasture mute`): show it now, not after the throttle.
+          // Someone asked (the tray, `bellwether mute`): show it now, not after the throttle.
           if (r.ok) publisher.markDirty(true);
           return r;
         },

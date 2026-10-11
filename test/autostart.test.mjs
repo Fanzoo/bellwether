@@ -30,7 +30,7 @@ describe('autostart', () => {
     assert.equal(text, plistText());
     assert.match(text, new RegExp(`<string>${LABEL}</string>`));
     assert.match(text, /<string>serve<\/string>/);
-    assert.doesNotMatch(text, /PASTURE_HOOK_TOKEN|throwaway|testToken/i, 'the token is never in the plist');
+    assert.doesNotMatch(text, /BELLWETHER_HOOK_TOKEN|throwaway|testToken/i, 'the token is never in the plist');
     const again = autostart('install', { home, platform: 'darwin', run: neverRun });
     assert.match(again.lines.join(), /already installed/);
     const un = autostart('uninstall', { home, platform: 'darwin', write: true, run: neverRun });
@@ -74,9 +74,9 @@ describe('autostart', () => {
 describe('the strip at login too (Milestone 10)', () => {
   test('with shell: both plists, valid, no token; the strip runs the release binary without spawning a brain and stays quit after Quit', () => {
     const home = tempDir();
-    const bin = path.join(tempDir(), 'pasture-shell');
+    const bin = path.join(tempDir(), 'bellwether-shell');
     fs.writeFileSync(bin, '');
-    process.env.PASTURE_HOOK_TOKEN = 'm10TokenCanary_0123456789abcdef';
+    process.env.BELLWETHER_HOOK_TOKEN = 'm10TokenCanary_0123456789abcdef';
     try {
       const prev = autostart('install', { home, platform: 'darwin', uid: 501, shell: true, shellBin: bin, run: () => assert.fail('launchctl') });
       assert.equal(prev.wrote, false);
@@ -85,23 +85,23 @@ describe('the strip at login too (Milestone 10)', () => {
       const strip = fs.readFileSync(plistPath(home, SHELL_LABEL), 'utf8');
       assert.match(strip, new RegExp(`<string>${bin}</string>\\s*<string>--no-spawn-brain</string>`));
       assert.match(strip, /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>/, 'restarted after a crash, not after Quit');
-      assert.doesNotMatch(strip + fs.readFileSync(plistPath(home), 'utf8'), /m10TokenCanary|PASTURE_HOOK_TOKEN/);
+      assert.doesNotMatch(strip + fs.readFileSync(plistPath(home), 'utf8'), /m10TokenCanary|BELLWETHER_HOOK_TOKEN/);
       if (process.platform === 'darwin') assert.equal(spawnSync('plutil', ['-lint', plistPath(home, SHELL_LABEL)]).status, 0);
       autostart('uninstall', { home, platform: 'darwin', uid: 501, write: true, shell: true, shellBin: bin, run: () => assert.fail('launchctl') });
       assert.equal(fs.existsSync(plistPath(home, SHELL_LABEL)), false);
       assert.equal(fs.existsSync(plistPath(home)), false);
     } finally {
-      delete process.env.PASTURE_HOOK_TOKEN;
+      delete process.env.BELLWETHER_HOOK_TOKEN;
     }
   });
   test('an unbuilt strip refuses before writing anything, and says how to build it or go brain-only', () => {
     const home = tempDir();
-    assert.throws(() => autostart('install', { home, platform: 'darwin', uid: 501, write: true, shell: true, shellBin: path.join(home, 'missing') }), /pasture shell --dev --release[\s\S]*--brain-only/);
+    assert.throws(() => autostart('install', { home, platform: 'darwin', uid: 501, write: true, shell: true, shellBin: path.join(home, 'missing') }), /bellwether shell --dev --release[\s\S]*--brain-only/);
     assert.equal(fs.existsSync(plistPath(home)), false);
   });
   test('with the real home faked, both are booted out and in, brain first', () => {
     const home = tempDir();
-    const bin = path.join(tempDir(), 'pasture-shell');
+    const bin = path.join(tempDir(), 'bellwether-shell');
     fs.writeFileSync(bin, '');
     const calls = [];
     autostart('install', { home, platform: 'darwin', write: true, uid: 501, shell: true, shellBin: bin, realHome: () => true, run: (c, a) => (calls.push(a.join(' ')), { ok: true, out: '' }) });

@@ -5,14 +5,14 @@ import { test } from 'node:test';
 import { AGENT_DIR } from './helpers.mjs';
 
 /**
- * The webview's privileges: pasture's own commands
+ * The webview's privileges: bellwether's own commands
  * only, no plugin permissions, and a CSP with no network and no unsafe-eval.
  */
 
 const TAURI = path.join(AGENT_DIR, 'shell', 'src-tauri');
 const ALLOWED = ['allow-get-pet', 'allow-get-snapshot', 'allow-report-hitboxes', 'allow-sprite-clicked', 'allow-shell-log', 'allow-debug-snapshot'];
 
-test('capabilities grant only pasture\'s own commands, to strip windows only', () => {
+test('capabilities grant only bellwether\'s own commands, to strip windows only', () => {
   const files = fs.readdirSync(path.join(TAURI, 'capabilities')).filter((f) => f.endsWith('.json'));
   assert.deepEqual(files, ['strip.json']);
   for (const f of files) {
@@ -20,7 +20,7 @@ test('capabilities grant only pasture\'s own commands, to strip windows only', (
     assert.deepEqual(cap.windows, ['strip-*']);
     for (const p of cap.permissions) {
       const name = typeof p === 'string' ? p : p.identifier;
-      assert.ok(ALLOWED.includes(name), `${f}: ${name} is not one of pasture's own commands`);
+      assert.ok(ALLOWED.includes(name), `${f}: ${name} is not one of bellwether's own commands`);
       assert.doesNotMatch(name, /^(core|fs|shell|http|opener|clipboard|dialog|process|os|notification|global-shortcut|updater):/);
     }
     assert.equal(cap.remote, undefined, 'no remote URLs may use these permissions');

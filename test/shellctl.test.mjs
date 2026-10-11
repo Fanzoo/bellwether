@@ -8,7 +8,7 @@ import { runDoctor } from '../brain/doctor.mjs';
 import { shellControl } from '../brain/shellctl.mjs';
 import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
 
-/** `pasture shell start | stop | restart` (temp HOME and fakes only: launchd and the live strip are never touched). */
+/** `bellwether shell start | stop | restart` (temp HOME and fakes only: launchd and the live strip are never touched). */
 
 const withAgent = () => {
   const home = tempDir();
@@ -34,10 +34,10 @@ describe('with the strip LaunchAgent installed: launchctl, behind the real-home 
   });
 });
 
-describe('without it: pasture\'s own detached copy, found by pid file or exact binary path', () => {
+describe('without it: bellwether\'s own detached copy, found by pid file or exact binary path', () => {
   const setup = () => {
     const dataDir = tempDir();
-    const shellBin = path.join(tempDir(), 'pasture-shell');
+    const shellBin = path.join(tempDir(), 'bellwether-shell');
     fs.writeFileSync(shellBin, '');
     const procs = new Map([[10, '/usr/bin/other'], [11, `${shellBin}-not-quite`]]);
     const killed = [];
@@ -87,22 +87,22 @@ describe('without it: pasture\'s own detached copy, found by pid file or exact b
     assert.deepEqual((await shellControl('restart', o)).lines, ['restarted the strip (pid 4242)']);
     assert.deepEqual(killed, [[55, 'SIGTERM']]);
     assert.equal(spawned.length, 1);
-    await assert.rejects(shellControl('start', { ...o, processes: () => new Map(), shellBin: '/nope/pasture-shell' }), /isn't built yet .* --dev --release/);
-    await assert.rejects(shellControl('reboot', o), /usage: pasture shell/);
+    await assert.rejects(shellControl('start', { ...o, processes: () => new Map(), shellBin: '/nope/bellwether-shell' }), /isn't built yet .* --dev --release/);
+    await assert.rejects(shellControl('reboot', o), /usage: bellwether shell/);
   });
 });
 
 describe('doctor and the CLI', () => {
-  test('doctor says `pasture shell start` when the strip agent is installed but no strip runs', async () => {
+  test('doctor says `bellwether shell start` when the strip agent is installed but no strip runs', async () => {
     const home = withAgent();
     fs.writeFileSync(plistPath(home), '');
-    const run = (running) => runDoctor({ env: { PASTURE_HOOK_TOKEN: TOKEN }, settingsFile: path.join(home, 'none.json'), configLoader: () => ({ config: { port: 1 }, usingExample: false }), home, dataDir: tempDir(), probeTimeoutMs: 100, isStripRunning: () => running });
+    const run = (running) => runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: path.join(home, 'none.json'), configLoader: () => ({ config: { port: 1 }, usingExample: false }), home, dataDir: tempDir(), probeTimeoutMs: 100, isStripRunning: () => running });
     if (process.platform !== 'darwin') return;
-    assert.match((await run(false)).checks.find((c) => c.name === 'strip running').detail, /pasture shell start/);
+    assert.match((await run(false)).checks.find((c) => c.name === 'strip running').detail, /bellwether shell start/);
     assert.equal((await run(true)).checks.find((c) => c.name === 'strip running'), undefined);
   });
-  test('`pasture shell bogus` and `shell start --dev` are refused (exit 3) without doing anything', () => {
-    const env = { PATH: process.env.PATH, HOME: tempDir(), PASTURE_DATA_DIR: tempDir(), PASTURE_HOOK_TOKEN: TOKEN };
+  test('`bellwether shell bogus` and `shell start --dev` are refused (exit 3) without doing anything', () => {
+    const env = { PATH: process.env.PATH, HOME: tempDir(), BELLWETHER_DATA_DIR: tempDir(), BELLWETHER_HOOK_TOKEN: TOKEN };
     const cli = (...a) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'shell', ...a], { encoding: 'utf8', env });
     assert.equal(cli('bogus').status, 3);
     assert.equal(cli('start', '--dev').status, 3);
