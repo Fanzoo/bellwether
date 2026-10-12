@@ -66,9 +66,10 @@ the repository root.
    file and checks its sha256; run again, it says `esheep64: already present and
    verified`.
 4. **Build the strip, and try it:** `./bellwether shell --dev --release`. It
-   compiles (a few minutes the first time), then an empty strip opens above the Dock
-   with a sheep in the menu bar. **Quit it** (menu-bar sheep > Quit Bellwether, or Ctrl-C):
-   the next step starts it for good.
+   compiles into `shell/src-tauri/target-dev/` (a few minutes the first time), then an
+   empty strip opens above the Dock with a sheep in the menu bar. **Quit it** (menu-bar
+   sheep > Quit Bellwether, or Ctrl-C). Then build the copy that starts at login:
+   `./bellwether shell build --release` (into `shell/src-tauri/target/release/`).
 5. **Start bellwether at login:**
    ```
    ./bellwether autostart install           # preview: the two LaunchAgents it would write
@@ -190,18 +191,36 @@ To remove them: `./bellwether hooks uninstall --write`.
 
 ### 6. Build and run the overlay
 
-Needs Rust (`rustc --version`, 1.99 or newer) and Xcode's command-line tools. Then:
+Needs Rust (`rustc --version`, 1.99 or newer) and Xcode's command-line tools. `bellwether`
+finds cargo on PATH, in `~/.cargo/bin` or in `$CARGO_HOME/bin`; `doctor` shows which. Then:
 
 ```
-./bellwether pets fetch          # the sheep art, pinned and sha256-checked, into data/pets/
-./bellwether shell --dev --release   # builds with cargo (about a minute the first time), then runs
+./bellwether pets fetch              # the sheep art, pinned and sha256-checked, into data/pets/
+./bellwether shell --dev --release   # builds into target-dev/ (about a minute the first time), then runs
+./bellwether shell build --release   # builds the strip the login item runs, into target/release/
 ```
+
+**Two build directories, on purpose.** macOS ties the Accessibility permission (sheep
+standing on the Dock) to the exact binary the login item runs,
+`shell/src-tauri/target/release/bellwether-shell`; rebuilding it drops the permission.
+So:
+- every development build goes to `shell/src-tauri/target-dev/`: `bellwether shell --dev`,
+  `bellwether shell build` without `--release`, and plain `cargo build` / `cargo test`
+  (with or without `--release`) run from the repository root, `shell/` or
+  `shell/src-tauri`: a `.cargo/config.toml` in each says so. These never touch the
+  login item's binary;
+- only `bellwether shell build --release` writes `target/release/`. It says so before
+  it builds. Afterwards: `bellwether shell restart`, then `bellwether shell
+  dock-permission` to give Accessibility again.
+
+Only `CARGO_TARGET_DIR` (which `shell build --release` sets) overrides that; don't set
+it by hand in a checkout whose strip starts at login.
 
 After the first build, `./bellwether shell` starts it straight away. It
 runs without any macOS permission. Two are optional:
 - *Accessibility*, so sheep can stand on the Dock itself: `./bellwether shell
-  dock-permission`. The grant belongs to the built binary, so after every rebuild it
-  must be given again.
+  dock-permission`. The grant belongs to the built binary, so after every
+  `shell build --release` it must be given again.
 - *Automation*, for clicking a sheep into its exact iTerm2 or Terminal tab.
 
 Screen Recording is never needed.
@@ -209,6 +228,8 @@ Screen Recording is never needed.
 - It shows a strip along the bottom of the main screen, directly above the Dock, with
   one sheep per Claude Code session (start one with hooks, as in step 4). The strip is
   invisible except for the sheep.
+- Started before there is a token, it waits: it looks for `BELLWETHER_HOOK_TOKEN` every
+  3 s and connects once `bellwether token init` adds one (logged in `data/shell.log`).
 - If the brain isn't running, the shell starts it, and stops it again when the shell
   quits: on Ctrl-C, `kill` (TERM, HUP) or a normal quit. If the shell is killed
   outright (`kill -9`), that brain notices within a second and stops itself. A brain
@@ -486,7 +507,10 @@ Bellwether was called pasture. For one release the old names still work:
   run, whatever their label) with `local.bellwether.*`, previewed first; the old plists
   are backed up to `~/Library/Application Support/bellwether/launchagent-backups/`.
 
-To move everything in one step:
+To move everything in one step, first quit any strip you started by hand (`bellwether
+shell --dev --release`, say): menu-bar sheep > Quit Bellwether. Only one strip can run,
+so a strip left running keeps the login item's from starting. `migrate` stops and says
+so if it finds one, and the preview lists it.
 
 ```
 ./bellwether migrate --from <old pasture directory>           # preview
@@ -513,6 +537,9 @@ directory; without it this checkout is upgraded in place. In this order:
      message lists what changed;
    - if bellwether's strip isn't built yet, pasture's strip agent is left as it is,
      and only the brain moves;
+   - a strip that `bellwether shell start` started from this checkout is stopped
+     first; any other strip started by hand stops the run, with how to quit it. After
+     loading, it reports whether the login item's strip is running, with its pid;
 5. only then, pasture's hook entries, replaced by bellwether's (a backup goes to
    `data/backups/`).
 
@@ -544,6 +571,7 @@ with `node scripts/third-party.mjs` after changing a dependency (offline;
 | `bellwether replay --burst <events/s> [--seconds S]` | A synthetic load of tool events, for the rate and latency checks |
 | `bellwether doctor [--json] [--e2e] [--settings <path>]` | Node, config, token, brain running and accepting the token, hooks installed in the settings file (timeout, token, `disableAllHooks`, `allowedHttpHookUrls`), and the project, local and managed settings levels that can switch hooks off. `--e2e` also runs one `claude -p` with haiku and bellwether's hooks from a throwaway file (one small API call; your user settings and MCP servers are left out) and checks the events arrive |
 | `bellwether shell [--dev] [--release]` | Runs the overlay in this terminal; `--dev` builds it with cargo first |
+| `bellwether shell build [--release]` | Builds the strip. Without `--release`: the debug build, into `target-dev/`. With it: the binary the login item runs, in `target/release/`; it warns first, because the Accessibility permission has to be given again afterwards |
 | `bellwether shell dock-permission` | Asks macOS for Accessibility for the strip's release binary (shows the system prompt), so sheep can stand on the Dock. Only when you run it |
 | `bellwether shell start` / `stop` / `restart` | The strip in the background. With its LaunchAgent installed: `launchctl kickstart` / `kill TERM` / `kickstart -k`. Otherwise bellwether runs the release build itself (pid in `data/shell.pid`), and stops only that exact binary. Use `restart` after a config change |
 | `bellwether mute` / `bellwether unmute` | Do-not-disturb through the brain, the same as the tray's Mute; kept across restarts |

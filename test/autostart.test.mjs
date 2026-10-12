@@ -96,7 +96,7 @@ describe('the strip at login too (Milestone 10)', () => {
   });
   test('an unbuilt strip refuses before writing anything, and says how to build it or go brain-only', () => {
     const home = tempDir();
-    assert.throws(() => autostart('install', { home, platform: 'darwin', uid: 501, write: true, shell: true, shellBin: path.join(home, 'missing') }), /bellwether shell --dev --release[\s\S]*--brain-only/);
+    assert.throws(() => autostart('install', { home, platform: 'darwin', uid: 501, write: true, shell: true, shellBin: path.join(home, 'missing') }), /bellwether shell build --release[\s\S]*--brain-only/);
     assert.equal(fs.existsSync(plistPath(home)), false);
   });
   test('with the real home faked, both are booted out and in, brain first', () => {
@@ -104,8 +104,11 @@ describe('the strip at login too (Milestone 10)', () => {
     const bin = path.join(tempDir(), 'bellwether-shell');
     fs.writeFileSync(bin, '');
     const calls = [];
-    autostart('install', { home, platform: 'darwin', write: true, uid: 501, shell: true, shellBin: bin, realHome: () => true, run: (c, a) => (calls.push(a.join(' ')), { ok: true, out: '' }) });
+    // The login item's strip shows up in the process table once launchd has loaded it.
+    const up = () => calls.some((c) => c.startsWith('bootstrap') && c.includes(SHELL_LABEL));
+    const r = autostart('install', { home, platform: 'darwin', write: true, uid: 501, shell: true, shellBin: bin, realHome: () => true, processes: () => new Map(up() ? [[99, bin]] : []), parents: () => new Map([[99, 1]]), commands: () => new Map([[99, `${bin} --no-spawn-brain`]]), run: (c, a) => (calls.push(a.join(' ')), { ok: true, out: '' }) });
     assert.deepEqual(calls, [`bootout gui/501/${LABEL}`, `bootstrap gui/501 ${plistPath(home)}`, `bootout gui/501/${SHELL_LABEL}`, `bootstrap gui/501 ${plistPath(home, SHELL_LABEL)}`]);
+    assert.match(r.lines.join('\n'), /the strip is running \(pid 99, started by its LaunchAgent\)/);
   });
 });
 

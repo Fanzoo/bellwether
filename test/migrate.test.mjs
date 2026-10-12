@@ -203,10 +203,14 @@ ${args.map((a) => `    <string>${a.replace(/&/g, '&amp;').replace(/</g, '&lt;')}
 describe('migrate with launchd (injected; the real HOME and launchctl are never used)', () => {
   // realHome is forced true and every launchctl / probe call goes to `run`; the port
   // holder is injected, so nothing here opens a socket to a real brain.
-  const real = (w, { run, holder = { state: 'free' } } = {}) => {
+  // The process table: by default the login item's strip (parent launchd, the agent's
+  // own command line) appears once launchd has loaded the strip agent.
+  const real = (w, { run, holder = { state: 'free' }, procs = new Map(), starts = true, parents = new Map([[99, 1]]), commands = new Map([[99, `${w.opts.shellBin} --no-spawn-brain`]]), kill } = {}) => {
     const calls = [];
     const fake = run ?? ((c, a) => ({ ok: true, out: '' }));
-    return { calls, opts: { ...w.opts, realHome: () => true, portHolder: () => holder, run: (c, a) => (calls.push(c === 'launchctl' ? `launchctl ${a.join(' ')}` : `probe ${a.slice(1).join(' ')}`), fake(c, a)) } };
+    const loaded = () => calls.some((c) => c.startsWith('launchctl bootstrap') && c.includes('local.bellwether.shell'));
+    const table = () => new Map([...procs, ...(starts && loaded() ? [[99, w.opts.shellBin]] : [])]);
+    return { calls, opts: { ...w.opts, realHome: () => true, portHolder: () => holder, processes: table, parents: () => parents, commands: () => commands, kill, stripWaitMs: 0, run: (c, a) => (calls.push(c === 'launchctl' ? `launchctl ${a.join(' ')}` : `probe ${a.slice(1).join(' ')}`), fake(c, a)) } };
   };
   const hubAgents = (w, prefix = 'local.example-hub') => {
     for (const l of OLD_LABELS) fs.rmSync(plistPath(w.home, l), { force: true });
@@ -297,6 +301,37 @@ describe('migrate with launchd (injected; the real HOME and launchctl are never 
     assert.match(migrate({ ...ours.opts, write: true }).lines.join('\n'), /Done/);
   });
 
+  test('a strip started by hand stops the run before anything changes, says how, and is not signalled; the preview warns about it', () => {
+    const w = world();
+    const { brain } = hubAgents(w);
+    const killed = [];
+    const r = real(w, { procs: new Map([[4242, w.opts.shellBin.replace('/release/', '/debug/')]]), parents: new Map([[4242, 777]]), kill: (pid) => killed.push(pid) });
+    assert.match(migrate({ ...r.opts }).lines.join('\n'), /a strip is running by hand \(pid 4242, .*\): quit it from the menu bar \(Quit Bellwether\) before --write/);
+    assert.throws(() => migrate({ ...r.opts, write: true }), /a strip is already running \(pid 4242, .*\), not the login item's[\s\S]*Quit it from the menu bar \(Quit Bellwether\), then run this again/);
+    assert.deepEqual(killed, []);
+    assert.ok(fs.existsSync(brain), 'nothing was booted out');
+    assert.ok(!r.calls.some((c) => /bootout|bootstrap/.test(c)), r.calls.join('\n'));
+    assert.match(fs.readFileSync(w.settingsFile, 'utf8'), /X-Pasture-Token/);
+  });
+
+  test('the strip this data dir started (shell.pid) is stopped first; after loading, the login item\'s strip is reported running, or not', () => {
+    const w = world();
+    hubAgents(w);
+    fs.mkdirSync(w.opts.dataDir, { recursive: true });
+    fs.writeFileSync(path.join(w.opts.dataDir, 'shell.pid'), '5150');
+    const procs = new Map([[5150, w.opts.shellBin]]);
+    const killed = [];
+    const r = real(w, { procs, parents: new Map([[5150, 1], [99, 1]]), kill: (pid) => (killed.push(pid), procs.delete(pid)) });
+    const text = migrate({ ...r.opts, write: true }).lines.join('\n');
+    assert.deepEqual(killed, [5150]);
+    assert.match(text, /stopped the strip started by `bellwether shell start` \(pid 5150\)/);
+    assert.match(text, /the strip is running \(pid 99, started by its LaunchAgent\)/);
+    const w2 = world();
+    hubAgents(w2);
+    const none = real(w2, { starts: false });
+    assert.match(migrate({ ...none.opts, write: true }).lines.join('\n'), /the strip's LaunchAgent is loaded, but its strip is not running/);
+  });
+
   test('a re-run with the agents already moved still waits for the brain before the hooks, and leaves them if none answers', () => {
     const w = world();
     fs.rmSync(plistPath(w.home, OLD_LABELS[0]));
@@ -325,5 +360,42 @@ describe('which token wins', () => {
     assert.equal(load(both, { PASTURE_HOOK_TOKEN: 'env_old' }), 'file_new');
     assert.equal(load('PASTURE_HOOK_TOKEN=file_old\n', { PASTURE_HOOK_TOKEN: 'env_old' }), 'env_old');
     assert.equal(load('PASTURE_HOOK_TOKEN=file_old\n', {}), 'file_old');
+  });
+});
+
+describe('cargo, for building the strip', () => {
+  test('found on PATH, then in ~/.cargo/bin, then in $CARGO_HOME/bin; none: null', async () => {
+    const { findCargo } = await import('../brain/cargo.mjs');
+    const root = tempDir('cargo-');
+    const mk = (dir) => {
+      fs.mkdirSync(dir, { recursive: true });
+      const f = path.join(dir, 'cargo');
+      fs.writeFileSync(f, '#!/bin/sh\n', { mode: 0o755 });
+      return f;
+    };
+    const home = path.join(root, 'home');
+    const env = { PATH: path.join(root, 'empty'), CARGO_HOME: path.join(root, 'ch') };
+    assert.equal(findCargo({ env, home, platform: 'darwin' }), null);
+    const ch = mk(path.join(root, 'ch', 'bin'));
+    assert.equal(findCargo({ env, home, platform: 'darwin' }), ch);
+    const hb = mk(path.join(home, '.cargo', 'bin'));
+    assert.equal(findCargo({ env, home, platform: 'darwin' }), hb);
+    const onPath = mk(path.join(root, 'onpath'));
+    assert.equal(findCargo({ env: { ...env, PATH: [path.join(root, 'empty'), path.join(root, 'onpath')].join(path.delimiter) }, home, platform: 'darwin' }), onPath);
+  });
+  test('`shell --dev` without cargo: one line with the fix, exit 1, no stack', { skip: fs.existsSync(path.join(path.dirname(process.execPath), 'cargo')) && 'cargo sits next to node here' }, () => {
+    const home = tempDir('cargo-home-');
+    const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'shell', '--dev'], { encoding: 'utf8', timeout: 20000, env: { PATH: path.dirname(process.execPath), HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'd'), BELLWETHER_ENV: path.join(home, 'none.env') } });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /^bellwether: cargo \(Rust\) wasn't found on PATH, in ~\/\.cargo\/bin or in \$CARGO_HOME\/bin: run `source ~\/\.cargo\/env`, or install rustup from https:\/\/rustup\.rs\n$/);
+  });
+  test('doctor shows cargo as INFO either way', async () => {
+    const { runDoctor } = await import('../brain/doctor.mjs');
+    const settings = path.join(tempDir('cargo-doc-'), 'settings.json');
+    fs.writeFileSync(settings, '{}');
+    const base = { env: { BELLWETHER_HOOK_TOKEN: 'cargoDoctorTokenNotReal_012345' }, settingsFile: settings, configLoader: () => ({ config: null, usingExample: false }) };
+    const missing = (await runDoctor({ ...base, findCargoFor: () => null })).checks.find((c) => c.name === 'cargo');
+    assert.equal(missing.status, 'INFO');
+    assert.match(missing.detail, /not found; only needed to build the strip\. .*source ~\/\.cargo\/env/);
   });
 });

@@ -54,6 +54,11 @@ export function migrate({
   platform = process.platform,
   shellBin = shellBinary(agentDir),
   portHolder = realPortHolder,
+  processes,
+  parents,
+  commands,
+  kill,
+  stripWaitMs,
 } = {}) {
   const src = sourceOf(from, agentDir, dataDir);
   const lines = [`From: ${src.root ?? '(a data directory only)'}, data in ${src.dataDir}`, `To:   ${agentDir}, data in ${dataDir}`, ''];
@@ -165,7 +170,7 @@ export function migrate({
     if (retire.length === 0) say(found.length ? 'nothing else to replace' : `no pasture LaunchAgents in ${path.join(home, 'Library', 'LaunchAgents')}`);
     else {
       const shell = built && (oldShell.length > 0 || fs.existsSync(plistPath(home, SHELL_LABEL)));
-      const r = swapAgents({ old: retire, write, home, run, uid, realHome, shell, shellBin, agentDir, dataDir, backupDir: agentBackupDir(home), port, portHolder, verify: () => brainAnswers(port, targetEnv, run, agentDir) });
+      const r = swapAgents({ old: retire, write, home, run, uid, realHome, shell, shellBin, agentDir, dataDir, backupDir: agentBackupDir(home), port, portHolder, processes, parents, commands, kill, stripWaitMs, verify: () => brainAnswers(port, targetEnv, run, agentDir) });
       say(...r.lines);
       swapped = r.wrote;
       if (r.wrote) did.push('LaunchAgents');

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SHELL_LABEL, isRealHome, plistPath, shellBinary } from './autostart.mjs';
 import { CliError, DATA_DIR, EXIT } from './util.mjs';
+import { agentArgs, defaultCommands, defaultParents, defaultProcesses, stripAgentStatus, strayStrips } from './stripproc.mjs';
 
 /**
  * `bellwether shell start | stop | restart`: the strip, without a terminal attached.
@@ -34,6 +35,9 @@ export async function shellControl(action, o = {}) {
     kill = (pid, sig) => process.kill(pid, sig),
     brainUp = async () => false,
     platform = process.platform,
+    parents = defaultParents,
+    commands = defaultCommands,
+    waitMs = 2500,
   } = o;
   if (!['start', 'stop', 'restart'].includes(action)) throw new CliError('usage: bellwether shell [start | stop | restart]   (no argument: run it in this terminal)', EXIT.BAD_CONFIG);
   const lines = [];
@@ -45,12 +49,25 @@ export async function shellControl(action, o = {}) {
       lines.push(`would run: launchctl ${args.join(' ')}`, 'launchctl not called: HOME is not your real home directory (a test).');
       return { lines };
     }
+    const domain = `gui/${uid}`;
+    if (action !== 'stop') {
+      // Only one strip can run. Another one (started by hand) would make the login
+      // item's exit at once, and "started" would be untrue.
+      const other = strayStrips({ shellBin, processes, parents, commands, agent: agentArgs(plistPath(home, SHELL_LABEL)) })[0];
+      if (other) throw new CliError(`a strip is already running (pid ${other.pid}, not the login item's); quit it from the menu bar (Quit Bellwether), then run \`bellwether shell ${action}\``, EXIT.NOT_RUNNING);
+    }
     const r = run('launchctl', args);
     if (!r.ok) {
       const hint = action === 'stop' ? ' (it may not be running)' : '; is it loaded? `bellwether autostart status`';
       throw new CliError(`launchctl ${args.join(' ')} failed: ${r.out}${hint}`, EXIT.NOT_RUNNING);
     }
-    lines.push({ start: 'started the strip (LaunchAgent)', restart: 'restarted the strip (LaunchAgent)', stop: 'stopped the strip (LaunchAgent); `bellwether shell start` brings it back, and so does your next login' }[action]);
+    if (action === 'stop') {
+      lines.push('stopped the strip (LaunchAgent); `bellwether shell start` brings it back, and so does your next login');
+      return { lines };
+    }
+    const st = stripAgentStatus({ shellBin, processes, parents, commands, agent: agentArgs(plistPath(home, SHELL_LABEL)), waitMs });
+    const did = action === 'restart' ? 'restarted' : 'started';
+    lines.push(st.ok ? `${did} the strip (LaunchAgent): ${st.line}` : `asked launchd to ${action} the strip, but ${st.line.replace(/^the strip's LaunchAgent is loaded, but /, '')}`);
     return { lines };
   }
 
@@ -82,7 +99,7 @@ export async function shellControl(action, o = {}) {
     lines.push(`the strip is already running (pid ${ours()})`);
     return { lines };
   }
-  if (!fs.existsSync(shellBin)) throw new CliError(`the strip isn't built yet (${shellBin}). Build it with \`bellwether shell --dev --release\``, EXIT.NOT_RUNNING);
+  if (!fs.existsSync(shellBin)) throw new CliError(`the strip isn't built yet (${shellBin}). Build it with \`bellwether shell build --release\``, EXIT.NOT_RUNNING);
   const up = await brainUp();
   const pid = spawnDetached(shellBin, up ? ['--no-spawn-brain'] : []);
   fs.mkdirSync(dataDir, { recursive: true });
@@ -99,18 +116,7 @@ function defaultRun(cmd, args) {
   }
 }
 
-/** pid -> executable path, for this user's processes (`ps -o comm` gives the full path). */
-export function defaultProcesses() {
-  const out = new Map();
-  try {
-    const text = execFileSync('/bin/ps', ['-x', '-o', 'pid=,comm='], { encoding: 'utf8', timeout: 5000 });
-    for (const line of text.split('\n')) {
-      const m = /^\s*(\d+)\s+(.*\S)\s*$/.exec(line);
-      if (m) out.set(Number(m[1]), m[2]);
-    }
-  } catch {}
-  return out;
-}
+export { defaultProcesses };
 
 function defaultSpawn(bin, args) {
   const child = spawn(bin, args, { detached: true, stdio: 'ignore', cwd: path.dirname(bin) });

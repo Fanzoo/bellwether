@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AGENT_DIR, CliError, DATA_DIR, EXIT } from './util.mjs';
+import { readPlist } from './plist.mjs';
+import { agentArgs, clearStripsFor, defaultCommands, defaultParents, defaultProcesses, stripAgentStatus, strayStrips } from './stripproc.mjs';
 
 /**
  * Starting bellwether at login (macOS LaunchAgents): the brain, and (Milestone 10) the
@@ -81,21 +83,6 @@ function programKind(args) {
   return null;
 }
 
-/** Label and ProgramArguments of a plist (XML, or binary through `plutil`, read-only). */
-function readPlist(file) {
-  let text;
-  try {
-    text = fs.readFileSync(file, 'utf8');
-    if (text.startsWith('bplist')) text = execFileSync('plutil', ['-convert', 'xml1', '-o', '-', file], { encoding: 'utf8', timeout: 5000 });
-  } catch {
-    return {};
-  }
-  const un = (v) => v.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
-  const label = /<key>Label<\/key>\s*<string>([^<]*)<\/string>/.exec(text)?.[1];
-  const arr = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(text)?.[1];
-  const args = arr === undefined ? null : [...arr.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => un(m[1]));
-  return { ...(label ? { label: un(label) } : {}), args };
-}
 
 export function plistPath(home = os.homedir(), label = LABEL) {
   return path.join(home, 'Library', 'LaunchAgents', `${label}.plist`);
@@ -213,7 +200,7 @@ export function autostart(action, opts = {}) {
   }
   const { shell = false, shellBin = shellBinary() } = opts;
   if (action === 'install' && shell && !fs.existsSync(shellBin)) {
-    throw new CliError(`the strip isn't built yet (${shellBin}), so it can't start at login. Build it first: \`bellwether shell --dev --release\` (takes a few minutes the first time). Or install the brain alone: \`bellwether autostart install --brain-only\``, EXIT.NOT_RUNNING);
+    throw new CliError(`the strip isn't built yet (${shellBin}), so it can't start at login. Build it first: \`bellwether shell build --release\` (takes a few minutes the first time). Or install the brain alone: \`bellwether autostart install --brain-only\``, EXIT.NOT_RUNNING);
   }
   if (action === 'status') {
     const now = current(action, opts);
@@ -239,13 +226,16 @@ export function agentBackupDir(home = os.homedir()) {
  * removed and the old ones restored from their backups, and the error says exactly
  * what changed and how to recover by hand. launchctl only runs for the real HOME.
  */
-export function swapAgents({ old, write = false, home = os.homedir(), run = defaultRun, uid = process.getuid?.(), realHome = isRealHome, shell = false, shellBin = shellBinary(), agentDir = AGENT_DIR, dataDir = DATA_DIR, backupDir, port = null, verify = null, portHolder = null }) {
+export function swapAgents({ old, write = false, home = os.homedir(), run = defaultRun, uid = process.getuid?.(), realHome = isRealHome, shell = false, shellBin = shellBinary(), agentDir = AGENT_DIR, dataDir = DATA_DIR, backupDir, port = null, verify = null, portHolder = null, processes = defaultProcesses, parents = defaultParents, commands = defaultCommands, kill, stripWaitMs }) {
   const domain = `gui/${uid}`;
   const real = realHome(home);
   const lines = [];
   const ind = (ls) => ls.flatMap((l) => l.split('\n')).filter((l) => !/^Preview only/.test(l)).map((l) => (l ? `  ${l}` : ''));
   if (!write) {
     for (const a of old) lines.push(`pasture's old LaunchAgent ${a.label} (replaced by ${a.kind === 'brain' ? LABEL : SHELL_LABEL}):`, `  would back up ${a.file} to ${backupDir}/`, `  would run: launchctl bootout ${domain}/${a.label}`, `  would remove ${a.file}`, '');
+    if (real && shell) {
+      for (const st of strayStrips({ shellBin, processes, parents, commands, agent: agentArgs(plistPath(home, SHELL_LABEL)) })) lines.push(`a strip is running by hand (pid ${st.pid}, ${st.comm}): quit it from the menu bar (Quit Bellwether) before --write, or the login item's strip can't start`, '');
+    }
     return { lines: [...lines, ...current('install', { write, home, run, uid, realHome, shell, shellBin, agentDir, dataDir }).lines], wrote: false };
   }
 
@@ -267,6 +257,11 @@ export function swapAgents({ old, write = false, home = os.homedir(), run = defa
     }
   }
 
+  // A strip of this checkout started by hand would keep the login item's from
+  // starting; find it now, while nothing has changed.
+  const cleared = real && shell ? clearStrips({ home, shellBin, dataDir, processes, parents, commands, kill }) : [];
+  lines.push(...cleared);
+
   // 2. Back up and boot out the old agents.
   fs.mkdirSync(backupDir, { recursive: true });
   const changed = [];
@@ -283,7 +278,7 @@ export function swapAgents({ old, write = false, home = os.homedir(), run = defa
 
   // 3. The new agents, then 4. the new brain must answer.
   try {
-    const now = current('install', { write: true, home, run, uid, realHome, shell, shellBin, agentDir, dataDir });
+    const now = current('install', { write: true, home, run, uid, realHome, shell, shellBin, agentDir, dataDir, processes, parents, commands, kill, stripWaitMs });
     lines.push('', ...now.lines);
     if (real && verify) {
       const v = verify();
@@ -321,12 +316,22 @@ export function swapAgents({ old, write = false, home = os.homedir(), run = defa
   }
 }
 
+/** clearStripsFor, with the installed strip agent's own strip (by its ProgramArguments) left alone. */
+function clearStrips({ home, shellBin, dataDir, processes, parents, commands, kill }) {
+  return clearStripsFor({ shellBin, dataDir, processes, parents, commands, agent: agentArgs(plistPath(home, SHELL_LABEL)), ...(kill ? { kill } : {}), makeError: (m) => new CliError(m, EXIT.NOT_RUNNING) });
+}
+
 /** The bellwether agents themselves. */
-function current(action, { write = false, home = os.homedir(), run = defaultRun, uid = process.getuid?.(), realHome = isRealHome, shell = false, shellBin = shellBinary(), agentDir = AGENT_DIR, dataDir = DATA_DIR } = {}) {
+function current(action, { write = false, home = os.homedir(), run = defaultRun, uid = process.getuid?.(), realHome = isRealHome, shell = false, shellBin = shellBinary(), agentDir = AGENT_DIR, dataDir = DATA_DIR, processes = defaultProcesses, parents = defaultParents, commands = defaultCommands, kill, stripWaitMs } = {}) {
   const brainText = plistText({ agentDir, dataDir });
   if (!shell) return one(action, { write, home, run, uid, realHome, label: LABEL, wantText: brainText, what: 'the brain', dataDir });
+  const live = action === 'install' && write && realHome(home);
+  // Only one strip can run: one started by hand would make the login item's exit at once.
+  const cleared = live ? clearStrips({ home, shellBin, dataDir, processes, parents, commands, kill }) : [];
   const brain = one(action, { write, home, run, uid, realHome, label: LABEL, wantText: brainText, what: 'the brain', dataDir });
   const strip = one(action, { write, home, run, uid, realHome, label: SHELL_LABEL, wantText: shellPlistText({ shellBin, agentDir, dataDir }), what: 'the strip', dataDir });
+  strip.lines.unshift(...cleared);
+  if (live && strip.wrote) strip.lines.push(stripAgentStatus({ shellBin, processes, parents, commands, agent: agentArgs(plistPath(home, SHELL_LABEL)), ...(stripWaitMs !== undefined ? { waitMs: stripWaitMs } : {}) }).line);
   const indent = (ls) => ls.flatMap((l) => l.split('\n')).map((l) => (l ? `  ${l}` : ''));
   return { lines: ['brain (data/brain.log):', ...indent(brain.lines), '', 'strip (data/shell.log):', ...indent(strip.lines)], wrote: brain.wrote || strip.wrote };
 }

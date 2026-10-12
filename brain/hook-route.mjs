@@ -29,6 +29,9 @@ export function newCounters() {
   return {
     accepted: 0,
     rejected: { origin: 0, host: 0, contentType: 0, token: 0 },
+    // When the last request was refused (ms), so doctor can tell a fresh problem from
+    // old ones. All counters live only as long as the brain: a restart resets them.
+    lastRejectedAt: null,
     malformed: 0,
     oversize: 0,
     unknownEvent: 0,
@@ -56,6 +59,7 @@ export function createHookRoute({ port, token, onEvent, knownEvents, counters, l
     const reason = rejectionReason(req.headers, allowedHosts, expected);
     if (reason) {
       counters.rejected[reason]++;
+      counters.lastRejectedAt = Date.now();
       log(`rejected /hook: ${reason}`);
       answer(res, 403);
       req.resume();

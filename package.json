@@ -15,6 +15,6 @@
     "hooks": "node brain/cli.mjs hooks",
     "status": "node brain/cli.mjs status",
     "replay": "node brain/cli.mjs replay",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "NODE_OPTIONS=--import=./test/setup.mjs node --test --test-concurrency=1 test/*.test.mjs"
   }
 }

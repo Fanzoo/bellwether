@@ -39,8 +39,8 @@ impl Settings {
         // The token, in the CLI's order (brain/envload.mjs): an exported
         // BELLWETHER_HOOK_TOKEN, then one in the .env (env_file), then the old name,
         // exported, then in the .env.
-        let text = std::fs::read_to_string(env_file(&agent_dir)).unwrap_or_default();
-        let token = token_in_order(|k| std::env::var(k).ok(), &text);
+        let _ = AGENT_DIR.set(agent_dir.clone());
+        let token = token_now();
 
         Ok(Settings { agent_dir, data_dir, port, node_path, token, config })
     }
@@ -74,6 +74,20 @@ pub fn env_file(agent_dir: &Path) -> PathBuf {
         }
     }
     own
+}
+
+static AGENT_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The hook token as it is right now: the environment, then the .env, read again on
+/// every call. A strip started before `bellwether token init` uses it to connect once
+/// the token appears (brain.rs), without a restart.
+pub fn token_now() -> Option<String> {
+    token_from(AGENT_DIR.get().map(PathBuf::as_path), |k| std::env::var(k).ok())
+}
+
+fn token_from(agent_dir: Option<&Path>, var: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let text = agent_dir.and_then(|d| std::fs::read_to_string(env_file(d)).ok()).unwrap_or_default();
+    token_in_order(var, &text)
 }
 
 /// The hook token: an exported BELLWETHER_HOOK_TOKEN, then the .env's, then the old
@@ -178,6 +192,17 @@ mod tests {
         assert_eq!(token_in_order(env(&[("PASTURE_HOOK_TOKEN", "env_old")]), file_new_and_old).as_deref(), Some("file_new"), "a stale exported old name doesn't beat the .env's new one");
         assert_eq!(token_in_order(env(&[("PASTURE_HOOK_TOKEN", "env_old")]), "PASTURE_HOOK_TOKEN=file_old\n").as_deref(), Some("env_old"));
         assert_eq!(token_in_order(env(&[]), "PASTURE_HOOK_TOKEN=file_old\n").as_deref(), Some("file_old"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_token_written_later_is_found_on_the_next_look() {
+        let dir = std::env::temp_dir().join(format!("bellwether-later-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(token_from(Some(&dir), |_| None), None, "no token yet");
+        std::fs::write(dir.join(".env"), "BELLWETHER_HOOK_TOKEN=appearedLater_0123456789\n").unwrap();
+        assert_eq!(token_from(Some(&dir), |_| None).as_deref(), Some("appearedLater_0123456789"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -12,6 +12,7 @@ import { BIND_HOST, DATA_DIR, DOCTOR_PING, EXIT, USER_SETTINGS, setOwn } from '.
 import { SHELL_LABEL, findOldAgents, plistPath, shellBinary } from './autostart.mjs';
 import { stripRunning } from './shellctl.mjs';
 import { checkPets } from './pets.mjs';
+import { CARGO_FIX, cargoVersion, findCargo } from './cargo.mjs';
 import { makeTextCleaner } from './redact.mjs';
 
 export const MIN_NODE = [22, 9];
@@ -28,7 +29,10 @@ export function nodeSupported(version) {
  * running or the hooks aren't installed; 1 for any other failure; 0 when all pass.
  */
 
-export async function runDoctor({ settingsFile = USER_SETTINGS, env = process.env, probeTimeoutMs = 1000, configLoader = loadConfig, projectDir = null, managedFile = MANAGED_SETTINGS[process.platform] ?? null, e2e = false, runClaude = defaultRunClaude, dataDir = DATA_DIR, home = os.homedir(), isStripRunning = stripRunning } = {}) {
+/** A refused request older than this is history, not a problem (doctor shows it as INFO). */
+export const REJECTION_RECENT_MS = 15 * 60 * 1000;
+
+export async function runDoctor({ settingsFile = USER_SETTINGS, env = process.env, probeTimeoutMs = 1000, configLoader = loadConfig, projectDir = null, managedFile = MANAGED_SETTINGS[process.platform] ?? null, e2e = false, runClaude = defaultRunClaude, dataDir = DATA_DIR, home = os.homedir(), isStripRunning = stripRunning, findCargoFor = findCargo } = {}) {
   const checks = [];
   const add = (name, status, detail, exitCode = EXIT.UNEXPECTED) => checks.push({ name, status, detail, exitCode: status === 'FAIL' ? exitCode : EXIT.OK });
 
@@ -64,6 +68,9 @@ export async function runDoctor({ settingsFile = USER_SETTINGS, env = process.en
   }
 
   add('claude', 'INFO', claudeVersion());
+  // Only for building the strip (`bellwether shell --dev`); running it needs no Rust.
+  const cargo = findCargoFor();
+  add('cargo', 'INFO', cargo ? `${cargoVersion(cargo) ?? 'found'} (${cargo}); only needed to build the strip` : `not found; only needed to build the strip. ${CARGO_FIX}`);
 
   if (config) {
     const port = config.port;
@@ -76,7 +83,15 @@ export async function runDoctor({ settingsFile = USER_SETTINGS, env = process.en
       const h = health.body;
       const rejected = Object.entries(h.counters?.rejected ?? {}).filter(([, n]) => n > 0);
       add('brain', 'PASS', `pid ${h.pid}, v${h.version}, mode ${h.mode}, ${h.counters?.accepted ?? 0} events accepted` + (h.lastEventAt ? `, last ${new Date(h.lastEventAt).toLocaleTimeString()}` : ''));
-      if (rejected.length) add('rejections', 'WARN', `the brain has refused requests: ${rejected.map(([k, n]) => `${k}=${n}`).join(', ')}. token=N usually means the settings file holds an old token: re-run \`bellwether hooks install --write\``);
+      if (rejected.length) {
+        // The counts run from the brain's start; only a refusal in the last 15 minutes
+        // (or one of unknown age, from an older brain) is worth a warning.
+        const last = h.counters?.lastRejectedAt;
+        const recent = typeof last !== 'number' || Date.now() - last < REJECTION_RECENT_MS;
+        const counts = rejected.map(([k, n]) => `${k}=${n}`).join(', ');
+        if (recent) add('rejections', 'WARN', `the brain has refused requests: ${counts}${typeof last === 'number' ? `, the last at ${new Date(last).toLocaleTimeString()}` : ''}. token=N usually means the settings file holds an old token: re-run \`bellwether hooks install --write\``);
+        else add('rejections', 'INFO', `${counts} refused since the brain started, the last at ${new Date(last).toLocaleTimeString()}; none in the last 15 minutes (the counts reset when the brain restarts)`);
+      }
       if (token) {
         const ping = await probeHook(port, token, probeTimeoutMs);
         if (ping.status === 204) add('brain token', 'PASS', 'the brain accepts the token in .env');
@@ -479,7 +494,7 @@ export function nextStep({ checks, installed, home = os.homedir(), dataDir = DAT
   if (status('config') === 'FAIL') return 'fix config.json (the config line above says what is wrong)';
   if (status('token') === 'FAIL') return 'put a token in the .env: `./bellwether token init` (README, Setup step 1)';
   if (!petOk) return `fetch the pet art: \`${P} pets fetch\``;
-  if (!shellBuilt) return `build the strip (a few minutes, once): \`${P} shell --dev --release\``;
+  if (!shellBuilt) return `build the strip that starts at login (a few minutes, once): \`${P} shell build --release\` (to try it in a terminal first: \`${P} shell --dev --release\`)`;
   const autostarted = fs.existsSync(plistPath(home));
   if (platform === 'darwin' && (!autostarted || !fs.existsSync(plistPath(home, SHELL_LABEL)))) return `start bellwether at login: \`${P} autostart install\` (preview), then the same with --write`;
   if (status('brain') !== 'PASS') return autostarted ? `the brain should be running from its LaunchAgent but isn't: see ${path.join(dataDir, 'brain.log')}, then \`launchctl kickstart -k gui/$(id -u)/local.bellwether.brain\`` : `start the brain: \`${P} serve\``;

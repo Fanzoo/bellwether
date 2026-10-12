@@ -3,34 +3,50 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { SHELL_LABEL, plistPath } from '../brain/autostart.mjs';
+import { SHELL_LABEL, plistPath, shellPlistText } from '../brain/autostart.mjs';
 import { runDoctor } from '../brain/doctor.mjs';
 import { shellControl } from '../brain/shellctl.mjs';
 import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
 
 /** `bellwether shell start | stop | restart` (temp HOME and fakes only: launchd and the live strip are never touched). */
 
-const withAgent = () => {
+const withAgent = (shellBin = '/x/target/release/bellwether-shell') => {
   const home = tempDir();
   fs.mkdirSync(path.dirname(plistPath(home, SHELL_LABEL)), { recursive: true });
-  fs.writeFileSync(plistPath(home, SHELL_LABEL), '');
+  fs.writeFileSync(plistPath(home, SHELL_LABEL), shellPlistText({ shellBin }));
   return home;
 };
+// The login item's strip: its parent is launchd and its command line is the agent's ProgramArguments.
+const loginStrip = (pid, shellBin) => ({ processes: () => new Map([[pid, shellBin]]), parents: () => new Map([[pid, 1]]), commands: () => new Map([[pid, `${shellBin} --no-spawn-brain`]]) });
 
 describe('with the strip LaunchAgent installed: launchctl, behind the real-home guard', () => {
   test('restart is kickstart -k, start is kickstart, stop is kill TERM; each says what it did', async () => {
     const calls = [];
     const run = (cmd, args) => (calls.push([cmd, ...args].join(' ')), { ok: true, out: '' });
-    const o = { home: withAgent(), uid: 501, realHome: () => true, run, platform: 'darwin', processes: () => assert.fail('no ps with launchd') };
-    assert.deepEqual((await shellControl('restart', o)).lines, ['restarted the strip (LaunchAgent)']);
-    assert.deepEqual((await shellControl('start', o)).lines, ['started the strip (LaunchAgent)']);
+    // The process table shows the login item's strip (its parent is launchd) once it runs.
+    const shellBin = '/x/target/release/bellwether-shell';
+    const o = { home: withAgent(), uid: 501, realHome: () => true, run, platform: 'darwin', shellBin, ...loginStrip(99, shellBin) };
+    assert.deepEqual((await shellControl('restart', o)).lines, ['restarted the strip (LaunchAgent): the strip is running (pid 99, started by its LaunchAgent)']);
+    assert.deepEqual((await shellControl('start', o)).lines, ['started the strip (LaunchAgent): the strip is running (pid 99, started by its LaunchAgent)']);
     assert.match((await shellControl('stop', o)).lines[0], /^stopped the strip \(LaunchAgent\)/);
     assert.deepEqual(calls, [`launchctl kickstart -k gui/501/${SHELL_LABEL}`, `launchctl kickstart gui/501/${SHELL_LABEL}`, `launchctl kill TERM gui/501/${SHELL_LABEL}`]);
+  });
+  test('another strip holding the single instance: start and restart say so and don\'t kickstart; a start whose strip never runs is not reported as started', async () => {
+    const shellBin = '/x/target/release/bellwether-shell';
+    const calls = [];
+    const run = (cmd, args) => (calls.push(args[0]), { ok: true, out: '' });
+    const dev = { home: withAgent(), uid: 501, realHome: () => true, run, platform: 'darwin', shellBin, processes: () => new Map([[4242, '/x/target/debug/bellwether-shell']]), parents: () => new Map([[4242, 777]]), waitMs: 0 };
+    for (const a of ['start', 'restart']) await assert.rejects(shellControl(a, dev), new RegExp(`a strip is already running \\(pid 4242, not the login item's\\); quit it from the menu bar \\(Quit Bellwether\\), then run \`bellwether shell ${a}\``));
+    assert.deepEqual(calls, [], 'nothing was kickstarted');
+    const r = await shellControl('start', { ...dev, processes: () => new Map(), parents: () => new Map() });
+    assert.match(r.lines.join('\n'), /^asked launchd to start the strip, but its strip is not running/);
+    assert.doesNotMatch(r.lines.join('\n'), /^started/);
+    assert.deepEqual(calls, ['kickstart']);
   });
   test('a temp HOME never reaches launchctl; a launchctl failure is one clean line', async () => {
     const r = await shellControl('restart', { home: withAgent(), uid: 501, platform: 'darwin', run: () => assert.fail('launchctl was called') });
     assert.match(r.lines.join('\n'), /launchctl not called/);
-    await assert.rejects(shellControl('start', { home: withAgent(), uid: 501, realHome: () => true, platform: 'darwin', run: () => ({ ok: false, out: 'Could not find service' }) }), /launchctl kickstart .* failed: Could not find service/);
+    await assert.rejects(shellControl('start', { home: withAgent(), uid: 501, realHome: () => true, platform: 'darwin', processes: () => new Map(), run: () => ({ ok: false, out: 'Could not find service' }) }), /launchctl kickstart .* failed: Could not find service/);
   });
 });
 
@@ -87,7 +103,7 @@ describe('without it: bellwether\'s own detached copy, found by pid file or exac
     assert.deepEqual((await shellControl('restart', o)).lines, ['restarted the strip (pid 4242)']);
     assert.deepEqual(killed, [[55, 'SIGTERM']]);
     assert.equal(spawned.length, 1);
-    await assert.rejects(shellControl('start', { ...o, processes: () => new Map(), shellBin: '/nope/bellwether-shell' }), /isn't built yet .* --dev --release/);
+    await assert.rejects(shellControl('start', { ...o, processes: () => new Map(), shellBin: '/nope/bellwether-shell' }), /isn't built yet .* shell build --release/);
     await assert.rejects(shellControl('reboot', o), /usage: bellwether shell/);
   });
 });

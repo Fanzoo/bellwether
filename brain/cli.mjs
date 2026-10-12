@@ -14,6 +14,7 @@ import { fetchPets } from './pets.mjs';
 import { readShellState, shellStateFile, writeShellState } from './privacy.mjs';
 import { tokenInit } from './token.mjs';
 import { migrate } from './migrate.mjs';
+import { CARGO_FIX, findCargo } from './cargo.mjs';
 import { envFilePath } from './envpath.mjs';
 import { shellControl } from './shellctl.mjs';
 import { autostart, shellBinary } from './autostart.mjs';
@@ -32,7 +33,8 @@ const USAGE = `bellwether — Claude Code sessions as sheep (brain CLI)
   bellwether show | hide                      show or hide the strip (the same as the tray's Hide; kept across restarts)
   bellwether replay <file.jsonl> [--speed N] [--port P] [--tag <pane>]
   bellwether replay --burst <events/s> [--seconds S] [--port P]
-  bellwether shell [--dev] [--release]        run the overlay in this terminal (--dev builds it with cargo first)
+  bellwether shell [--dev] [--release]        run the overlay in this terminal (--dev builds it first, into target-dev/)
+  bellwether shell build [--release]         build the strip; --release replaces the login item's binary (Accessibility must be given again)
   bellwether shell start | stop | restart     the strip in the background (through its LaunchAgent when installed)
   bellwether shell dock-permission            ask macOS for Accessibility, so sheep can stand on the Dock (only when you run it)
   bellwether autostart install|uninstall [--write] [--brain-only] | status   start the brain and the strip at login (macOS LaunchAgents); preview by default
@@ -315,9 +317,13 @@ async function shellCommand(args) {
     // macOS grants Accessibility per binary: ask from the strip's own release binary
     // (the one the LaunchAgent runs), not from node.
     const bin = shellBinary();
-    if (!fs.existsSync(bin)) throw new CliError(`the strip isn't built yet (${bin}). Build it with \`bellwether shell --dev --release\``, EXIT.NOT_RUNNING);
+    if (!fs.existsSync(bin)) throw new CliError(`the strip isn't built yet (${bin}). Build it with \`bellwether shell build --release\``, EXIT.NOT_RUNNING);
     const r = spawnSync(bin, ['--ax-prompt'], { stdio: 'inherit' });
     return r.status ?? EXIT.UNEXPECTED;
+  }
+  if (sub === 'build') {
+    if (args.dev) throw new CliError('`bellwether shell build` takes --release or nothing', EXIT.BAD_CONFIG);
+    return shellBuild(args);
   }
   if (sub !== undefined) {
     if (args.dev || args.release) throw new CliError('`bellwether shell start|stop|restart` takes no --dev or --release (they run the release build)', EXIT.BAD_CONFIG);
@@ -327,18 +333,51 @@ async function shellCommand(args) {
     return EXIT.OK;
   }
   const tauriDir = path.join(AGENT_DIR, 'shell', 'src-tauri');
-  const bin = (profile) => path.join(tauriDir, 'target', profile, process.platform === 'win32' ? 'bellwether-shell.exe' : 'bellwether-shell');
-  if (args.dev) {
-    const build = spawn('cargo', ['build', ...(args.release ? ['--release'] : [])], { cwd: tauriDir, stdio: 'inherit' });
-    const code = await new Promise((r) => build.on('close', r));
-    if (code !== 0) throw new CliError('cargo build failed (is Rust installed? see README, Setup)', EXIT.UNEXPECTED);
-  }
-  const candidates = args.release ? [bin('release')] : [bin('release'), bin('debug')];
+  const exe = process.platform === 'win32' ? 'bellwether-shell.exe' : 'bellwether-shell';
+  // target/: only the release binary the LaunchAgent runs. target-dev/: everything else.
+  const bin = (dir, profile) => path.join(tauriDir, dir, profile, exe);
+  if (args.dev) await cargoBuild(tauriDir, { release: !!args.release, targetDir: 'target-dev' });
+  const candidates = args.dev ? [bin('target-dev', args.release ? 'release' : 'debug')] : args.release ? [bin('target', 'release')] : [bin('target', 'release'), bin('target-dev', 'release'), bin('target-dev', 'debug')];
   const found = candidates.find((f) => fs.existsSync(f));
-  if (!found) throw new CliError(`the shell isn't built yet. Build it with \`bellwether shell --dev\` or \`cd shell/src-tauri && cargo build --release\``, EXIT.NOT_RUNNING);
+  if (!found) throw new CliError(`the shell isn't built yet. Try it with \`bellwether shell --dev\`; build the one that starts at login with \`bellwether shell build --release\``, EXIT.NOT_RUNNING);
   log(`starting ${found}`);
   const child = spawn(found, [], { stdio: 'inherit' });
   return await new Promise((r) => child.on('close', (code) => r(code ?? EXIT.OK)));
+}
+
+/**
+ * `bellwether shell build [--release]`. With --release it rebuilds
+ * target/release/bellwether-shell, the binary the strip's LaunchAgent runs; macOS ties
+ * the Accessibility grant to that exact binary, so it says so before and after.
+ * Without --release it builds the debug binary into target-dev/, like `shell --dev`.
+ */
+async function shellBuild(args) {
+  const tauriDir = path.join(AGENT_DIR, 'shell', 'src-tauri');
+  if (!args.release) {
+    await cargoBuild(tauriDir, { release: false, targetDir: 'target-dev' });
+    log('built the debug strip into shell/src-tauri/target-dev/debug/ (`bellwether shell --dev` runs it); the login item\'s binary was not touched');
+    return EXIT.OK;
+  }
+  const grant = 'macOS ties the Accessibility permission (sheep standing on the Dock) to this exact binary, so after this build the sheep use the full-width strip until you run `bellwether shell dock-permission` and turn it on again, then `bellwether shell restart`';
+  log(`rebuilding ${shellBinary()}, the strip the login item runs. ${grant}.`);
+  await cargoBuild(tauriDir, { release: true, targetDir: 'target' });
+  log(`built ${shellBinary()}. A running strip keeps the old binary until \`bellwether shell restart\`. Then give Accessibility again: \`bellwether shell dock-permission\`.`);
+  return EXIT.OK;
+}
+
+/** cargo build into shell/src-tauri/<targetDir>; a missing cargo or a failed build is one clear line. */
+async function cargoBuild(tauriDir, { release, targetDir }) {
+  const cargo = findCargo();
+  if (!cargo) throw new CliError(CARGO_FIX, EXIT.UNEXPECTED);
+  // cargo's own directory goes first on PATH, so rustc and the build scripts find their toolchain too.
+  const env = { ...process.env, PATH: [path.dirname(cargo), process.env.PATH].filter(Boolean).join(path.delimiter), CARGO_TARGET_DIR: path.join(tauriDir, targetDir) };
+  const build = spawn(cargo, ['build', ...(release ? ['--release'] : [])], { cwd: tauriDir, stdio: 'inherit', env });
+  const code = await new Promise((r) => {
+    build.on('error', (e) => r(`could not run ${cargo} (${e.code ?? e.message})`));
+    build.on('close', r);
+  });
+  if (typeof code === 'string') throw new CliError(`${code}. ${CARGO_FIX}`, EXIT.UNEXPECTED);
+  if (code !== 0) throw new CliError('cargo build failed (is Rust installed? see README, Setup)', EXIT.UNEXPECTED);
 }
 
 async function pets(args) {

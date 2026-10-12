@@ -1,3 +1,4 @@
+import { loadConfig } from '../brain/config.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -13,7 +14,8 @@ import { AGENT_DIR, FIXTURES, TOKEN, tempDir } from './helpers.mjs';
  * ~/.claude/settings.json is never passed to anything here.
  */
 
-const PORT = 47417;
+// The configured port: in the test run, the suite's own (test/setup.mjs), never the live 47417.
+const PORT = loadConfig().config.port;
 const SAFE_HOME = tempDir('bellwether-home-');
 const fixture = () => JSON.parse(fs.readFileSync(path.join(FIXTURES, 'settings-sample.json'), 'utf8'));
 
@@ -46,7 +48,7 @@ describe('hook block', () => {
       assert.equal(groups[0].matcher, undefined);
       const [h] = groups[0].hooks;
       assert.equal(h.type, 'http');
-      assert.equal(h.url, 'http://127.0.0.1:47417/hook');
+      assert.equal(h.url, `http://127.0.0.1:${PORT}/hook`);
       assert.equal(h.timeout, 1);
       assert.equal(h.headers['X-Bellwether-Token'], TOKEN);
       for (const [name, value] of Object.entries(h.headers)) {
@@ -67,10 +69,10 @@ describe('hook block', () => {
   });
 
   test('ownership is by URL prefix only', () => {
-    assert.ok(isBellwetherHandler({ type: 'http', url: 'http://127.0.0.1:47417/hook' }, PORT));
+    assert.ok(isBellwetherHandler({ type: 'http', url: `http://127.0.0.1:${PORT}/hook` }, PORT));
     assert.ok(!isBellwetherHandler({ type: 'http', url: 'http://127.0.0.1:47418/hook' }, PORT));
-    assert.ok(!isBellwetherHandler({ type: 'http', url: 'http://localhost:47417/hook' }, PORT));
-    assert.ok(!isBellwetherHandler({ type: 'command', command: 'curl http://127.0.0.1:47417/hook' }, PORT));
+    assert.ok(!isBellwetherHandler({ type: 'http', url: `http://localhost:${PORT}/hook` }, PORT));
+    assert.ok(!isBellwetherHandler({ type: 'command', command: `curl http://127.0.0.1:${PORT}/hook` }, PORT));
   });
 });
 
@@ -88,7 +90,7 @@ describe('install / uninstall', () => {
 
   test('install removes a bellwether entry left on an event it no longer subscribes to', () => {
     const stale = structuredClone(fixture());
-    stale.hooks.SessionStart.push({ hooks: [{ type: 'http', url: 'http://127.0.0.1:47417/hook', timeout: 1 }] });
+    stale.hooks.SessionStart.push({ hooks: [{ type: 'http', url: `http://127.0.0.1:${PORT}/hook`, timeout: 1 }] });
     const after = install(stale, PORT, TOKEN);
     assert.deepEqual(after.hooks.SessionStart, fixture().hooks.SessionStart);
   });
@@ -118,7 +120,7 @@ describe('install / uninstall', () => {
   });
 
   test('uninstall keeps a foreign handler that shares a group with bellwether', () => {
-    const mixed = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'http', url: 'http://127.0.0.1:47417/hook' }] }] } };
+    const mixed = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'http', url: `http://127.0.0.1:${PORT}/hook` }] }] } };
     assert.deepEqual(uninstall(mixed, PORT), { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] } });
   });
 
@@ -150,7 +152,7 @@ describe('the CLI against a temp copy', () => {
 
     const dry = cli(['hooks', 'install', '--settings', file], data);
     assert.equal(dry.code, 0, dry.stderr);
-    assert.match(dry.stdout, /^\+\s+"url": "http:\/\/127\.0\.0\.1:47417\/hook",$/m);
+    assert.match(dry.stdout, new RegExp(`^\\+\\s+"url": "http://127\\.0\\.0\\.1:${PORT}/hook",$`, 'm'));
     assert.doesNotMatch(dry.stdout, /^-(?!-- )/m, 'no removed lines');
     assert.match(dry.stderr, /Nothing was written/);
     assert.deepEqual(fs.readFileSync(file), original);
@@ -409,14 +411,14 @@ describe('--out never destroys data', () => {
 
 describe('exact-URL ownership (Decision 13)', () => {
   const foreign = [
-    { type: 'http', url: 'http://127.0.0.1:47417/hooks' },
-    { type: 'http', url: 'http://127.0.0.1:47417/hook2' },
-    { type: 'http', url: 'http://127.0.0.1:47417/hook?x=1' },
-    { type: 'http', url: 'http://127.0.0.1:47417/hook/sub' },
+    { type: 'http', url: `http://127.0.0.1:${PORT}/hooks` },
+    { type: 'http', url: `http://127.0.0.1:${PORT}/hook2` },
+    { type: 'http', url: `http://127.0.0.1:${PORT}/hook?x=1` },
+    { type: 'http', url: `http://127.0.0.1:${PORT}/hook/sub` },
   ];
 
   test('only the exact URL is bellwether\'s', () => {
-    assert.ok(isBellwetherHandler({ type: 'http', url: 'http://127.0.0.1:47417/hook' }, PORT));
+    assert.ok(isBellwetherHandler({ type: 'http', url: `http://127.0.0.1:${PORT}/hook` }, PORT));
     for (const h of foreign) assert.ok(!isBellwetherHandler(h, PORT), h.url);
   });
 

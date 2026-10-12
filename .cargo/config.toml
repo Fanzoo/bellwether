@@ -1,0 +1,6 @@
+# cargo reads this when run anywhere in the repository (it looks in the directory it is
+# run from and its parents). Every build of the strip goes to shell/src-tauri/target-dev/;
+# shell/src-tauri/target/release/ holds only the binary the strip's LaunchAgent runs, and
+# only `bellwether shell build --release` writes it. See shell/src-tauri/.cargo/config.toml.
+[build]
+target-dir = "shell/src-tauri/target-dev"

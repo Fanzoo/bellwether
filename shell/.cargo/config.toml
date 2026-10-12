@@ -1,0 +1,3 @@
+# As in the repository root's .cargo/config.toml: builds go to src-tauri/target-dev/.
+[build]
+target-dir = "src-tauri/target-dev"

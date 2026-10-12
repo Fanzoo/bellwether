@@ -144,7 +144,7 @@ pub fn control(port: u16, token: Option<&str>, action: &str) -> Result<(), Strin
 
 /// POST /control with any message (`placed`, Milestone 8).
 pub fn control_json(port: u16, token: Option<&str>, msg: &Value) -> Result<(), String> {
-    let token = token.ok_or("BELLWETHER_HOOK_TOKEN is not set")?;
+    let token = token.map(str::to_string).or_else(crate::settings::token_now).ok_or("BELLWETHER_HOOK_TOKEN is not set")?;
     let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).http_status_as_error(false).build().new_agent();
     let resp = agent
         .post(&format!("http://127.0.0.1:{port}/control"))
@@ -176,9 +176,9 @@ pub fn run(brain: Arc<Brain>, cfg: BrainConfig) {
         .http_status_as_error(false)
         .build()
         .new_agent();
-    let Some(token) = cfg.token.clone() else {
-        log("error: BELLWETHER_HOOK_TOKEN is not set (environment or the .env); the strip stays empty");
-        return;
+    let token = match cfg.token.clone() {
+        Some(t) => t,
+        None => wait_for_token(),
     };
     let mut rev: i64 = -1;
     let mut spawned_once = false;
@@ -224,6 +224,19 @@ pub fn run(brain: Arc<Brain>, cfg: BrainConfig) {
                 }
                 std::thread::sleep(Duration::from_millis(if failures < 5 { 500 } else { 2000 }));
             }
+        }
+    }
+}
+
+/// No token yet (the strip started before `bellwether token init`): look again every
+/// few seconds, and connect as soon as one appears.
+fn wait_for_token() -> String {
+    log("error: BELLWETHER_HOOK_TOKEN is not set (environment or the .env); the strip stays empty until it is. Checking again every 3 s (`bellwether token init` adds one)");
+    loop {
+        std::thread::sleep(Duration::from_secs(3));
+        if let Some(t) = crate::settings::token_now() {
+            log("found BELLWETHER_HOOK_TOKEN in the .env; connecting to the brain");
+            return t;
         }
     }
 }

@@ -1,3 +1,5 @@
+// The isolation preload (npm test loads it first; this also covers `node --test <file>`).
+import './setup.mjs';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';

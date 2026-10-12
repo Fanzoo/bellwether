@@ -1,0 +1,6 @@
+# Every plain `cargo build` / `cargo test` here goes to target-dev/, never to target/.
+# target/release/bellwether-shell is the binary the strip's LaunchAgent runs, and macOS
+# ties the Accessibility grant (sheep on the Dock) to that exact binary: rebuilding it
+# drops the grant. Only `bellwether shell build --release` writes there, on purpose.
+[build]
+target-dir = "target-dev"

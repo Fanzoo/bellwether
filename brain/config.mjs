@@ -9,10 +9,13 @@ import { withDefaults } from './defaults.mjs';
  * to configure a bind address, then merges defaults under it (defaults.mjs), which
  * also validates the behaviour and bubble keys the brain reads.
  */
-export function loadConfig({ dir = AGENT_DIR } = {}) {
+export function loadConfig({ dir = AGENT_DIR, env = process.env } = {}) {
   const real = path.join(dir, 'config.json');
   const example = path.join(dir, 'config.example.json');
-  const file = fs.existsSync(real) ? real : example;
+  // BELLWETHER_CONFIG (a test aid, as in the shell's settings.rs): another config file
+  // for this checkout, e.g. one on a port that isn't the live brain's.
+  const other = dir === AGENT_DIR && env.BELLWETHER_CONFIG ? path.resolve(env.BELLWETHER_CONFIG) : null;
+  const file = other ?? (fs.existsSync(real) ? real : example);
   let raw;
   try {
     raw = fs.readFileSync(file, 'utf8');
