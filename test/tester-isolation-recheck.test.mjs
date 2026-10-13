@@ -144,9 +144,9 @@ describe('strip processes and the build target', () => {
       assert.equal(found.length, 1, `${bin} is not detected (checkoutBinaries: ${checkoutBinaries(shellBin).join(', ')})`);
     }
   });
-  test('cargo, run from the repo root or from shell/ against the strip manifest, builds into target-dev/, never target/', () => {
+  test('cargo, run from the repo root or from shell/ against the strip manifest, builds into target-dev/, never target/', (t) => {
     const cargo = path.join(process.env.HOME, '.cargo', 'bin', 'cargo');
-    if (!fs.existsSync(cargo)) return;
+    if (!fs.existsSync(cargo)) return t.skip('no cargo at ~/.cargo/bin');
     for (const [cwd, manifest] of [[AGENT_DIR, 'shell/src-tauri/Cargo.toml'], [path.join(AGENT_DIR, 'shell'), 'src-tauri/Cargo.toml'], [path.join(AGENT_DIR, 'shell', 'src-tauri'), 'Cargo.toml']]) {
       const r = spawnSync(cargo, ['metadata', '--no-deps', '--offline', '--format-version', '1', '--manifest-path', manifest], { cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME } });
       assert.equal(JSON.parse(r.stdout).target_directory, path.join(AGENT_DIR, 'shell', 'src-tauri', 'target-dev'), `cargo from ${path.relative(AGENT_DIR, cwd) || '.'} would build into target/`);

@@ -53,11 +53,41 @@ export function registryAvailable() {
 /** Licences npm lists for the dev tools, used when node_modules isn't installed. */
 const KNOWN_NPM_LICENCES = { '@tauri-apps/cli': 'Apache-2.0 OR MIT' };
 
+/**
+ * The crate rows of the committed THIRD-PARTY.md, by "name version". A crate this machine
+ * never downloaded (cargo fetches only what the platforms it built for need) keeps the
+ * licence its row already has: that row was read from a registry that had the crate. So
+ * the file doesn't depend on which crates happen to be cached here, and `--check` still
+ * fails on a crate that has no row yet.
+ */
+function committedLicences() {
+  const rows = new Map();
+  let text = '';
+  try {
+    text = fs.readFileSync(OUT, 'utf8');
+  } catch {
+    return rows;
+  }
+  const table = text.split('| Crate | Version | Licence |')[1] ?? '';
+  for (const m of table.matchAll(/^\| ([^|]+) \| ([^|]+) \| ([^|]+) \|$/gm)) rows.set(`${m[1]} ${m[2]}`, m[3]);
+  return rows;
+}
+
+const NOT_DOWNLOADED = 'not downloaded on this machine (another platform\'s dependency)';
+
+/** How many crates were not in the local registry on the last render. */
+export let unverified = 0;
+
 function render() {
   const regs = registryDirs();
+  const committed = committedLicences();
+  unverified = 0;
   const crates = lockedCrates(fs.readFileSync(LOCK, 'utf8')).map((c) => {
     const dir = regs.map((r) => path.join(r, `${c.name}-${c.version}`)).find((d) => fs.existsSync(path.join(d, 'Cargo.toml')));
-    return { ...c, licence: dir ? crateLicence(fs.readFileSync(path.join(dir, 'Cargo.toml'), 'utf8')) : 'not downloaded on this machine (another platform\'s dependency)' };
+    if (dir) return { ...c, licence: crateLicence(fs.readFileSync(path.join(dir, 'Cargo.toml'), 'utf8')) };
+    unverified++;
+    const kept = committed.get(`${c.name} ${c.version}`);
+    return { ...c, licence: kept && kept !== NOT_DOWNLOADED ? kept : NOT_DOWNLOADED };
   });
   const npm = [];
   for (const [file, where] of [[path.join(AGENT, 'package.json'), AGENT], [path.join(AGENT, 'shell', 'package.json'), path.join(AGENT, 'shell')]]) {
@@ -120,7 +150,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.stderr.write('THIRD-PARTY.md is out of date: run `node scripts/third-party.mjs`\n');
       process.exit(1);
     }
-    process.stdout.write('THIRD-PARTY.md is up to date\n');
+    process.stdout.write(`THIRD-PARTY.md is up to date${unverified ? ` (${unverified} crates aren't in this machine's cargo registry, so their licences were taken from the file as committed; \`cargo fetch\` downloads every platform's crates)` : ''}\n`);
   } else {
     fs.writeFileSync(OUT, text);
     process.stdout.write(`wrote ${path.relative(process.cwd(), OUT)}\n`);

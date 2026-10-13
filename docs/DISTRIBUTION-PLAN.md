@@ -1399,6 +1399,65 @@ Progress against **Done when**:
 - [ ] Only CI can prove: the workflow runs at all, the Node suite on a GitHub macOS
   runner, the cross-checks on Ubuntu, and the job summary. It runs on the first push.
 
+#### M2 first CI run (run 38460881139) and its fixes
+
+The release check, the cargo tests and both cross-checks passed. The Node suite and the
+parity table failed, for these reasons:
+
+- **Redaction time budgets (tester-m2 and tester-m2-recheck).** A fixed wall clock
+  (1 s or 1.5 s per 5 MB input) failed on the shared runner: `userinfo` took 2481 ms,
+  against 1237 ms here, where it was already near its budget. Every input grows linearly
+  here (4× the input takes 3.7–4.1× the time).
+  - Fix: `cleaningProblems` in test/helpers.mjs. The budgets stay as written, multiplied by
+    `machineSlowdown()`. That is the time of a fixed redaction-like regex workload, which
+    doesn't use the code under test, measured in the same process against this Mac's
+    174–185 ms. It is never below 1, so this machine keeps the exact budgets. An input
+    over budget is measured again, best of 3, before it counts.
+  - Tried and dropped: a linear-growth check (time(N) / time(N/4) ≤ 8). It caught an
+    injected quadratic cleaner, but under 2× CPU oversubscription the large allocations
+    made linear inputs read 13–20×, a false alarm.
+  - Under that load the calibrated budgets held (slowdown measured 1.64–1.79, 0
+    failures). A quadratic cleaner is still caught (811 ms against a 100 ms budget).
+- **THIRD-PARTY.md depended on the machine's cargo cache** (docs.test.mjs 6/7, tester-m10's
+  licensing test). The parity job built the macOS binary, so `~/.cargo/registry` held only
+  macOS crates. The check then ran and rendered the other platforms' crates as "not
+  downloaded" (reproduced here with a macOS-only `CARGO_HOME`: same 6/7).
+  - Fix in `scripts/third-party.mjs`: a crate not in the local registry keeps its
+    committed row, which was read from a registry that had it. A crate with no row still
+    fails the check.
+  - CI runs `cargo fetch` (every platform's crates), so it verifies every row.
+- **The test count** (957 on CI against 958 here). A skipped `describe` registers none of
+  its tests. The horn-mask suite, skipped without the pet art, has one test, and the
+  suite itself counts as one skipped test.
+- **The 5 skips on CI:**
+  - docs: the THIRD-PARTY check, with no cargo registry;
+  - horns: the pet art;
+  - tester-m10: the autostart CLI test, which needed `target/release/bellwether-shell`;
+  - tester-m8: three `--locate` tests, which needed the same binary.
+
+  Fixes:
+  - CI now fetches every crate and the pinned, hash-checked pet art, and builds the strip
+    (debug).
+  - tester-m8 uses `BELLWETHER_STRIP_BIN`, else whichever build of the strip exists.
+  - tester-m10's test runs in a temp copy of the checkout, with a stub file as the strip
+    "build", the same on every machine.
+- **Silent early returns made visible.** Four tests passed without checking anything when
+  something was missing:
+  - tester-m10's doctor walk after step 1, and the two tests that need its brain (no pet
+    art);
+  - tester-m2-recheck's replay of real recordings (`data/recordings` is private and never
+    committed);
+  - tester-isolation-recheck's cargo check (no `~/.cargo/bin/cargo`).
+
+  They now call `t.skip` with the reason.
+- **tester-m10 in the parity table:** "25/27" was 1 failure (the licensing check) plus 1
+  skip, which the cell counted as a missing pass. Cells now show skips apart
+  (`pass 9/9, 3 skipped`).
+- **brain-server, node 20/21 in the parity job only.** It passed in the Node suite job of
+  the same run, and here under 2× CPU load. The runner didn't keep the test's output, so
+  which test failed is unknown. The runner now prints every failing test's name and error
+  to the log and the job summary.
+
 #### M2 findings
 
 - **The shared `.env` reader differs from `node --env-file` in two shapes** (found by the

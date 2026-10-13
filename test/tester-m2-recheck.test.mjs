@@ -8,7 +8,7 @@ import { normalise } from '../brain/normalise.mjs';
 import { makeTextCleaner } from '../brain/redact.mjs';
 import { rebuild } from '../brain/replay.mjs';
 import { loadState } from '../brain/persist.mjs';
-import { AGENT_DIR, readVectors, tempDir } from './helpers.mjs';
+import { AGENT_DIR, cleaningProblems, readVectors, tempDir } from './helpers.mjs';
 
 const example = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
 const clean = makeTextCleaner({ maxChars: 500, redactPatterns: [] });
@@ -69,14 +69,9 @@ describe('re-check: ReDoS and size', () => {
   const cleaners = { builtin: clean, example: cleanEx };
   for (const [cn, fn] of Object.entries(cleaners)) {
     test(`every pathological 5 MB input cleans in under 1.5 s (${cn})`, () => {
-      const slow = [];
-      for (const [k, v] of Object.entries(inputs())) {
-        const t = process.hrtime.bigint();
-        fn(v);
-        const ms = Number(process.hrtime.bigint() - t) / 1e6;
-        if (ms > 1500) slow.push(`${k}: ${ms.toFixed(0)} ms`);
-      }
-      assert.deepEqual(slow, []);
+      // 1.5 s each on the maintainer's Mac, scaled by this machine's measured speed
+      // (test/helpers.mjs, cleaningProblems).
+      assert.deepEqual(cleaningProblems(fn, inputs(), 1500), []);
     });
   }
   test('output is capped at maxChars even when every character is redacted', () => {
@@ -86,9 +81,9 @@ describe('re-check: ReDoS and size', () => {
 });
 
 describe('re-check: D2 replay of a real recording', () => {
-  test('every real recording in data/recordings replays with no marker in any snapshot, and no marker is sent in an allowlisted field', () => {
+  test('every real recording in data/recordings replays with no marker in any snapshot, and no marker is sent in an allowlisted field', (t) => {
     const dir = path.join(AGENT_DIR, 'data', 'recordings');
-    if (!fs.existsSync(dir)) return;
+    if (!fs.existsSync(dir)) return t.skip('no real recordings in data/recordings (private, never committed)');
     const c = makeTextCleaner({ maxChars: 60 });
     const f = new Flock({ config: withDefaults({ port: 0 }), t: 0 });
     let n = 0;

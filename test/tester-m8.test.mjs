@@ -47,8 +47,12 @@ describe('locator.rs: nothing from a header reaches a shell or a script unvalida
 });
 
 describe('--locate with hostile terminal values (real binary, AppleScript off, fake herdr)', () => {
-  const bin = path.join(AGENT_DIR, 'shell', 'src-tauri', 'target', 'release', 'bellwether-shell');
-  const skip = !fs.existsSync(bin) || process.platform !== 'darwin';
+  // Any build of the strip has `--locate`: BELLWETHER_STRIP_BIN if set, else the release
+  // one the LaunchAgent runs if this checkout has it, else a dev build (CI builds
+  // target-dev/debug before the suite).
+  const builds = ['target/release', 'target-dev/release', 'target-dev/debug'].map((d) => path.join(AGENT_DIR, 'shell', 'src-tauri', ...d.split('/'), 'bellwether-shell'));
+  const bin = [process.env.BELLWETHER_STRIP_BIN, ...builds].find((b) => b && fs.existsSync(b));
+  const skip = process.platform !== 'darwin' ? 'macOS only' : !bin && 'no build of the strip in this checkout (cargo build --manifest-path shell/src-tauri/Cargo.toml)';
   const setup = () => {
     const root = tempDir('m8-');
     const log = path.join(root, 'fake.log');

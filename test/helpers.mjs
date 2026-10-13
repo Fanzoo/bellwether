@@ -214,3 +214,56 @@ export function readInstallerVectors() {
   const file = (c, f) => fs.readFileSync(path.join(dir, c.dir, f), 'utf8');
   return { ...meta, cases: meta.cases.map((c) => ({ ...c, settings: file(c, 'settings.json'), installed: file(c, 'installed.json'), installDiff: file(c, 'install.diff'), uninstallDiff: file(c, 'uninstall.diff'), uninstalled: file(c, 'uninstalled.json') })) };
 }
+
+// ------------------------------------------------- ReDoS guards that hold on a slow runner
+
+/** Milliseconds for `f`, the best of `runs`. */
+function bestOf(runs, f) {
+  let best = Infinity;
+  for (let i = 0; i < runs; i++) {
+    const t = process.hrtime.bigint();
+    f();
+    best = Math.min(best, Number(process.hrtime.bigint() - t) / 1e6);
+  }
+  return best;
+}
+
+// What the calibration workload takes on the maintainer's Mac (M-series: 174-185 ms).
+const CALIBRATION_REFERENCE_MS = 200;
+let calibrationScale = null;
+
+/**
+ * How much slower this machine is than the maintainer's Mac, measured in this process
+ * on a fixed workload of the kind redaction does (a look-behind, bounded classes,
+ * captures and a replacement callback over 4 MB) that doesn't use the code under test.
+ * Never below 1: a dev machine keeps a budget exactly as written; a shared CI runner
+ * gets it scaled by its own measured speed.
+ */
+export function machineSlowdown() {
+  if (calibrationScale === null) {
+    const text = 'k:'.repeat(1e6) + 'x=y '.repeat(5e5);
+    const re = /(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]{1,80})(\s{0,20}[=:]\s{0,20})/g;
+    const ms = bestOf(3, () => text.replace(re, (m, k, sep) => k + sep));
+    calibrationScale = Math.max(1, ms / CALIBRATION_REFERENCE_MS);
+  }
+  return calibrationScale;
+}
+
+/**
+ * The ReDoS guard for a text cleaner: every input (a name and the pathological text, about
+ * 5 MB) must clean within `budgetMs` on the maintainer's Mac, times machineSlowdown() on
+ * this one. Catastrophic or polynomial backtracking on inputs this size takes minutes, far
+ * past any scaled budget; ordinary linear work fits. A run over budget is measured again,
+ * the best of 3 (one sample can be stretched by the scheduler), before it counts.
+ * Returns the problems found, as lines (empty when all is well).
+ */
+export function cleaningProblems(clean, inputs, budgetMs) {
+  const budget = budgetMs * machineSlowdown();
+  const problems = [];
+  for (const [name, text] of Object.entries(inputs)) {
+    let ms = bestOf(1, () => clean(text));
+    if (ms > budget) ms = bestOf(3, () => clean(text));
+    if (ms > budget) problems.push(`${name}: ${ms.toFixed(0)} ms, over the ${budget.toFixed(0)} ms budget (${budgetMs} ms × slowdown ${machineSlowdown().toFixed(2)})`);
+  }
+  return problems;
+}

@@ -96,10 +96,22 @@ describe('autostart: both LaunchAgents, temp HOME only', () => {
     assert.doesNotMatch(t, /a&b <c>/);
     void plistText;
   });
-  test('the CLI under a temp HOME: preview writes nothing, --write writes both, --brain-only writes one, uninstall removes them, bad flags exit 3', { skip: !fs.existsSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'target', 'release', 'bellwether-shell')) }, () => {
+  test('the CLI under a temp HOME: preview writes nothing, --write writes both, --brain-only writes one, uninstall removes them, bad flags exit 3', () => {
     const home = mkHome();
+    // A temp copy of the checkout whose strip "build" is a stub file: installing the
+    // strip's LaunchAgent only needs the binary to exist (it is never run from a temp
+    // HOME), so this runs the same with or without a release build of the strip here.
+    const agent = path.join(home, 'checkout');
+    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(agent, 'brain'), { recursive: true });
+    fs.copyFileSync(path.join(AGENT_DIR, 'package.json'), path.join(agent, 'package.json'));
+    const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
+    cfg.port = JSON.parse(fs.readFileSync(process.env.BELLWETHER_CONFIG, 'utf8')).port; // the suite's test port, never 47417
+    fs.writeFileSync(path.join(agent, 'config.example.json'), JSON.stringify(cfg));
+    const strip = path.join(agent, 'shell', 'src-tauri', 'target', 'release', 'bellwether-shell');
+    fs.mkdirSync(path.dirname(strip), { recursive: true });
+    fs.writeFileSync(strip, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: 'cliCanaryToken_0123456789abcdef' };
-    const run = (...a) => spawnBrainSync(['autostart', ...a], { encoding: 'utf8', env });
+    const run = (...a) => spawnBrainSync(['autostart', ...a], { root: agent, encoding: 'utf8', env, cwd: agent });
     const dir = path.join(home, 'Library', 'LaunchAgents');
     assert.equal(run('install').status, 0);
     assert.deepEqual(fs.readdirSync(dir), []);
@@ -146,7 +158,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test('each state names exactly the right single step, in order, and hooks come last', async () => {
+  test('each state names exactly the right single step, in order, and hooks come last', async (t) => {
     const e = (v) => ({ BELLWETHER_HOOK_TOKEN: v });
     // 0 nothing: no token
     assert.match(next({ BELLWETHER_HOOK_TOKEN: '' }).text, /token/);
@@ -154,7 +166,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
     assert.match(next().text, /pets fetch/);
     // 2 pet art present (the real, hash-pinned file when this machine has it), strip not built
     const realPet = path.join(AGENT_DIR, 'data', 'pets', 'esheep64', 'animations.xml');
-    if (!fs.existsSync(realPet)) return; // no pet art on this machine: the rest of the walk needs it
+    if (!fs.existsSync(realPet)) return t.skip('steps 2-7 need the pet art (bellwether pets fetch); steps 0-1 passed'); // the rest of the walk needs it
     fs.mkdirSync(path.join(dataDir, 'pets', 'esheep64'), { recursive: true });
     fs.copyFileSync(realPet, path.join(dataDir, 'pets', 'esheep64', 'animations.xml'));
     assert.match(next().text, /shell --dev --release/);
@@ -186,8 +198,8 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
     void e;
   });
 
-  test('"all set" is not said while a doctor check is failing (a token mismatch, disableAllHooks, a bad timeout)', async () => {
-    if (!brain) return;
+  test('"all set" is not said while a doctor check is failing (a token mismatch, disableAllHooks, a bad timeout)', async (t) => {
+    if (!brain) return t.skip('needs the brain the walk above starts, which needs the pet art');
     const s = JSON.parse(fs.readFileSync(settings, 'utf8'));
     s.disableAllHooks = true;
     fs.writeFileSync(settings, JSON.stringify(s, null, 2));
@@ -204,8 +216,8 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
     assert.equal(out.status, 0);
   });
 
-  test('another brain token (brain started with a different token) is not "all set"', async () => {
-    if (!brain) return;
+  test('another brain token (brain started with a different token) is not "all set"', async (t) => {
+    if (!brain) return t.skip('needs the brain the walk above starts, which needs the pet art');
     const r = next({ BELLWETHER_HOOK_TOKEN: 'aDifferentTokenNotReal_0123456789' });
     assert.ok(r.checks.some((c) => c.status === 'FAIL'));
     assert.doesNotMatch(r.text, /all set/, `next said "${r.text}"`);

@@ -12,7 +12,7 @@ import { Flock } from '../brain/flock.mjs';
 import { normalise } from '../brain/normalise.mjs';
 import { makeTextCleaner } from '../brain/redact.mjs';
 import { rebuild } from '../brain/replay.mjs';
-import { AGENT_DIR, TOKEN, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, cleaningProblems, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Independent tester probes for Milestone 2. In-process pieces use port 0 and temp
@@ -91,14 +91,9 @@ describe('redaction: nothing that looks like a credential survives into a bubble
       jwt: 'eyJ' + 'a'.repeat(5e6),
       colons: ':'.repeat(5e6),
     };
-    const slow = [];
-    for (const [k, v] of Object.entries(inputs)) {
-      const t = process.hrtime.bigint();
-      clean(v);
-      const ms = Number(process.hrtime.bigint() - t) / 1e6;
-      if (ms > 1000) slow.push(`${k}: ${ms.toFixed(0)} ms`);
-    }
-    assert.deepEqual(slow, []);
+    // Under a second each on the maintainer's Mac, scaled by this machine's measured speed
+    // (test/helpers.mjs, cleaningProblems).
+    assert.deepEqual(cleaningProblems(clean, inputs, 1000), []);
   });
 
   // The cases are shared with the Rust port (test/fixtures/normalise-vectors.json).

@@ -106,7 +106,8 @@ function runFile(file, impl) {
       r.ok = !timedOut && code === 0 && r.fail === 0 && r.cancelled === 0 && r.tests > 0;
       // The first failing test by name; a failure of the file as a whole (a hook that
       // failed) is reported under the file's path, shown relative to the checkout.
-      const failures = [...out.matchAll(/^\s*not ok \d+ - (.*)$/gm)].map((m) => m[1].split(AGENT_DIR + path.sep).join(''));
+      r.failures = failureDetails(out);
+      const failures = r.failures.map((f) => f.name);
       const firstFailure = failures.find((f) => !f.endsWith('.test.mjs')) ?? failures[0];
       r.why = timedOut ? `timed out after ${FILE_TIMEOUT_MS / 1000} s` : firstFailure ?? (r.tests === 0 ? out.trim().split('\n').slice(-3).join(' ').slice(0, 200) : null);
       resolve(r);
@@ -114,11 +115,39 @@ function runFile(file, impl) {
   });
 }
 
+const relative = (text) => String(text).split(AGENT_DIR + path.sep).join('');
+
+/**
+ * Every failing test in TAP output: its name and the lines of its diagnostic block that
+ * say why (error, expected, actual, the first stack line in a test file).
+ */
+function failureDetails(tap) {
+  const lines = tap.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)not ok \d+ - (.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const why = [];
+    for (let j = i + 1; j < lines.length && !/^\s*\.\.\.$/.test(lines[j]) && !/^\s*(not )?ok \d+ - /.test(lines[j]); j++) {
+      const l = lines[j].trim();
+      // A multi-line error (`error: |-`): its first few lines.
+      if (/^error: [|>]-?$/.test(l)) {
+        why.push(`error: ${lines.slice(j + 1, j + 4).map((x) => x.trim()).filter(Boolean).join(' ')}`.slice(0, 300));
+        continue;
+      }
+      if (/^(error|expected|actual|code|failureType):/.test(l) || (/test\/[^ ]+\.test\.mjs:\d+/.test(l) && !why.some((w) => /\.test\.mjs:\d+/.test(w)))) why.push(relative(l).slice(0, 300));
+    }
+    out.push({ name: relative(m[2]), why });
+  }
+  return out;
+}
+
 function cell(r, row = null, impl = null) {
   if (!r) return '–';
   if (r.status === 'not wired') return 'not wired';
   if (r.timedOut) return 'TIMEOUT';
-  const n = `${r.pass}/${r.tests}`;
+  // Skipped tests are neither passes nor failures: shown apart.
+  const n = `${r.pass}/${r.tests - r.skipped - r.todo}${r.skipped ? `, ${r.skipped} skipped` : ''}`;
   // A rust pass for a file that also tests brain/*.mjs in process covers only its tests
   // that start the brain.
   const star = impl === 'rust' && row?.inProcess ? ' *' : '';
@@ -143,6 +172,18 @@ function table(results, manifest, impls) {
   return lines.join('\n');
 }
 
+/** The failing node tests, for the summary: each red node cell, test by test. */
+function nodeFailures(results) {
+  const red = results.filter((r) => r.node && !r.node.ok);
+  if (!red.length) return [];
+  const lines = ['', '### Node failures', ''];
+  for (const r of red) {
+    lines.push(`- **${r.file}**${r.node.timedOut ? ` (${r.node.why})` : ''}`);
+    for (const f of r.node.failures) lines.push(`  - ${f.name.replace(/\|/g, '\\|')}${f.why.length ? `: \`${f.why.join(' ').replace(/`/g, "'").slice(0, 400)}\`` : ''}`);
+  }
+  return lines;
+}
+
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   const manifest = JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'conformance.json'), 'utf8'));
@@ -165,6 +206,8 @@ async function main() {
       process.stderr.write(`  ${impl.padEnd(4)} ${row.file} … `);
       row[impl] = await runFile(row.file, impl);
       process.stderr.write(`${cell(row[impl])} (${(row[impl].ms / 1000).toFixed(1)} s)\n`);
+      // A red node cell is a regression in today's brain: say exactly what failed.
+      if (impl === 'node' && !row.node.ok) for (const f of row.node.failures) process.stderr.write(`       not ok: ${f.name}\n${f.why.map((w) => `         ${w}\n`).join('')}`);
     }
   }
 
@@ -183,6 +226,7 @@ async function main() {
     impls.includes('rust') ? `- rust: ${greenRust} of ${results.length} files green; required by ${manifest.current}: ${required.length - red.rustRequired.length} of ${required.length} green` : null,
     '- "not wired": the file tests brain/*.mjs in process, so it has no rust result until its milestone runs it against the Rust binary.',
     '- "pass *": the file also tests brain/*.mjs in process; the rust result speaks only for its tests that start the brain (for some, only that an unported command leaks nothing).',
+    ...nodeFailures(results),
   ]
     .filter((l) => l !== null)
     .join('\n');

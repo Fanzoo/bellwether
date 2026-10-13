@@ -751,7 +751,12 @@ oracle until the Rust brain replaces it:
 **CI** (`.github/workflows/ci.yml`, GitHub Actions, no secrets): the Node suite and the
 vector check, the cargo tests with and without the `conformance` feature, the parity table
 (published as the job summary) and the differential, a release build's refusal of
-`__fixture`, and `cargo check` of the platform-neutral crate for Linux and Windows.
+`__fixture`, and `cargo check` of the platform-neutral crate for Linux and Windows. Before
+the suite, CI does what a developer's checkout already has: `cargo fetch` (every
+platform's crates, whose licences THIRD-PARTY.md lists), a debug build of the strip, and
+`pets fetch` (the pinned, hash-checked art; never committed). The redaction time budgets
+are written for a developer's Mac and scale with the machine's speed, measured in the same
+process (`machineSlowdown` in `test/helpers.mjs`).
 
 Runs serially (`--test-concurrency=1`): several suites use live sockets and timing.
 Offline and self-contained. The installer tests only ever use temp copies of an

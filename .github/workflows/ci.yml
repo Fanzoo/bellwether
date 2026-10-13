@@ -27,7 +27,7 @@ jobs:
   node:
     name: Node suite (npm test)
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,6 +35,22 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            shell/src-tauri/target-dev
+          key: cargo-node-suite-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+      # What the suite reads besides the checkout, as a developer's machine has it:
+      - name: Every platform's crates (the THIRD-PARTY.md check reads their licences)
+        run: cargo fetch --locked --manifest-path shell/src-tauri/Cargo.toml
+      - name: A build of the strip (debug, into target-dev/; tester-m8 runs its --locate)
+        run: cargo build --locked --manifest-path shell/src-tauri/Cargo.toml
+      - name: The pet art, pinned and sha256-checked (fetched, never committed; see NOTICE)
+        run: node brain/cli.mjs pets fetch
       - name: npm test
         run: npm test
       - name: The shared vectors match what the Node brain answers
@@ -85,8 +101,13 @@ jobs:
             ~/.cargo/git
             shell/src-tauri/target-dev
           key: cargo-conformance-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+      # The same as the Node suite job has, so the node column agrees with it.
+      - name: Every platform's crates (the THIRD-PARTY.md check reads their licences)
+        run: cargo fetch --locked --manifest-path shell/src-tauri/Cargo.toml
+      - name: The pet art, pinned and sha256-checked (fetched, never committed; see NOTICE)
+        run: node brain/cli.mjs pets fetch
       - name: Build the Rust binary with the conformance feature (debug, into target-dev/)
-        run: cargo build --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance
+        run: cargo build --locked --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance
       - name: Parity table (published as this job's summary)
         # Fails only when a node cell is red, or a row the current milestone requires
         # is red under rust (test/conformance.json).
