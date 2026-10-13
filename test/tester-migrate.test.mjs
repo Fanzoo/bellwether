@@ -10,7 +10,7 @@ import { hookBlock, install, uninstall } from '../brain/hooks.mjs';
 import { adoptLegacyEnv } from '../brain/envpath.mjs';
 import { migrate } from '../brain/migrate.mjs';
 import { startServer } from '../brain/server.mjs';
-import { AGENT_DIR, FIXTURES, request, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, request, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * BR-3K's probes for the pasture -> bellwether rename and `migrate`. Temp directories
@@ -101,7 +101,7 @@ describe('migrate preview: changes nothing and never shows a token', () => {
     const w = world();
     const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'd'), BELLWETHER_ENV: w.targetEnv, BELLWETHER_HOOK_TOKEN: NEW };
     for (const args of [['migrate', '--from', w.old, '--settings', w.settingsFile], ['migrate', '--from', path.join(w.root, 'nope')], ['migrate', '--bogus'], ['migrate', '--env', path.join(w.root, 'nope.env')]]) {
-      const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args], { encoding: 'utf8', env });
+      const r = spawnBrainSync([...args], { encoding: 'utf8', env });
       assert.ok(noTokens(r.stdout + r.stderr, OLD, NEW), args.join(' '));
     }
     assert.equal(fs.existsSync(path.join(w.repo, '.env')), false);

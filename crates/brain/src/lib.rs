@@ -131,6 +131,14 @@ pub struct Options {
     pub token: String,
     pub mode: Mode,
     pub log: Logger,
+    /// How long a /hook body may take to arrive: REQUEST_TIMEOUT, shorter only in tests.
+    pub request_timeout: Duration,
+}
+
+impl Options {
+    pub fn new(token: String, mode: Mode, log: Logger) -> Options {
+        Options { token, mode, log, request_timeout: REQUEST_TIMEOUT }
+    }
 }
 
 /// Content-free log lines, `<ms> bellwether: <line>`, to stderr and (if set) a file.
@@ -173,6 +181,7 @@ pub(crate) struct Brain {
     pub mode: Mode,
     pub counters: Counters,
     pub log: Logger,
+    pub request_timeout: Duration,
 }
 
 /// A bound listener, not yet serving. Binding is separate so `serve` can report a held
@@ -209,7 +218,7 @@ pub fn serve(bound: Bound, opts: Options, stop: Option<tokio::sync::oneshot::Rec
 
 async fn run(bound: Bound, opts: Options, stop: Option<tokio::sync::oneshot::Receiver<()>>) -> Result<u64, BrainError> {
     let listener = tokio::net::TcpListener::from_std(bound.listener).map_err(|e| BrainError::new(format!("cannot listen: {e}"), exit::UNEXPECTED))?;
-    let brain = Arc::new(Brain { port: bound.port, expected: hook::digest(opts.token.as_bytes()), mode: opts.mode, counters: Counters::default(), log: opts.log });
+    let brain = Arc::new(Brain { port: bound.port, expected: hook::digest(opts.token.as_bytes()), mode: opts.mode, counters: Counters::default(), log: opts.log, request_timeout: opts.request_timeout });
     let counters_of = brain.clone();
     let log = brain.log.clone();
     let accepting = tokio::task::spawn(async move {
@@ -361,7 +370,7 @@ fn serve_from_args(args: &[String]) -> Result<(), BrainError> {
         Mode::Normal => String::new(),
     };
     log.log(&format!("listening on http://{BIND_HOST}:{}{mode}, pid {}, version {VERSION} (rust)", bound.port, std::process::id()));
-    let accepted = serve(bound, Options { token, mode: parsed.mode, log: log.clone() }, None)?;
+    let accepted = serve(bound, Options::new(token, parsed.mode, log.clone()), None)?;
     log.log(&format!("stopped ({accepted} events accepted)"));
     Ok(())
 }

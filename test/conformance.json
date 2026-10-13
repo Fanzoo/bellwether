@@ -1,0 +1,35 @@
+{
+  "comment": "The parity table's rows and when each must be green against the Rust brain (distribution plan D2 and the milestones' Done when). test/conformance.mjs adds every other test file that starts the brain through test/helpers.mjs. A row whose milestone is at or before `current` must pass under both implementations, or the run fails.",
+  "current": "M2",
+  "milestones": {
+    "M1": ["hook-route-blackbox.test.mjs"],
+    "M3": [
+      "brain-server.test.mjs",
+      "brain.test.mjs",
+      "flock.test.mjs",
+      "privacy.test.mjs",
+      "token.test.mjs",
+      "palette-labels.test.mjs",
+      "tester-m1.test.mjs",
+      "tester-m1-reverify.test.mjs",
+      "tester-m2.test.mjs",
+      "tester-m2-recheck.test.mjs",
+      "tester-m5.test.mjs"
+    ],
+    "M4": [
+      "hooks.test.mjs",
+      "doctor.test.mjs",
+      "docs.test.mjs",
+      "shellctl.test.mjs",
+      "tester-shellctl.test.mjs",
+      "tester-m3.test.mjs",
+      "tester-m6.test.mjs",
+      "tester-m8.test.mjs",
+      "tester-m10.test.mjs",
+      "tester-regression.test.mjs",
+      "migrate.test.mjs",
+      "tester-migrate.test.mjs",
+      "tester-migrate-recheck.test.mjs"
+    ]
+  }
+}

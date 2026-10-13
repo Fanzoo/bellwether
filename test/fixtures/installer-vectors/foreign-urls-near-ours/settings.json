@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hooks"
+          },
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook2"
+          },
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook?x=1"
+          },
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook/sub"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hooks"
+          }
+        ]
+      }
+    ]
+  }
+}

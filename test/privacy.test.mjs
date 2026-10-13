@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { runDoctor } from '../brain/doctor.mjs';
 import { readShellState, sharingProcessWarnings, writeShellState } from '../brain/privacy.mjs';
-import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /** Milestone 7 fixes (verification D1, D2): the way back for a hidden strip, and sharing names that can't match. */
 
@@ -50,7 +49,7 @@ describe('privacy.sharingProcesses entries that can never match (D2)', () => {
 });
 
 describe('the way back for a hidden strip (D1)', () => {
-  const cli = (args, dataDir) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args], { env: { ...process.env, BELLWETHER_DATA_DIR: dataDir, BELLWETHER_HOOK_TOKEN: TOKEN }, encoding: 'utf8', timeout: 10000 });
+  const cli = (args, dataDir) => spawnBrainSync([...args], { env: { ...process.env, BELLWETHER_DATA_DIR: dataDir, BELLWETHER_HOOK_TOKEN: TOKEN }, encoding: 'utf8', timeout: 10000 });
   test('`bellwether hide` and `bellwether show` write shell-state.json and keep Show labels as it was', () => {
     const dataDir = tempDir();
     writeShellState(dataDir, { hidden: false, showLabels: true });

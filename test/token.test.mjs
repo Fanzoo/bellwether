@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { nextStep } from '../brain/doctor.mjs';
 import { tokenInit } from '../brain/token.mjs';
 import { CliError, maskToken } from '../brain/util.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /** M10 verification fixes: the token never shown (D1), "all set" only when nothing fails (D2), `token init` (D4). */
 
-const cli = (args, env) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args], { encoding: 'utf8', env });
+const cli = (args, env) => spawnBrainSync([...args], { encoding: 'utf8', env });
 
 describe('the token is masked in everything a person sees (D1)', () => {
   const T = 'maskCanaryToken_0123456789abcdef';

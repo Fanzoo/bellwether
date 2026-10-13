@@ -14,6 +14,14 @@ members = [".", "../../crates/brain"]
 name = "bellwether_shell_lib"
 crate-type = ["rlib"]
 
+# `conformance`: the hidden `__` subcommands the conformance harness drives
+# (test/conformance.mjs, scripts/differential.mjs; distribution plan D2). Dev and CI
+# builds only. It is not a default feature, and neither `tauri build` nor
+# scripts/build-app.mjs turns it on, so a release build answers `Bellwether __fixture`
+# with "unknown command" (pinned by cli.rs's tests and the CI release check).
+[features]
+conformance = []
+
 [build-dependencies]
 tauri-build = { version = "=2.7.1", features = [] }
 

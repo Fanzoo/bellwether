@@ -1,0 +1,3 @@
+# The installer vectors are settings files byte for byte (CRLF, no trailing newline):
+# git must never convert their line endings.
+test/fixtures/installer-vectors/** -text

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { envFilePath } from '../brain/envpath.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Which .env the CLI reads (brain/envpath.mjs, brain/envload.mjs): the repository's
@@ -45,7 +44,7 @@ describe('which .env', () => {
 
 describe('the CLI loads it', () => {
   const T = 'envLoadCanaryToken_0123456789ab';
-  const cli = (env, ...args) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args], { encoding: 'utf8', timeout: 20000, env: { PATH: process.env.PATH, ...env } });
+  const cli = (env, ...args) => spawnBrainSync([...args], { encoding: 'utf8', timeout: 20000, env: { PATH: process.env.PATH, ...env } });
   const hooksFile = (env) => {
     const dir = tempDir('envl-');
     const out = path.join(dir, 'hooks.json');

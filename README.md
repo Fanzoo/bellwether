@@ -610,7 +610,7 @@ spctl -a -vvv -t exec "$A"                   # after --notarize
 "$A/Contents/MacOS/Bellwether" doctor --port 47418
 "$A/Contents/MacOS/Bellwether" autostart install --write --brain-only   # the brain at login (SMAppService)
 "$A/Contents/MacOS/Bellwether" autostart uninstall --write --brain-only
-npm run test:rust                            # the /hook black-box suite against the Rust brain (debug build)
+npm run test:rust                            # the parity table: the brain's tests against both brains (see Tests)
 ```
 
 `autostart` registers the brain's login agent, which is the plist inside the bundle at
@@ -706,12 +706,52 @@ Windows (not built yet): `bellwether.cmd`. A symlink to `bellwether` on your PAT
 ```
 npm test               # the JS suite
 npm run test:cargo     # the Rust tests (shell and brain), from the repository root
-npm run test:rust      # the /hook black-box suite against the Rust brain (debug build;
-                       # it says when to rebuild: cargo build --manifest-path shell/src-tauri/Cargo.toml)
+npm run test:rust      # the parity table: the brain's tests against the Node and the Rust brain
+npm run test:vectors   # the shared vector files still match what the Node brain answers
+npm run differential   # Node and Rust on 10^5 generated cases per area
 ```
 
 `cargo test` on its own has to be run in `shell/src-tauri`, where the Cargo workspace
 is; from the root, use `npm run test:cargo`.
+
+**The Rust port's conformance harness** (distribution plan D2). The Node brain is the
+oracle until the Rust brain replaces it:
+
+- Every test that starts the brain or its CLI goes through `spawnBrain` in
+  `test/helpers.mjs`. `BELLWETHER_IMPL=rust` runs `$BELLWETHER_BIN` instead of
+  `brain/cli.mjs`; by default that is the dev build
+  `shell/src-tauri/target-dev/debug/bellwether-shell`, which must not be older than its
+  sources. Under rust the helper gives the binary a temp `BELLWETHER_HOME` whose
+  `config.json` has the test port, refuses anything that would use port 47417, and never
+  runs `autostart` (it would register login items on this Mac).
+- `npm run test:rust` (`test/conformance.mjs`) runs those test files against both brains
+  and prints the parity table: test file, node, rust. `test/conformance.json` says which
+  milestone turns each row green; the run fails only when a node cell is red or a row the
+  current milestone requires is red under rust. Build the binary first, with the hidden
+  commands the harness uses:
+
+  ```
+  cargo build --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance
+  ```
+
+- The `conformance` feature adds hidden `__` commands (`__env`, and `__redact`,
+  `__normalise`, `__fixture`, `__json` and `__diff` as their milestones port them) that
+  take cases as JSON lines. No release build has it: `Bellwether __fixture` answers
+  "unknown command" with exit 1.
+- The shared vectors in `test/fixtures/` (`redact-`, `normalise-`, `config-` and
+  `diff-vectors.json`, `installer-vectors/`) hold cases and the Node brain's answers. The
+  Node tests and the cargo tests read the same files. `node test/fixtures/build-vectors.mjs`
+  rewrites them; read the diff before committing it.
+- `npm run differential` (`scripts/differential.mjs`) sends generated inputs to the Node
+  functions and the Rust binary and fails on any difference. Areas the binary doesn't
+  have yet are listed as not ported.
+- Intended differences between the two brains are in `test/DIVERGENCES.md`, each with
+  the test that pins it. Anything else is a bug.
+
+**CI** (`.github/workflows/ci.yml`, GitHub Actions, no secrets): the Node suite and the
+vector check, the cargo tests with and without the `conformance` feature, the parity table
+(published as the job summary) and the differential, a release build's refusal of
+`__fixture`, and `cargo check` of the platform-neutral crate for Linux and Windows.
 
 Runs serially (`--test-concurrency=1`): several suites use live sockets and timing.
 Offline and self-contained. The installer tests only ever use temp copies of an

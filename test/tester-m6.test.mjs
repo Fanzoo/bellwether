@@ -6,7 +6,7 @@ import { familyExtent, freePlace, lambOffset, lambX } from '../shell/src/player/
 import { familyHomes } from '../shell/src/player/layout.mjs';
 import { Sprite } from '../shell/src/player/sprite.mjs';
 import { resolveAnimationMap, validatePet } from '../shell/src/player/pet.mjs';
-import { FIXTURES } from './helpers.mjs';
+import { FIXTURES, readVectors } from './helpers.mjs';
 import { layoutBubbles } from '../shell/src/player/bubbles.mjs';
 import { withDefaults } from '../brain/defaults.mjs';
 import { Flock } from '../brain/flock.mjs';
@@ -93,6 +93,11 @@ describe('agent_type is untrusted', () => {
   };
   test('HTML-ish, bidi, control, newline, space and empty types never become a lamb label', () => {
     for (const t of ['<img src=x onerror=alert(1)>', 'a‮b', 'a\u0007b', 'a\nb', 'two words', '', 'x"y', "x'y", '`rm`', 'a;b', '%00', '​zw']) assert.equal(lambOf(t), undefined, JSON.stringify(t));
+    // The same agent types through normalise alone, as the shared vectors pin it for the
+    // Rust port (test/fixtures/normalise-vectors.json).
+    for (const v of readVectors('normalise', 'agent types')) {
+      assert.deepEqual(normalise(v.payload, v.headers, v.receivedAt, { clean: makeTextCleaner(v.clean) }), v.expected, v.name);
+    }
   });
   test('an identifier-shaped type is length-limited and a credential-shaped one is not shown as a label', () => {
     const long = lambOf('a'.repeat(200));

@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, TOKEN, hookHeaders, request, tempDir } from './helpers.mjs';
+import { AGENT_DIR, IMPL, TOKEN, hookHeaders, request, spawnBrain, tempDir } from './helpers.mjs';
 
 /**
  * The /hook guard matrix from hook-route.test.mjs, black-box: against a brain process,
  * reading its counters from /health instead of from memory. It runs against either
- * implementation (distribution plan D2, milestone 1):
+ * implementation (distribution plan D2), through the switch in helpers.mjs:
  *
  *   npm test                 the Node brain (brain/cli.mjs serve)
  *   npm run test:rust        the Rust brain: $BELLWETHER_BIN serve, by default the dev
@@ -18,9 +17,6 @@ import { AGENT_DIR, TOKEN, hookHeaders, request, tempDir } from './helpers.mjs';
  *
  * Every response from /hook must be status-only: an empty 204, or an empty 403.
  */
-
-const IMPL = process.env.BELLWETHER_IMPL === 'rust' ? 'rust' : 'node';
-const RUST_BIN = process.env.BELLWETHER_BIN || path.join(AGENT_DIR, 'shell', 'src-tauri', 'target-dev', 'debug', 'bellwether-shell');
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -33,45 +29,24 @@ function freePort() {
   });
 }
 
-/** Newest mtime (ms) of the Rust sources the binary is built from. */
-function newestSource() {
-  let newest = 0;
-  const walk = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (/\.(rs|toml)$/.test(e.name)) newest = Math.max(newest, fs.statSync(p).mtimeMs);
-    }
-  };
-  for (const d of [path.join(AGENT_DIR, 'crates', 'brain', 'src'), path.join(AGENT_DIR, 'shell', 'src-tauri', 'src')]) walk(d);
-  for (const f of [path.join(AGENT_DIR, 'crates', 'brain', 'Cargo.toml'), path.join(AGENT_DIR, 'shell', 'src-tauri', 'Cargo.toml')]) newest = Math.max(newest, fs.statSync(f).mtimeMs);
-  return newest;
-}
-
 /** Starts one brain on a free port (never 47417) and waits for /health. */
 async function startBrain(extra = []) {
   const port = await freePort();
   const dir = tempDir('bw-blackbox-');
-  let cmd;
-  let args;
   const env = { ...process.env, BELLWETHER_HOOK_TOKEN: TOKEN };
+  let args;
   if (IMPL === 'rust') {
-    if (!fs.existsSync(RUST_BIN)) throw new Error(`BELLWETHER_IMPL=rust needs the binary: build it with \`cargo build --manifest-path shell/src-tauri/Cargo.toml\` (a debug build, into target-dev/) or set BELLWETHER_BIN (looked for ${RUST_BIN})`);
-    // The default dev build must not be older than its sources: a stale binary would
-    // test yesterday's brain. (A BELLWETHER_BIN given by hand is taken as it is.)
-    if (!process.env.BELLWETHER_BIN && fs.statSync(RUST_BIN).mtimeMs < newestSource()) throw new Error(`${RUST_BIN} is older than the Rust sources: rebuild it with \`cargo build --manifest-path shell/src-tauri/Cargo.toml\` (a debug build, into target-dev/), then run \`npm run test:rust\` again`);
-    cmd = RUST_BIN;
+    // The Rust brain takes the port as an argument and keeps its files in a home.
     args = ['serve', '--port', String(port), ...extra];
     env.BELLWETHER_HOME = dir;
   } else {
     const config = path.join(dir, 'config.json');
     fs.writeFileSync(config, JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8')), port }));
-    cmd = process.execPath;
-    args = [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'serve', ...extra];
+    args = ['serve', ...extra];
     env.BELLWETHER_CONFIG = config;
     env.BELLWETHER_DATA_DIR = path.join(dir, 'data');
   }
-  const child = spawn(cmd, args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawnBrain(args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', (d) => (stderr += d));
   const deadline = Date.now() + 15000;

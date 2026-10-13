@@ -26,10 +26,13 @@ impl Drop for Running {
 }
 
 fn start(mode: bellwether_brain::Mode) -> Running {
+    start_with(bellwether_brain::Options::new(TOKEN.into(), mode, bellwether_brain::Logger::stderr_only()))
+}
+
+fn start_with(opts: bellwether_brain::Options) -> Running {
     let bound = bellwether_brain::bind(0).unwrap();
     let port = bound.port;
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let opts = bellwether_brain::Options { token: TOKEN.into(), mode, log: bellwether_brain::Logger::stderr_only() };
     let thread = std::thread::spawn(move || {
         bellwether_brain::serve(bound, opts, Some(rx)).unwrap();
     });
@@ -195,4 +198,53 @@ fn a_held_port_is_exit_2() {
     let e = bellwether_brain::bind(held.local_addr().unwrap().port()).err().unwrap();
     assert_eq!(e.code, 2);
     assert!(e.message.contains("already in use"));
+}
+
+/// test/DIVERGENCES.md, "a /hook body that stalls": the Node brain's server answers 408
+/// when a body hasn't arrived within its request timeout. A HookAnswer is only 204 or
+/// 403, so the Rust brain answers an empty 204 and counts nothing.
+#[test]
+fn a_stalled_body_gets_an_uncounted_empty_204() {
+    let mut opts = bellwether_brain::Options::new(TOKEN.into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+    opts.request_timeout = Duration::from_millis(300);
+    let b = start_with(opts);
+    let before = health(b.port)["counters"].clone();
+    let mut s = TcpStream::connect(("127.0.0.1", b.port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    // Content-Length promises 100 bytes; 10 arrive, then nothing.
+    s.write_all(format!("POST /hook HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nX-Bellwether-Token: {TOKEN}\r\nContent-Length: 100\r\n\r\n{{\"hook_eve", b.port).as_bytes()).unwrap();
+    let t0 = std::time::Instant::now();
+    let mut raw = Vec::new();
+    let mut buf = [0u8; 512];
+    while !raw.windows(4).any(|w| w == b"\r\n\r\n") {
+        let n = s.read(&mut buf).expect("an answer before the read timeout");
+        assert!(n > 0, "closed without an answer");
+        raw.extend_from_slice(&buf[..n]);
+    }
+    let text = String::from_utf8_lossy(&raw).to_string();
+    assert!(text.starts_with("HTTP/1.1 204 "), "{text}");
+    assert!(!text.to_ascii_lowercase().contains("content-type"), "{text}");
+    assert!(t0.elapsed() >= Duration::from_millis(250), "answered only after the timeout");
+    drop(s);
+    settle();
+    let after = health(b.port)["counters"].clone();
+    for k in ["accepted", "malformed", "oversize", "unknownEvent", "consumerErrors", "dropped"] {
+        assert_eq!(after[k], before[k], "{k} must not count a stalled body");
+    }
+    assert_eq!(after["rejected"], before["rejected"]);
+}
+
+/// test/DIVERGENCES.md, "/health key order": serde_json writes object keys sorted; the
+/// Node brain writes them in source order. Consumers compare key sets, never order.
+#[test]
+fn health_keys_are_written_sorted() {
+    let b = start(bellwether_brain::Mode::Normal);
+    let r = request(b.port, "GET", "/health", &[("Host", format!("127.0.0.1:{}", b.port))], b"").unwrap();
+    let text = String::from_utf8(r.body).unwrap();
+    let top = ["\"counters\"", "\"lastEventAt\"", "\"mode\"", "\"name\"", "\"ok\"", "\"pid\"", "\"port\"", "\"version\""];
+    let at: Vec<usize> = top.iter().map(|k| text.find(k).unwrap_or_else(|| panic!("{k} missing: {text}"))).collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "top-level keys not in sorted order: {text}");
+    let counters = ["\"accepted\"", "\"consumerErrors\"", "\"dropped\"", "\"lastRejectedAt\"", "\"malformed\"", "\"oversize\"", "\"rejected\"", "\"unknownEvent\""];
+    let at: Vec<usize> = counters.iter().map(|k| text.find(k).unwrap_or_else(|| panic!("{k} missing: {text}"))).collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "counter keys not in sorted order: {text}");
 }

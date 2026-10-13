@@ -30,8 +30,18 @@ pub fn run(args: &[String]) -> i32 {
         print!("{USAGE}");
         return exit::OK;
     };
-    let tail = &rest[1..];
-    let result = match command {
+    match command_result(command, &rest[1..]) {
+        Ok(code) => code,
+        Err((message, code)) => {
+            eprintln!("bellwether: {message}");
+            code
+        }
+    }
+}
+
+/// One command's outcome: its exit code, or a message for stderr and the exit code.
+fn command_result(command: &str, tail: &[String]) -> CliResult {
+    match command {
         "help" | "--help" | "-h" => {
             print!("{USAGE}");
             Ok(exit::OK)
@@ -40,17 +50,14 @@ pub fn run(args: &[String]) -> i32 {
             println!("bellwether {} (rust)", bellwether_brain::VERSION);
             Ok(exit::OK)
         }
-        "serve" => return bellwether_brain::cli_serve(tail),
+        "serve" => Ok(bellwether_brain::cli_serve(tail)),
         "doctor" => doctor(tail),
         "autostart" => autostart(tail),
+        // The conformance harness's hidden commands: only in a build with the
+        // `conformance` feature (never a release). Without it they are unknown commands.
+        #[cfg(feature = "conformance")]
+        hidden if hidden.starts_with("__") => Ok(crate::conformance::run(hidden, tail)),
         _ => Err((format!("unknown command {command:?}.\n\n{USAGE}"), exit::UNEXPECTED)),
-    };
-    match result {
-        Ok(code) => code,
-        Err((message, code)) => {
-            eprintln!("bellwether: {message}");
-            code
-        }
     }
 }
 
@@ -610,6 +617,55 @@ mod tests {
         assert!(flags(&s(&["--write=1"]), &["write"], &[]).is_err());
         assert!(flags(&s(&["--port"]), &[], &["port"]).is_err());
         assert_eq!(value(&flags(&s(&["--port=47418"]), &[], &["port"]).unwrap().1, "port"), Some("47418"));
+    }
+
+    /// The hidden commands of the conformance harness (distribution plan D2).
+    const HIDDEN: [&str; 7] = ["__fixture", "__redact", "__normalise", "__json", "__diff", "__env", "__list"];
+
+    /// A build without the `conformance` feature (every release build) doesn't know
+    /// them: "unknown command", exit 1.
+    #[test]
+    #[cfg(not(feature = "conformance"))]
+    fn without_the_conformance_feature_hidden_commands_are_unknown() {
+        for c in HIDDEN {
+            match command_result(c, &[]) {
+                Err((message, code)) => {
+                    assert_eq!(code, exit::UNEXPECTED, "{c}");
+                    assert!(message.starts_with(&format!("unknown command {c:?}")), "{c}: {message}");
+                }
+                Ok(code) => panic!("{c} ran (exit {code}) in a build without the conformance feature"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "conformance")]
+    fn with_the_conformance_feature_hidden_commands_are_known() {
+        // `__list` reads nothing and prints the areas; an unknown `__` word is still refused.
+        assert_eq!(command_result("__list", &[]), Ok(exit::OK));
+        for c in HIDDEN.iter().filter(|c| **c != "__list") {
+            assert!(crate::conformance::AREAS.iter().any(|(a, _)| c.strip_prefix("__") == Some(*a)), "{c} has no area");
+        }
+        assert_eq!(command_result("__nope", &[]), Ok(exit::UNEXPECTED));
+        assert!(command_result("nope", &[]).is_err());
+    }
+
+    /// Nothing that makes a release build turns the feature on: not a default feature,
+    /// not the Tauri configs' `build.features`, not the build script.
+    #[test]
+    fn release_builds_never_enable_the_conformance_feature() {
+        let cargo = include_str!("../Cargo.toml");
+        let features = cargo.split("[features]").nth(1).expect("a [features] table").split("\n[").next().unwrap();
+        for line in features.lines().filter(|l| l.trim_start().starts_with("default")) {
+            assert!(!line.contains("conformance"), "a default feature: {line}");
+        }
+        for conf in [include_str!("../tauri.conf.json"), include_str!("../tauri.dist.conf.json")] {
+            let v: serde_json::Value = serde_json::from_str(conf).unwrap();
+            assert!(v["build"].get("features").is_none(), "build.features in a Tauri config");
+            assert!(!conf.contains("conformance"));
+        }
+        let script = include_str!("../../../scripts/build-app.mjs");
+        assert!(!script.contains("--features") && !script.contains("conformance"), "scripts/build-app.mjs passes a feature");
     }
 
     #[test]

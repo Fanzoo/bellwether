@@ -8,86 +8,31 @@ import { normalise } from '../brain/normalise.mjs';
 import { makeTextCleaner } from '../brain/redact.mjs';
 import { rebuild } from '../brain/replay.mjs';
 import { loadState } from '../brain/persist.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, readVectors, tempDir } from './helpers.mjs';
 
 const example = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
 const clean = makeTextCleaner({ maxChars: 500, redactPatterns: [] });
 const cleanEx = makeTextCleaner({ maxChars: 500, redactPatterns: example.bubble.redactPatterns });
 
 describe('re-check: new secret shapes must be redacted (built-in patterns only)', () => {
-  const leaks = [
-    ['export with quotes', `export API_KEY='abcd1234efgh5678'`, 'abcd1234efgh5678'],
-    ['env prefix', 'STRIPE_SECRET_KEY=sk_live_abcdef123456 node app.js', 'abcdef123456'],
-    ['-H X-Api-Key', `curl -H 'X-Api-Key: abcdef1234567890' https://x.test`, 'abcdef1234567890'],
-    ['-H Cookie session', `curl -H 'Cookie: session=abcdef1234567890; other=1' https://x.test`, 'abcdef1234567890'],
-    ['--token=', 'gh auth login --with-token=ghx_abcdef1234567890zzzz', 'abcdef1234567890zzzz'],
-    ['npm _authToken', 'echo "//registry.npmjs.org/:_authToken=npm_abcdef1234567890" >> .npmrc', 'abcdef1234567890'],
-    ['yaml style', 'printf "password: s3cr3tvalue\\n" > f.yml', 's3cr3tvalue'],
-    ['json nested', `echo '{"db":{"password":"s3cr3tvalue"}}'`, 's3cr3tvalue'],
-    ['json with escaped quote', `echo "{\\"password\\":\\"s3cr3tvalue\\"}"`, 's3cr3tvalue'],
-    ['url query secret', 'curl "https://x.test/?client_secret=abcdef1234567890&a=1"', 'abcdef1234567890'],
-    ['url query sig', 'curl "https://x.test/blob?sig=abcdef1234567890%2Bzz"', 'abcdef1234567890'],
-    ['basic auth uppercase', 'curl -H "AUTHORIZATION: BASIC dXNlcjpwYXNzd29yZA==" x', 'dXNlcjpwYXNzd29yZA'],
-    ['authorization with equals', 'AUTHORIZATION=Bearer abcdef1234567890', 'abcdef1234567890'],
-    ['curl -u glued', 'curl -uadmin:S3cr3tPassw0rd https://x', 'S3cr3tPassw0rd'],
-    ['curl --user=', 'curl --user=admin:S3cr3tPassw0rd https://x', 'S3cr3tPassw0rd'],
-    ['psql url', 'psql postgres://app:S3cr3tPassw0rd@db.internal/prod', 'S3cr3tPassw0rd'],
-    ['redis url empty user', 'redis-cli -u redis://:S3cr3tPassw0rd@host:6379', 'S3cr3tPassw0rd'],
-    ['sshpass', 'sshpass -p S3cr3tPassw0rd ssh host', 'S3cr3tPassw0rd'],
-    ['-p with space mysql', 'mysql -u root -p S3cr3tPassw0rd', 'S3cr3tPassw0rd'],
-    ['--passphrase', 'gpg --batch --passphrase S3cr3tPassw0rd -d f', 'S3cr3tPassw0rd'],
-    ['openssl pass', 'openssl enc -pass pass:S3cr3tPassw0rd', 'S3cr3tPassw0rd'],
-    ['docker login -p', 'docker login -u me -p S3cr3tPassw0rd', 'S3cr3tPassw0rd'],
-    ['base64 of creds', 'echo dXNlcjpwYXNzd29yZA== | base64 -d # token', 'dXNlcjpwYXNzd29yZA'],
-    ['unicode full-width', 'ＰＡＳＳＷＯＲＤ=Hunter2Hunter2', 'Hunter2Hunter2'],
-    ['zero width in key', 'pass​word=Hunter2Hunter2', 'Hunter2Hunter2'],
-    ['key split by tab', 'password\t=\tHunter2Hunter2', 'Hunter2Hunter2'],
-    ['heredoc', 'cat > .env <<EOF\nAPI_TOKEN=abcdef1234567890\nEOF', 'abcdef1234567890'],
-    ['value after long key name', 'MY_SERVICE_ACCOUNT_PRIVATE_KEY_ID=abcdef1234567890', 'abcdef1234567890'],
-    ['aws cli', 'aws configure set aws_secret_access_key wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY', 'wJalrXUtnFEMIK7MDENG'],
-    ['vault', 'vault login s.AbCdEfGhIjKlMnOpQrStUv', 's.AbCdEfGhIjKlMnOpQrStUv'],
-    ['gitlab pat', 'git clone https://oauth2:glpat-abcdefghij1234567890@gitlab.com/a/b', 'abcdefghij1234567890'],
-    ['google api key', 'curl "https://maps.googleapis.com/x?key=AIzaSyA1234567890abcdefghijklmnopqrstuv"', 'A1234567890abcdefghijklmnopqrstuv'],
-  ];
+  // The cases live in test/fixtures/redact-vectors.json, shared with the Rust port.
   const missed = [];
-  for (const [name, cmd, secret] of leaks) {
-    test(name, () => {
-      const out = clean(cmd);
-      if (out.includes(secret)) missed.push(name);
-      assert.ok(!out.includes(secret), `leaked "${secret}" in: ${out}`);
+  for (const v of readVectors('redact', 'new secret shapes')) {
+    test(v.name, () => {
+      const out = clean(v.text);
+      if (out.includes(v.mustNotContain)) missed.push(v.name);
+      assert.ok(!out.includes(v.mustNotContain), `leaked "${v.mustNotContain}" in: ${out}`);
+      assert.equal(out, v.expected);
     });
   }
 });
 
 describe('re-check: ordinary commands are not mangled', () => {
-  const ok = [
-    'git commit -m "fix author field" --author="A <a@b.c>"',
-    'git log --author=bob',
-    'ls -la /usr/local/bin',
-    'npm run build -- --token-limit 5',
-    'grep -rn "password" src/',
-    'grep -rn "TODO" . | head',
-    'docker run -p 8080:80 nginx',
-    'docker run -p 127.0.0.1:8080:80 nginx',
-    'ssh -p 2222 host',
-    'tar -xzf a.tgz -C /tmp',
-    'python3 -m http.server 8000',
-    'cat package.json | jq .name',
-    'curl -s https://example.com/api/v1/items?page=2&limit=10',
-    'make test PASSWORDS=0',
-    'echo "the secret of the universe"',
-    'git push origin main',
-    'rm -rf node_modules && npm install',
-    'sed -i "s/tokenizer/parser/g" a.js',
-    'ls ~/Documents/projects/author-notes',
-    'node scripts/rotate-tokens.mjs --dry-run',
-    'cd /tmp && ls -p',
-    'kubectl get pods -n kube-system',
-  ];
-  for (const cmd of ok) {
-    test(cmd, () => {
-      const out = clean(cmd);
+  for (const v of readVectors('redact', 'ordinary commands')) {
+    test(v.text, () => {
+      const out = clean(v.text);
       assert.ok(!out.includes('•••'), `false positive: ${out}`);
+      assert.equal(out, v.expected);
     });
   }
   test('redacted output keeps the readable key so the bubble still says what ran', () => {
@@ -277,6 +222,10 @@ describe('re-check: D3/D4 state.json validation and caps', () => {
     assert.ok(s.lambs[0]?.alert, 'the lamb\'s permission alert was timed out');
   });
   test('config validation: lambTimeoutMin and toolTimeoutMin reject negatives and strings', () => {
-    for (const k of ['lambTimeoutMin', 'toolTimeoutMin']) for (const v of [-1, '5', null]) assert.throws(() => withDefaults({ port: 0, behaviour: { [k]: v } }), new RegExp(k));
+    for (const k of ['lambTimeoutMin', 'toolTimeoutMin']) {
+      const bad = readVectors('config', 'behaviour').filter((v) => v.name.startsWith(`behaviour.${k} `));
+      assert.deepEqual(bad.map((v) => v.config.behaviour[k]), [-1, '5', null], k);
+      for (const v of bad) assert.throws(() => withDefaults(v.config), (e) => new RegExp(k).test(e.message) && e.message === v.error && e.exitCode === v.exitCode, v.name);
+    }
   });
 });

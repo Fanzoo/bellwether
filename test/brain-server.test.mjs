@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -9,7 +8,7 @@ import { call } from '../brain/client.mjs';
 import { withDefaults } from '../brain/defaults.mjs';
 import { burst, readRecording, rebuild, replay } from '../brain/replay.mjs';
 import { renderStatus } from '../brain/status.mjs';
-import { AGENT_DIR, FIXTURES, TOKEN, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, TOKEN, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * The running brain over HTTP: fixtures replayed through /hook, /state and /control,
@@ -212,7 +211,7 @@ describe('the CLI end to end (serve, replay, status)', () => {
     const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
     fs.writeFileSync(path.join(root, 'config.example.json'), JSON.stringify({ ...cfg, port }));
     env = { PATH: process.env.PATH, HOME: root, BELLWETHER_DATA_DIR: path.join(root, 'data'), BELLWETHER_HOOK_TOKEN: TOKEN };
-    child = spawn(process.execPath, [path.join(root, 'brain', 'cli.mjs'), 'serve'], { env, stdio: ['ignore', 'ignore', 'pipe'] });
+    child = spawnBrain(['serve'], { root, env, stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     child.stderr.on('data', (d) => (err += d));
     await new Promise((res) => {
@@ -223,7 +222,7 @@ describe('the CLI end to end (serve, replay, status)', () => {
 
   const cli = (args) =>
     new Promise((resolve) => {
-      const c = spawn(process.execPath, [path.join(root, 'brain', 'cli.mjs'), ...args], { env, cwd: root });
+      const c = spawnBrain([...args], { root, env, cwd: root });
       let out = '';
       let err = '';
       c.stdout.on('data', (d) => (out += d));
@@ -264,7 +263,7 @@ describe('the CLI end to end (serve, replay, status)', () => {
     fs.cpSync(path.join(root, 'brain'), path.join(dead, 'brain'), { recursive: true });
     const cfg = JSON.parse(fs.readFileSync(path.join(root, 'config.example.json'), 'utf8'));
     fs.writeFileSync(path.join(dead, 'config.example.json'), JSON.stringify({ ...cfg, port: 1 + ((port + 7) % 60000) + 1024 }));
-    const r = spawnSync(process.execPath, [path.join(dead, 'brain', 'cli.mjs'), 'status'], { env, cwd: dead, encoding: 'utf8', timeout: 10000 });
+    const r = spawnBrainSync(['status'], { root: dead, env, cwd: dead, encoding: 'utf8', timeout: 10000 });
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, /brain not running — run `bellwether serve`/);
   });

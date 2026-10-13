@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { validateConfig } from '../brain/config.mjs';
+import { PALETTE_UPGRADED, withDefaults } from '../brain/defaults.mjs';
 import { fingerprint, normalise } from '../brain/normalise.mjs';
 import { createRecorder } from '../brain/server.mjs';
-import { AGENT_DIR, FIXTURES, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, readVectors, tempDir } from './helpers.mjs';
 
 describe('package', () => {
   test('has no dependencies', () => {
@@ -22,20 +23,40 @@ describe('package', () => {
 });
 
 describe('config', () => {
+  // The cases are shared with the Rust port: test/fixtures/config-vectors.json.
+  const answer = (v) => {
+    try {
+      const out = v.step === 'validateConfig' ? validateConfig(structuredClone(v.config)) : withDefaults(structuredClone(v.config));
+      return v.step === 'withDefaults' ? { ok: true, effective: JSON.parse(JSON.stringify(out)), paletteUpgraded: out[PALETTE_UPGRADED] === true } : { ok: true };
+    } catch (e) {
+      return { ok: false, exitCode: e.exitCode, error: e.message };
+    }
+  };
+  const want = (v) => (v.ok ? (v.step === 'withDefaults' ? { ok: true, effective: v.effective, paletteUpgraded: v.paletteUpgraded } : { ok: true }) : { ok: false, exitCode: v.exitCode, error: v.error });
+
   test('the example config validates', () => {
-    validateConfig(JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8')));
+    const example = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
+    validateConfig(example);
+    const v = readVectors('config', 'ports and hosts').find((x) => x.name === 'the example config');
+    assert.deepEqual(v.config, example, 'the vector holds today\'s config.example.json');
+    // Defaults merged: every shared case answers as its vector says.
+    for (const d of readVectors('config', 'defaults')) assert.deepEqual(answer(d), want(d), d.name);
   });
 
   test('a host key anywhere is rejected with exit 3', () => {
     for (const bad of [{ port: 47417, host: '0.0.0.0' }, { port: 47417, brain: { host: '0.0.0.0' } }]) {
       assert.throws(() => validateConfig(bad), (e) => e.exitCode === 3 && /not configurable/.test(e.message));
     }
+    const hosts = readVectors('config', 'ports and hosts').filter((v) => /host/i.test(v.name));
+    assert.ok(hosts.length >= 3 && hosts.every((v) => !v.ok && v.exitCode === 3 && /not configurable/.test(v.error)));
+    for (const v of hosts) assert.deepEqual(answer(v), want(v), v.name);
   });
 
   test('a bad port is rejected', () => {
     for (const port of [undefined, '47417', 80, 70000, 1.5]) {
       assert.throws(() => validateConfig({ port }), (e) => e.exitCode === 3);
     }
+    for (const v of readVectors('config', 'ports and hosts').filter((x) => !/host|example/i.test(x.name))) assert.deepEqual(answer(v), want(v), v.name);
   });
 });
 
@@ -59,6 +80,11 @@ describe('normalise and record', () => {
 
   test('the normalised event comes from the allowlist only', () => {
     const ev = normalise(payload, headers, 123);
+    // Shared with the Rust port (test/fixtures/normalise-vectors.json): the same payload,
+    // and the whole HookEvent.
+    const [v] = readVectors('normalise', 'allowlist');
+    assert.deepEqual(v.payload, payload);
+    assert.deepEqual(normalise(v.payload, v.headers, v.receivedAt), v.expected);
     assert.deepEqual(Object.keys(ev).sort(), ['cwd', 'event', 'projectLabel', 'receivedAt', 'sessionId', 'terminal', 'toolFingerprint', 'toolName', 'toolUseId']);
     assert.equal(ev.projectLabel, 'demo');
     assert.deepEqual(ev.terminal, { program: 'iTerm.app', herdrPane: 'w1:p2' });
@@ -69,6 +95,7 @@ describe('normalise and record', () => {
     assert.equal(normalise({ hook_event_name: 'Stop' }).event, 'Stop');
     assert.equal(normalise({ hook_event_name: `free text ${SECRET}` }).event, 'unknown');
     assert.equal(normalise({ hook_event_name: { x: 1 } }).event, 'unknown');
+    for (const v of readVectors('normalise', 'event names')) assert.deepEqual(normalise(v.payload, v.headers, v.receivedAt), v.expected, v.name);
   });
 
   test('fingerprints ignore key order', () => {

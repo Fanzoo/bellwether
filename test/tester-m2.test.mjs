@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -13,7 +12,7 @@ import { Flock } from '../brain/flock.mjs';
 import { normalise } from '../brain/normalise.mjs';
 import { makeTextCleaner } from '../brain/redact.mjs';
 import { rebuild } from '../brain/replay.mjs';
-import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Independent tester probes for Milestone 2. In-process pieces use port 0 and temp
@@ -27,37 +26,19 @@ const exampleCfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.examp
 // ------------------------------------------------------------------ redaction
 
 describe('redaction: nothing that looks like a credential survives into a bubble', () => {
-  // [name, command, the secret fragment that must NOT appear in the cleaned text]
-  const corpus = [
-    ['env var with TOKEN suffix', 'export GITHUB_TOKEN=abcd1234efgh5678ijkl', 'abcd1234efgh5678ijkl'],
-    ['AWS secret env var', 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCY aws s3 ls', 'wJalrXUtnFEMIK7MDENGbPxRfiCY'],
-    ['DB password env var', 'DB_PASSWORD=hunter2hunter2 psql', 'hunter2hunter2'],
-    ['plain password=', 'mysql --password=hunter2xyz', 'hunter2xyz'],
-    ['password flag with a space', 'mysql --password hunter2xyz -h db', 'hunter2xyz'],
-    ['quoted value with spaces', 'export PASSWORD="my secret phrase" && run', 'secret phrase'],
-    ['json body', `curl -d '{"password":"hunter2xyz"}' https://x.test`, 'hunter2xyz'],
-    ['json api key', `curl -d '{"api_key": "abcdef123456"}' https://x.test`, 'abcdef123456'],
-    ['basic auth header', 'curl -H "Authorization: Basic dXNlcjpwYXNzd29yZA==" https://x.test', 'dXNlcjpwYXNzd29yZA'],
-    ['bearer header', 'curl -H "Authorization: Bearer abcDEF123456789xyz" https://x.test', 'abcDEF123456789xyz'],
-    ['curl -u', 'curl -u admin:S3cr3tPassw0rd https://x.test', 'S3cr3tPassw0rd'],
-    ['mysql -p', 'mysql -uroot -pS3cr3tPassw0rd', 'S3cr3tPassw0rd'],
-    ['url userinfo', 'git clone https://bob:pa55w0rdvalue@github.com/x/y', 'pa55w0rdvalue'],
-    ['access_token in a url query', 'curl "https://x.test/cb?access_token=abc123secretvalue&x=1"', 'abc123secretvalue'],
-    ['sk key', 'OPENAI=sk-abcdefghijklmnopqrstuvwx run', 'abcdefghijklmnopqrstuvwx'],
-    ['slack token', 'echo xoxb-1234567890-abcdefghijk', 'abcdefghijk'],
-    ['github pat', 'git push https://ghp_abcdefghijklmnopqrstuvwxyz0123@github.com', 'abcdefghijklmnopqrstuvwxyz0123'],
-    ['aws key id', 'AKIAABCDEFGHIJKLMNOP', 'ABCDEFGHIJKLMNOP'],
-    ['jwt', 'curl -H "x: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijk"', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0'],
-    ['multi-line heredoc', 'cat <<EOF\nsecret=topsecretvalue99\nEOF', 'topsecretvalue99'],
-    ['upper case', 'PASSWORD=Hunter2Hunter2', 'Hunter2Hunter2'],
-  ];
-  for (const [label, patterns] of [['built-in patterns only', []], ["config.example.json patterns", exampleCfg.bubble.redactPatterns]]) {
+  // The corpus lives in test/fixtures/redact-vectors.json (shared with the Rust port):
+  // each case's secret fragment must NOT appear in the cleaned text, and the cleaned
+  // text is exactly the vector's.
+  const patternSets = [['built-in patterns only', []], ['config.example.json patterns', exampleCfg.bubble.redactPatterns]];
+  for (const [label, patterns] of patternSets) {
     describe(label, () => {
       const clean = makeTextCleaner({ maxChars: 500, redactPatterns: patterns });
-      for (const [name, cmd, secret] of corpus) {
-        test(name, () => {
-          const out = clean(cmd);
-          assert.ok(!out.includes(secret), `secret "${secret}" survived: ${JSON.stringify(out)}`);
+      for (const v of readVectors('redact', `credential corpus, ${label}`)) {
+        test(v.name, () => {
+          assert.deepEqual(v.redactPatterns, patterns, 'the vector was made with these patterns');
+          const out = clean(v.text);
+          assert.ok(!out.includes(v.mustNotContain), `secret "${v.mustNotContain}" survived: ${JSON.stringify(out)}`);
+          assert.equal(out, v.expected);
         });
       }
     });
@@ -65,14 +46,12 @@ describe('redaction: nothing that looks like a credential survives into a bubble
 
   test('redact happens before truncation: a secret straddling the cut leaves no recognisable prefix', () => {
     const clean = makeTextCleaner({ maxChars: 60, redactPatterns: [] });
-    for (const pad of [30, 40, 45, 50, 52, 54, 56]) {
-      const out = clean(`${'x'.repeat(pad)} sk-abcdefghijklmnopqrstuvwxyz0123456789 tail`);
-      assert.ok(!/sk-/.test(out) || !/sk-[A-Za-z0-9]{3}/.test(out), `pad ${pad}: ${out}`);
+    for (const v of readVectors('redact', 'redact before truncate')) {
+      const out = clean(v.text);
+      if (v.name.startsWith('sk-')) assert.ok(!/sk-/.test(out) || !/sk-[A-Za-z0-9]{3}/.test(out), `${v.name}: ${out}`);
+      else assert.ok(!/hunt/.test(out), `${v.name}: ${out}`);
       assert.ok([...out].length <= 60);
-    }
-    for (const pad of [20, 30, 40, 47, 50]) {
-      const out = clean(`${'y'.repeat(pad)} password=hunter2hunter2hunter2`);
-      assert.ok(!/hunt/.test(out), `pad ${pad}: ${out}`);
+      assert.equal(out, v.expected, v.name);
     }
   });
 
@@ -89,6 +68,14 @@ describe('redaction: nothing that looks like a credential survives into a bubble
     const out = clean('😀'.repeat(100));
     assert.ok([...out].length <= 20);
     assert.doesNotMatch(out, /[\ud800-\udbff](?![\udc00-\udfff])/);
+    // The shared Unicode and control-character cases: exactly the vector's answer, never
+    // longer than maxChars, never a lone surrogate.
+    for (const v of readVectors('redact', 'unicode and controls')) {
+      const got = makeTextCleaner({ maxChars: v.maxChars, redactPatterns: v.redactPatterns })(v.text);
+      assert.equal(got, v.expected, v.name);
+      assert.ok([...got].length <= v.maxChars, v.name);
+      assert.doesNotMatch(got, /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/, v.name);
+    }
   });
 
   test('pathological inputs (5 MB) are cleaned in well under a second each', () => {
@@ -114,20 +101,24 @@ describe('redaction: nothing that looks like a credential survives into a bubble
     assert.deepEqual(slow, []);
   });
 
+  // The cases are shared with the Rust port (test/fixtures/normalise-vectors.json).
+  const normalised = (v) => normalise(v.payload, v.headers, v.receivedAt, { clean: v.clean ? makeTextCleaner(v.clean) : null });
+
   test('notification and elicitation messages are redacted too', () => {
-    const clean = makeTextCleaner({ maxChars: 80 });
-    const n = normalise({ hook_event_name: 'Notification', session_id: 's', notification_type: 'elicitation_dialog', message: 'Enter token=abc123def456ghi789' }, {}, 1, { clean });
-    assert.ok(!n.message.includes('abc123def456ghi789'), n.message);
-    const e = normalise({ hook_event_name: 'Elicitation', session_id: 's', mcp_server_name: 'srv', message: 'password: hunter2hunter2' }, {}, 1, { clean });
-    assert.ok(!e.message.includes('hunter2hunter2'), e.message);
+    const [n, e] = readVectors('normalise', 'messages');
+    const nev = normalised(n);
+    assert.ok(!nev.message.includes('abc123def456ghi789'), nev.message);
+    const eev = normalised(e);
+    assert.ok(!eev.message.includes('hunter2hunter2'), eev.message);
+    for (const v of [n, e]) assert.deepEqual(normalised(v), v.expected, v.name);
   });
 
   test('the file-name, URL and subagent summaries keep credentials out', () => {
-    const clean = makeTextCleaner({ maxChars: 60 });
-    const w = normalise({ hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'WebFetch', tool_input: { url: 'https://bob:pw123456@host.test/x?token=abc' } }, {}, 1, { clean });
-    assert.equal(w.toolSummary, 'host.test');
-    const f = normalise({ hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'Read', tool_input: { file_path: '/home/u/.aws/credentials' } }, {}, 1, { clean });
-    assert.equal(f.toolSummary, 'credentials');
+    const [w, f, mcp] = readVectors('normalise', 'summaries');
+    assert.equal(normalised(w).toolSummary, 'host.test');
+    assert.equal(normalised(f).toolSummary, 'credentials');
+    assert.equal(normalised(mcp).toolSummary, 'github:create_issue');
+    for (const v of [w, f, mcp]) assert.deepEqual(normalised(v), v.expected, v.name);
   });
 });
 
@@ -358,7 +349,12 @@ describe('thinkingTimeoutSec', () => {
     assert.doesNotThrow(() => stateAt(m, 5000));
   });
   test('a bad value is a config error (negative, string, NaN)', () => {
-    for (const v of [-1, '5', null]) assert.throws(() => withDefaults({ port: 0, behaviour: { thinkingTimeoutSec: v } }), /thinkingTimeoutSec/);
+    const bad = readVectors('config', 'behaviour').filter((v) => v.name.startsWith('behaviour.thinkingTimeoutSec'));
+    assert.deepEqual(bad.map((v) => v.config.behaviour.thinkingTimeoutSec), [-1, '5', null]);
+    for (const v of bad) {
+      assert.throws(() => withDefaults(v.config), /thinkingTimeoutSec/);
+      assert.throws(() => withDefaults(v.config), (e) => e.exitCode === v.exitCode && e.message === v.error, v.name);
+    }
   });
   test('a missing key in an older config.json still gets the default', () => {
     // An older config.json: the example as it is, without the key.
@@ -366,6 +362,8 @@ describe('thinkingTimeoutSec', () => {
     delete old.behaviour.thinkingTimeoutSec;
     assert.ok(Object.keys(old.behaviour).length > 0);
     assert.equal(withDefaults(old).behaviour.thinkingTimeoutSec, 120);
+    // The shared vectors: the same older config, and a 0 that is allowed.
+    for (const v of readVectors('config', 'behaviour').filter((x) => x.ok)) assert.deepEqual(JSON.parse(JSON.stringify(withDefaults(v.config))), v.effective, v.name);
   });
 });
 
@@ -608,7 +606,7 @@ describe('data/state.json corruption and persistence', () => {
 let root, agent, home, port, env, caller;
 const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => r(p)); }); });
 function bellwether(args, { extraEnv = {}, cwd } = {}) {
-  const r = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), ...args], { encoding: 'utf8', cwd: cwd ?? caller, env: { ...env, ...extraEnv }, timeout: 60_000 });
+  const r = spawnBrainSync([...args], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: cwd ?? caller, env: { ...env, ...extraEnv }, timeout: 60_000 });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 const read = (f) => fs.readFileSync(f, 'utf8');
@@ -709,18 +707,18 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   });
 
   test('replay and status against a live brain: the S2-shaped flow, and --json', async () => {
-    const child = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'serve'], { cwd: caller, env });
+    const child = spawnBrain(['serve'], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
     let err = '';
     await new Promise((r) => { child.stderr.on('data', (d) => { err += d; if (err.includes('listening on')) r(); }); });
     try {
       const fixture = path.join(AGENT_DIR, 'test', 'fixtures', 's2-permission-approve.jsonl');
-      const rep = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'replay', fixture, '--speed', '50'], { encoding: 'utf8', cwd: caller, env });
+      const rep = spawnBrainSync(['replay', fixture, '--speed', '50'], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env });
       assert.equal(rep.status, 0, rep.stderr);
       assert.match(rep.stdout, /every \/hook answer was an empty 204/);
-      const js = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'status', '--json'], { encoding: 'utf8', cwd: caller, env });
+      const js = spawnBrainSync(['status', '--json'], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env });
       assert.equal(js.status, 0, js.stderr);
       JSON.parse(js.stdout);
-      const wrong = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'status'], { encoding: 'utf8', cwd: caller, env: { ...env, BELLWETHER_HOOK_TOKEN: 'someOtherTokenValue1234567890' } });
+      const wrong = spawnBrainSync(['status'], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env: { ...env, BELLWETHER_HOOK_TOKEN: 'someOtherTokenValue1234567890' } });
       assert.equal(wrong.status, 3);
       assert.match(wrong.stderr, /refused the token/);
     } finally {
@@ -730,16 +728,16 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   });
 
   test('a rejected replay-marker check: a hostile recording line cannot inject a bubble through a field that is not allowlisted', async () => {
-    const child = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'serve'], { cwd: caller, env });
+    const child = spawnBrain(['serve'], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
     let err = '';
     await new Promise((r) => { child.stderr.on('data', (d) => { err += d; if (err.includes('listening on')) r(); }); });
     try {
       const line = { normalised: { receivedAt: 1, event: 'PreToolUse', sessionId: 's', toolName: 'Bash', toolUseId: 't', toolFingerprint: 'f', toolSummary: 'echo hi', terminal: {} }, rawKeys: { top: ['tool_input', 'prompt', 'tool_response'], tool_input: ['command'] }, headersPresent: [] };
       const f = path.join(caller, 'hostile.jsonl');
       fs.writeFileSync(f, JSON.stringify(line) + '\n');
-      const rep = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'replay', f], { encoding: 'utf8', cwd: caller, env });
+      const rep = spawnBrainSync(['replay', f], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env });
       assert.equal(rep.status, 0, rep.stderr);
-      const js = spawnSync('/bin/sh', [path.join(agent, 'bellwether'), 'status', '--json'], { encoding: 'utf8', cwd: caller, env });
+      const js = spawnBrainSync(['status', '--json'], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env });
       assert.doesNotMatch(js.stdout, /replay:/);
     } finally {
       child.kill('SIGTERM');

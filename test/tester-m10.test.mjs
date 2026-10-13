@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { SHELL_LABEL, LABEL, autostart, plistPath, shellPlistText, plistText } from '../brain/autostart.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Tester probes for Milestone 10. Autostart runs only under temp HOMEs with a `run` that
@@ -99,7 +99,7 @@ describe('autostart: both LaunchAgents, temp HOME only', () => {
   test('the CLI under a temp HOME: preview writes nothing, --write writes both, --brain-only writes one, uninstall removes them, bad flags exit 3', { skip: !fs.existsSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'target', 'release', 'bellwether-shell')) }, () => {
     const home = mkHome();
     const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: 'cliCanaryToken_0123456789abcdef' };
-    const run = (...a) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'autostart', ...a], { encoding: 'utf8', env });
+    const run = (...a) => spawnBrainSync(['autostart', ...a], { encoding: 'utf8', env });
     const dir = path.join(home, 'Library', 'LaunchAgents');
     assert.equal(run('install').status, 0);
     assert.deepEqual(fs.readdirSync(dir), []);
@@ -119,7 +119,7 @@ describe('autostart: both LaunchAgents, temp HOME only', () => {
 describe('doctor `next`: a walk from nothing to "all set"', () => {
   let root, agent, home, dataDir, port, env, settings, brain;
   const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => r(p)); }); });
-  const cli = (args, extra = {}) => spawnSync(process.execPath, [path.join(agent, 'brain', 'cli.mjs'), ...args], { encoding: 'utf8', env: { ...env, ...extra }, cwd: agent, timeout: 30000 });
+  const cli = (args, extra = {}) => spawnBrainSync([...args], { root: agent, encoding: 'utf8', env: { ...env, ...extra }, cwd: agent, timeout: 30000 });
   const next = (extra) => {
     const r = cli(['doctor', '--json', '--settings', settings], extra);
     const j = JSON.parse(r.stdout);
@@ -177,7 +177,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
     assert.doesNotMatch(n, /all set|hooks install/, `with hooks installed but no brain, next said: ${n}`);
     // 6 hooks removed again, brain running: now the hooks step
     assert.equal(cli(['hooks', 'uninstall', '--write', '--settings', settings]).status, 0);
-    brain = spawn(process.execPath, [path.join(agent, 'brain', 'cli.mjs'), 'serve'], { env, cwd: agent, stdio: ['ignore', 'pipe', 'pipe'] });
+    brain = spawnBrain(['serve'], { root: agent, env, cwd: agent, stdio: ['ignore', 'pipe', 'pipe'] });
     await new Promise((r) => { let s = ''; brain.stderr.on('data', (d) => { s += d; if (s.includes('listening on')) r(); }); });
     assert.match(next().text, /hooks install/);
     // 7 hooks installed: all set
@@ -226,11 +226,11 @@ describe('README "First run": every command exists, with the flags shown', () =>
     const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: 'readmeTokenNotReal_0123456789ab', BELLWETHER_ENV: path.join(home, 'test.env') };
     for (const c of new Set(commands)) {
       if (/^(pets|shell)/.test(c)) continue; // downloads / builds
-      const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...c.split(' ')], { encoding: 'utf8', env, timeout: 30000 });
+      const r = spawnBrainSync([...c.split(' ')], { encoding: 'utf8', env, timeout: 30000 });
       assert.doesNotMatch(r.stderr + r.stdout, /unknown (command|option)|unexpected argument|usage:/i, `${c}: ${r.stderr.slice(0, 160)}`);
     }
     // the two the sandbox skips: their flags are in the CLI's own usage text
-    const usage = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'help'], { encoding: 'utf8' }).stdout;
+    const usage = spawnBrainSync(['help'], { encoding: 'utf8' }).stdout;
     assert.match(usage, /pets fetch/);
     assert.match(usage, /shell \[--dev\] \[--release\]/);
   });
@@ -248,7 +248,7 @@ describe('previews', () => {
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{}\n');
     const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: T };
-    const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'hooks', 'install'], { encoding: 'utf8', env });
+    const r = spawnBrainSync(['hooks', 'install'], { encoding: 'utf8', env });
     assert.equal(r.status, 0);
     assert.ok(!(r.stdout + r.stderr).includes(T), 'the `hooks install` preview prints the token (16 times); previews are meant to be shown and pasted');
   });
@@ -371,7 +371,7 @@ describe('bellwether token init (temp files only; the real .env is never touched
     } finally { fs.chmodSync(d, 0o700); }
     // and through the CLI wrapper: never a bare stack trace
     const home = tempDir('m10-tok-cli-');
-    const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'token', 'bogus'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home } });
+    const r = spawnBrainSync(['token', 'bogus'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home } });
     assert.equal(r.status, 3);
   });
   test('the write is not a truncate-then-write of the only copy of the .env\'s other secrets (a temp file and rename, or a backup)', () => {
@@ -386,7 +386,7 @@ describe('the token mask (stdout, stderr, serve log, doctor, status, replay, cra
   const run = (file, args) => {
     const home = tempDir('m10-mask-');
     const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
-    return spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), ...args, '--settings', file], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'd'), BELLWETHER_HOOK_TOKEN: CUR } });
+    return spawnBrainSync([...args, '--settings', file], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'd'), BELLWETHER_HOOK_TOKEN: CUR } });
     void cfg;
   };
   const stale = (headerKey, extra = '') => {

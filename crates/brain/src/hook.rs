@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use crate::{now_ms, Brain, Mode, REQUEST_TIMEOUT};
+use crate::{now_ms, Brain, Mode};
 
 pub const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 
@@ -140,10 +140,12 @@ pub(crate) async fn handle(brain: Arc<Brain>, req: Request<Incoming>) -> HookAns
     let body = if brain.mode == Mode::Hang {
         Some(read_body(req.into_body()).await)
     } else {
-        tokio::time::timeout(REQUEST_TIMEOUT, read_body(req.into_body())).await.ok()
+        tokio::time::timeout(brain.request_timeout, read_body(req.into_body())).await.ok()
     };
+    // A body that hasn't arrived in time: the Node brain's server answers 408 here, but
+    // a HookAnswer is 204 or 403, so this is an uncounted, empty 204 (test/DIVERGENCES.md).
     let Some(body) = body else {
-        brain.log.log("dropped /hook: the body didn't arrive within 30 s");
+        brain.log.log(&format!("dropped /hook: the body didn't arrive within {} s", brain.request_timeout.as_secs_f64()));
         return HookAnswer::NoContent;
     };
     match brain.mode {

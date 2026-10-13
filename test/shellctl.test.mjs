@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { SHELL_LABEL, plistPath, shellPlistText } from '../brain/autostart.mjs';
 import { runDoctor } from '../brain/doctor.mjs';
 import { shellControl } from '../brain/shellctl.mjs';
-import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /** `bellwether shell start | stop | restart` (temp HOME and fakes only: launchd and the live strip are never touched). */
 
@@ -119,7 +118,7 @@ describe('doctor and the CLI', () => {
   });
   test('`bellwether shell bogus` and `shell start --dev` are refused (exit 3) without doing anything', () => {
     const env = { PATH: process.env.PATH, HOME: tempDir(), BELLWETHER_DATA_DIR: tempDir(), BELLWETHER_HOOK_TOKEN: TOKEN };
-    const cli = (...a) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'shell', ...a], { encoding: 'utf8', env });
+    const cli = (...a) => spawnBrainSync(['shell', ...a], { encoding: 'utf8', env });
     assert.equal(cli('bogus').status, 3);
     assert.equal(cli('start', '--dev').status, 3);
   });

@@ -1,0 +1,16 @@
+{
+	"theme": "dark",
+	"n": 1.5,
+	"hooks": {
+		"Stop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "k"
+					}
+				]
+			}
+		]
+	}
+}

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, FIXTURES, request, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, request, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Tester full regression (2026-10-09). A copy of the brain on its own port, throwaway
@@ -25,7 +24,7 @@ const env = { PATH: process.env.PATH, HOME, BELLWETHER_DATA_DIR: DATA, BELLWETHE
 let server;
 let serverErr = '';
 
-const cli = (args, extra = {}) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 30000, env: { ...env, ...extra }, cwd: AGENT });
+const cli = (args, extra = {}) => spawnBrainSync([...args], { root: AGENT, encoding: 'utf8', timeout: 30000, env: { ...env, ...extra }, cwd: AGENT });
 const hdr = (extra = {}) => ({ Host: `127.0.0.1:${PORT}`, 'Content-Type': 'application/json', 'X-Bellwether-Token': TOKEN, 'X-Bellwether-Term-Program': 'iTerm.app', 'X-Bellwether-Herdr-Pane': 'w1:p1', 'X-Bellwether-Herdr-Socket': '/tmp/regression-not-real.sock', ...extra });
 const post = (payload, headers = hdr()) => request(PORT, { path: '/hook', headers, body: JSON.stringify(payload) });
 const SID = 'aaaaaaaa-1111-4222-8333-000000000001';
@@ -58,7 +57,7 @@ async function up() {
   throw new Error(`brain did not come up: ${serverErr}`);
 }
 const startServer = async () => {
-  server = spawn(process.execPath, [CLI, 'serve'], { env, cwd: AGENT, stdio: ['ignore', 'ignore', 'pipe'] });
+  server = spawnBrain(['serve'], { root: AGENT, env, cwd: AGENT, stdio: ['ignore', 'ignore', 'pipe'] });
   server.stderr.on('data', (d) => (serverErr += d));
   await up();
 };
@@ -256,7 +255,7 @@ describe('mute, hide, and what survives a restart (M2, M5, M7)', () => {
 
 describe('replay drives the live brain from the fixtures (M2, M6)', () => {
   test('S17 (lamb alert outlives the main Stop) replays and ends with a sheep and a lamb alert on the way', async () => {
-    const r = spawnSync(process.execPath, [CLI, 'replay', path.join(FIXTURES, 's17-lamb-alert-outlives-main-stop.jsonl'), '--speed', '200', '--port', String(PORT)], { encoding: 'utf8', timeout: 60000, env, cwd: AGENT });
+    const r = spawnBrainSync(['replay', path.join(FIXTURES, 's17-lamb-alert-outlives-main-stop.jsonl'), '--speed', '200', '--port', String(PORT)], { root: AGENT, encoding: 'utf8', timeout: 60000, env, cwd: AGENT });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /19|events/);
     const snap = await state();
@@ -268,14 +267,14 @@ describe('replay drives the live brain from the fixtures (M2, M6)', () => {
   test('replay of a non-recording and of a missing file report a cause, not a stack', () => {
     fs.writeFileSync(path.join(ROOT, 'junk.jsonl'), 'hello\n');
     for (const f of [path.join(ROOT, 'junk.jsonl'), path.join(ROOT, 'missing.jsonl')]) {
-      const r = spawnSync(process.execPath, [CLI, 'replay', f, '--port', String(PORT)], { encoding: 'utf8', timeout: 20000, env, cwd: AGENT });
+      const r = spawnBrainSync(['replay', f, '--port', String(PORT)], { root: AGENT, encoding: 'utf8', timeout: 20000, env, cwd: AGENT });
       assert.notEqual(r.status, 0);
       assert.doesNotMatch(r.stderr, /\n\s+at .*\.mjs/);
       assert.match(r.stderr, /junk|missing|not JSON|cannot read/);
     }
   });
   test('replay against a port with no brain says so', () => {
-    const r = spawnSync(process.execPath, [CLI, 'replay', path.join(FIXTURES, 's1-read.jsonl'), '--port', '1'], { encoding: 'utf8', timeout: 20000, env, cwd: AGENT });
+    const r = spawnBrainSync(['replay', path.join(FIXTURES, 's1-read.jsonl'), '--port', '1'], { root: AGENT, encoding: 'utf8', timeout: 20000, env, cwd: AGENT });
     assert.notEqual(r.status, 0);
     assert.doesNotMatch(r.stderr, /\n\s+at .*\.mjs/);
   });
@@ -300,7 +299,7 @@ describe('doctor, with the brain up and with each credential broken (M1, M10)', 
   test('no token: exit 3 naming BELLWETHER_HOOK_TOKEN; token the brain does not know: names the restart', () => {
     const e = { ...env };
     delete e.BELLWETHER_HOOK_TOKEN;
-    const a = spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 20000, env: e, cwd: AGENT });
+    const a = spawnBrainSync(['doctor'], { root: AGENT, encoding: 'utf8', timeout: 20000, env: e, cwd: AGENT });
     assert.equal(a.status, 3);
     assert.match(a.stdout + a.stderr, /BELLWETHER_HOOK_TOKEN/);
     const b = cli(['doctor'], { BELLWETHER_HOOK_TOKEN: 'someOtherTokenNotReal_9876543210' });
@@ -361,7 +360,7 @@ describe('first run, on a fresh clone (M10)', () => {
     const repo = path.join(top, 'bellwether');
     fs.cpSync(AGENT, repo, { recursive: true });
     const e = { PATH: process.env.PATH, HOME: top, BELLWETHER_DATA_DIR: path.join(top, 'd') };
-    const run = () => spawnSync(process.execPath, [path.join(repo, 'brain', 'cli.mjs'), 'token', 'init'], { encoding: 'utf8', timeout: 20000, env: e, cwd: top });
+    const run = () => spawnBrainSync(['token', 'init'], { root: repo, encoding: 'utf8', timeout: 20000, env: e, cwd: top });
     const a = run();
     assert.equal(a.status, 0, a.stderr);
     const text = fs.readFileSync(path.join(repo, '.env'), 'utf8');
@@ -374,7 +373,7 @@ describe('first run, on a fresh clone (M10)', () => {
     assert.ok(!(b.stdout + b.stderr).includes(tok));
     // and the CLI reads it from there: the hooks file carries the token, with none exported
     const out = path.join(top, 'hooks-only.json');
-    const p = spawnSync(process.execPath, [path.join(repo, 'brain', 'cli.mjs'), 'hooks', 'print', '--out', out], { encoding: 'utf8', timeout: 20000, env: e, cwd: top });
+    const p = spawnBrainSync(['hooks', 'print', '--out', out], { root: repo, encoding: 'utf8', timeout: 20000, env: e, cwd: top });
     assert.equal(p.status, 0, p.stderr);
     assert.ok(fs.readFileSync(out, 'utf8').includes(tok), 'hooks print uses the token from the repository .env');
     fs.rmSync(top, { recursive: true, force: true });
@@ -386,7 +385,7 @@ describe('first run, on a fresh clone (M10)', () => {
     fs.cpSync(AGENT, repo, { recursive: true });
     fs.writeFileSync(path.join(hub, '.env'), 'OTHER_SECRET=keep-me\n');
     const e = { PATH: process.env.PATH, HOME: hub, BELLWETHER_DATA_DIR: path.join(hub, 'd') };
-    const a = spawnSync(process.execPath, [path.join(repo, 'brain', 'cli.mjs'), 'token', 'init'], { encoding: 'utf8', timeout: 20000, env: e, cwd: hub });
+    const a = spawnBrainSync(['token', 'init'], { root: repo, encoding: 'utf8', timeout: 20000, env: e, cwd: hub });
     assert.equal(a.status, 0, a.stderr);
     const text = fs.readFileSync(path.join(hub, '.env'), 'utf8');
     assert.match(text, /^OTHER_SECRET=keep-me$/m);

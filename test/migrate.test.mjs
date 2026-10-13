@@ -7,7 +7,7 @@ import { describe, test } from 'node:test';
 import { LABEL, OLD_LABELS, SHELL_LABEL, plistPath } from '../brain/autostart.mjs';
 import { countGroups, hookBlock } from '../brain/hooks.mjs';
 import { migrate, sourceOf } from '../brain/migrate.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * `bellwether migrate`: a pasture install laid out in temp directories (a hub with
@@ -175,7 +175,7 @@ describe('bellwether migrate', () => {
     const w = world();
     const before = snapshot(w.root);
     const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'cli-data'), BELLWETHER_ENV: path.join(w.root, 'cli.env') };
-    const cli = (...a) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'migrate', ...a], { encoding: 'utf8', env, timeout: 20000 });
+    const cli = (...a) => spawnBrainSync(['migrate', ...a], { encoding: 'utf8', env, timeout: 20000 });
     const r = cli('--from', w.old, '--settings', w.settingsFile);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /Preview only; nothing was changed/);
@@ -385,7 +385,7 @@ describe('cargo, for building the strip', () => {
   });
   test('`shell --dev` without cargo: one line with the fix, exit 1, no stack', { skip: fs.existsSync(path.join(path.dirname(process.execPath), 'cargo')) && 'cargo sits next to node here' }, () => {
     const home = tempDir('cargo-home-');
-    const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'shell', '--dev'], { encoding: 'utf8', timeout: 20000, env: { PATH: path.dirname(process.execPath), HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'd'), BELLWETHER_ENV: path.join(home, 'none.env') } });
+    const r = spawnBrainSync(['shell', '--dev'], { encoding: 'utf8', timeout: 20000, env: { PATH: path.dirname(process.execPath), HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'd'), BELLWETHER_ENV: path.join(home, 'none.env') } });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /^bellwether: cargo \(Rust\) wasn't found on PATH, in ~\/\.cargo\/bin or in \$CARGO_HOME\/bin: run `source ~\/\.cargo\/env`, or install rustup from https:\/\/rustup\.rs\n$/);
   });

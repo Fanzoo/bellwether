@@ -8,7 +8,7 @@ import { describe, test } from 'node:test';
 import { loadConfig } from '../brain/config.mjs';
 import { DATA_DIR } from '../brain/util.mjs';
 import { runDoctor } from '../brain/doctor.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 import { ISOLATED, takeViolations } from './setup.mjs';
 
 /**
@@ -59,7 +59,7 @@ describe('the test run is isolated from the live install', () => {
     assert.match(read.stderr, /test isolation: readFileSync .*\.env/);
     // This checkout's CLI with nothing but PATH: it gets the temp .env (no token), not the live one.
     const home = tempDir('iso-home-');
-    const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'hooks', 'print'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home } });
+    const r = spawnBrainSync(['hooks', 'print'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home } });
     assert.equal(r.status, 3, r.stderr);
     assert.match(r.stderr, /BELLWETHER_HOOK_TOKEN is not set/);
   });

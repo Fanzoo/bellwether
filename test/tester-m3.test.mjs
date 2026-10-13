@@ -9,7 +9,7 @@ import { describe, test } from 'node:test';
 import { autostart, plistText, shellBinary } from '../brain/autostart.mjs';
 import { fetchPets } from '../brain/pets.mjs';
 import { compile, evaluate, KEYWORDS } from '../shell/src/player/expr.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Tester probes for Milestone 3. No window is opened here and nothing touches
@@ -269,7 +269,7 @@ describe('autostart (temp HOME only; launchctl is never run)', () => {
     // On a fresh clone the strip isn't built: install refuses (exit 2) and says how to
     // go on; the rest then runs with --brain-only, which needs no build.
     const built = fs.existsSync(shellBinary());
-    const cli = (...a) => spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'autostart', ...a], { encoding: 'utf8', env });
+    const cli = (...a) => spawnBrainSync(['autostart', ...a], { encoding: 'utf8', env });
     if (!built) {
       const refused = cli('install', '--write');
       assert.equal(refused.status, 2, refused.stderr);

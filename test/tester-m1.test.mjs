@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, FIXTURES, TOKEN, hookHeaders, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, TOKEN, hookHeaders, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Independent tester probes for Milestone 1. Everything runs against a COPY of the
@@ -25,7 +25,8 @@ const freePort = () =>
 let root, home, port, env, settingsPath;
 
 function cli(args, { input, extraEnv = {}, cwd } = {}) {
-  const r = spawnSync(process.execPath, [path.join(root, 'brain', 'cli.mjs'), ...args], {
+  const r = spawnBrainSync(args, {
+    root,
     encoding: 'utf8',
     env: { ...env, ...extraEnv },
     input,
@@ -39,7 +40,7 @@ function cli(args, { input, extraEnv = {}, cwd } = {}) {
 // spawnSync would block this process's event loop and the in-process server could not answer.
 function cliAsync(args) {
   return new Promise((resolve) => {
-    const c = spawn(process.execPath, [path.join(root, 'brain', 'cli.mjs'), ...args], { env, cwd: root });
+    const c = spawnBrain([...args], { root, env, cwd: root });
     let out = '', err = '';
     c.stdout.on('data', (d) => (out += d));
     c.stderr.on('data', (d) => (err += d));
@@ -82,7 +83,7 @@ before(async () => {
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 
 function startBrain(extraArgs = [], extraEnv = {}) {
-  const child = spawn(process.execPath, [path.join(root, 'brain', 'cli.mjs'), 'serve', ...extraArgs], { env: { ...env, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawnBrain(['serve', ...extraArgs], { root, env: { ...env, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
   let err = '';
   child.stderr.on('data', (d) => (err += d));
   return new Promise((resolve, reject) => {
@@ -203,7 +204,7 @@ describe('hook endpoint: every path and method answers without a body', () => {
 describe('recorder keeps no free text', () => {
   test('canary strings in every content-bearing field never reach the recording or the log', async () => {
     const rec = path.join(root, 'canary.jsonl');
-    const child = spawn(process.execPath, [path.join(root, 'brain', 'cli.mjs'), 'record', '--out', rec], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawnBrain(['record', '--out', rec], { root, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let err = '';
     child.stderr.on('data', (d) => (err += d));
     await new Promise((r) => { const t = setInterval(() => err.includes('recording to') && (clearInterval(t), r()), 20); });
@@ -465,7 +466,7 @@ describe('doctor', () => {
     for (const t of [undefined, '', 'short', 'has space in it-----------', 'quote"quote_quote_quote']) {
       const e = { ...env };
       if (t === undefined) delete e.BELLWETHER_HOOK_TOKEN; else e.BELLWETHER_HOOK_TOKEN = t;
-      const r = spawnSync(process.execPath, [path.join(root, 'brain', 'cli.mjs'), 'doctor', '--settings', f], { encoding: 'utf8', env: e });
+      const r = spawnBrainSync(['doctor', '--settings', f], { root, encoding: 'utf8', env: e });
       assert.equal(r.status, 3, JSON.stringify(t));
       assert.match(r.stdout, /BELLWETHER_HOOK_TOKEN/);
     }
@@ -586,7 +587,10 @@ describe('doctor', () => {
 
 describe('fixtures and recordings', () => {
   test('committed fixtures contain no real session ids, terminal ids, home paths or user names', () => {
-    const blob = fs.readdirSync(FIXTURES).map((f) => fs.readFileSync(path.join(FIXTURES, f), 'utf8')).join('\n');
+    // Every file, the shared vectors in installer-vectors/ included.
+    const files = fs.readdirSync(FIXTURES, { recursive: true }).filter((f) => fs.statSync(path.join(FIXTURES, f)).isFile());
+    assert.ok(files.some((f) => f.startsWith(`installer-vectors${path.sep}`)), 'the scan reaches into subdirectories');
+    const blob = files.map((f) => fs.readFileSync(path.join(FIXTURES, f), 'utf8')).join('\n');
     // the only home directory is the invented one
     assert.doesNotMatch(blob, /\/Users\/(?!example\/)[^/\s"]+/);
     // every session id is one of the invented, patterned ones
@@ -603,10 +607,10 @@ describe('fixtures and recordings', () => {
 describe('shim', () => {
   test('exits 3 with a message when node is not on PATH, and passes the exit code through otherwise', { skip: process.platform === 'win32' }, () => {
     const shim = path.join(AGENT_DIR, 'bellwether');
-    const noNode = spawnSync('/bin/sh', [shim, 'doctor'], { encoding: 'utf8', env: { PATH: '/nonexistent' } });
+    const noNode = spawnBrainSync(['doctor'], { shim, encoding: 'utf8', env: { PATH: '/nonexistent' } });
     assert.equal(noNode.status, 3);
     assert.match(noNode.stderr, /node is not installed/);
-    const unknown = spawnSync('/bin/sh', [shim, 'bogus-command'], { encoding: 'utf8', env: { PATH: process.env.PATH, BELLWETHER_DATA_DIR: path.join(root, 'd2') }, cwd: os.tmpdir() });
+    const unknown = spawnBrainSync(['bogus-command'], { shim, encoding: 'utf8', env: { PATH: process.env.PATH, BELLWETHER_DATA_DIR: path.join(root, 'd2') }, cwd: os.tmpdir() });
     assert.equal(unknown.status, 1);
     assert.match(unknown.stderr, /unknown command/);
   });
@@ -616,7 +620,7 @@ describe('shim', () => {
     fs.mkdirSync(path.join(spaced, 'agents', 'bellwether'), { recursive: true });
     fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(spaced, 'agents', 'bellwether', 'brain'), { recursive: true });
     for (const f of ['bellwether', 'package.json', 'config.example.json']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(spaced, 'agents', 'bellwether', f));
-    const r = spawnSync('/bin/sh', [path.join(spaced, 'agents', 'bellwether', 'bellwether'), 'hooks', 'print'], { encoding: 'utf8', cwd: os.tmpdir(), env: { PATH: process.env.PATH, BELLWETHER_HOOK_TOKEN: TOKEN } });
+    const r = spawnBrainSync(['hooks', 'print'], { root: path.join(spaced, 'agents', 'bellwether'), shim: path.join(spaced, 'agents', 'bellwether', 'bellwether'), encoding: 'utf8', cwd: os.tmpdir(), env: { PATH: process.env.PATH, BELLWETHER_HOOK_TOKEN: TOKEN } });
     assert.equal(r.status, 0, r.stderr);
     assert.ok(JSON.parse(r.stdout).hooks.Stop);
   });

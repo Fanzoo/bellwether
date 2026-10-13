@@ -8,7 +8,7 @@ import { identityOf } from '../brain/identity.mjs';
 import { normalise } from '../brain/normalise.mjs';
 import { makeTextCleaner } from '../brain/redact.mjs';
 import { readJsonl, runFixture } from './fixture-runner.mjs';
-import { AGENT_DIR, FIXTURES } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, readVectors } from './helpers.mjs';
 
 /**
  * The reducer, with a fake clock throughout: every event carries its own time and
@@ -89,6 +89,8 @@ describe('snapshots carry only short, redacted text', () => {
     const alert = flock.snapshot().flock[0].alert.text;
     assert.ok([...alert].length <= 60, alert);
     assert.match(alert, /^Bash: curl -H "Authorization: Bearer •••"/);
+    const [user] = readVectors('redact', 'user patterns');
+    assert.equal(makeTextCleaner({ maxChars: user.maxChars, redactPatterns: user.redactPatterns })(user.text), user.expected, user.name);
   });
 
   test('bubble.detail "tool" shows the tool name only', () => {
@@ -315,26 +317,23 @@ function walk(o, fn, key = '') {
 
 describe('M2 verification fixes', () => {
   test('redaction keeps the key, flag or scheme readable and leaves ordinary commands alone', () => {
+    // Shared with the Rust port: test/fixtures/redact-vectors.json.
     const clean = makeTextCleaner({ maxChars: 200 });
-    const cases = [
-      ['export GITHUB_TOKEN=abcd1234efgh', 'export GITHUB_TOKEN=•••'],
-      ['mysql --password hunter2xyz -h db', 'mysql --password ••• -h db'],
-      ['curl -H "Authorization: Basic dXNlcjpwYXNz" x', 'curl -H "Authorization: Basic •••" x'],
-      ['curl -u admin:S3cr3t x', 'curl -u admin:••• x'],
-      ['mysql -uroot -pS3cr3tPw', 'mysql -uroot -p•••'],
-      ['git push -u origin main', 'git push -u origin main'],
-      ['mkdir -pv a/b', 'mkdir -pv a/b'],
-      ['docker run -p8080:80 img', 'docker run -p8080:80 img'],
-      ['git log --author alice', 'git log --author alice'],
-      ['git commit -m "fix auth flow"', 'git commit -m "fix auth flow"'],
-    ];
-    for (const [input, want] of cases) assert.equal(clean(input), want, input);
+    const cases = readVectors('redact', 'readable key');
+    assert.ok(cases.length >= 10);
+    for (const v of cases) {
+      assert.equal(clean(v.text), v.mustEqual, v.text);
+      assert.equal(v.expected, v.mustEqual, `${v.text}: the vector's answer`);
+    }
   });
 
   test('bidi controls are stripped', () => {
     const clean = makeTextCleaner({ maxChars: 60 });
-    for (const c of ['‪', '‫', '‬', '‭', '‮', '⁦', '⁧', '⁨', '⁩', '‎', '‏']) {
-      assert.ok(!clean(`ls ${c}fdp.exe`).includes(c), `U+${c.codePointAt(0).toString(16)}`);
+    const cases = readVectors('redact', 'bidi controls');
+    assert.equal(cases.length, 11);
+    for (const v of cases) {
+      assert.ok(!clean(v.text).includes(v.mustNotContain), v.name);
+      assert.equal(clean(v.text), v.expected, v.name);
     }
   });
 
@@ -421,8 +420,12 @@ describe('M2 verification fixes', () => {
 
 describe('M2 re-check fixes', () => {
   test('labels from the folder name and from state.json lose control, bidi and zero-width characters', () => {
-    const ev = normalise({ hook_event_name: 'Stop', session_id: 's', cwd: '/w/a‮b\u0007c​d' }, { 'x-bellwether-herdr-pane': 'w1:p1' }, 1);
+    const [v] = readVectors('normalise', 'labels');
+    const ev = normalise(v.payload, v.headers, v.receivedAt);
     assert.equal(ev.projectLabel, 'ab cd', JSON.stringify(ev.projectLabel));
+    assert.deepEqual(ev, v.expected);
+    const [t] = readVectors('normalise', 'terminals');
+    assert.deepEqual(normalise(t.payload, t.headers, t.receivedAt), t.expected, t.name);
     const f = new Flock({ config: CONFIG, t: 0, persisted: { identities: { 'herdr:#w1:p1': { label: 'x⁦y\nz', slots: {}, lastSeen: 0 } } } });
     assert.equal(f.persistable().identities['herdr:#w1:p1'].label, 'xy z');
   });

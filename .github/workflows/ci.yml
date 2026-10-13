@@ -1,0 +1,151 @@
+# Tests, the parity table and the cross-platform check (distribution plan, milestone 2).
+#
+# Needs no secrets: nothing here signs, notarizes or publishes, and the token has read
+# access only. The release workflow (milestone 9) is the only one that will reach the
+# signing environment. Actions are pinned by commit SHA.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # The suite's Node; brain/ needs >= 22.9 (package.json engines).
+  NODE_VERSION: "22.14.0"
+
+jobs:
+  node:
+    name: Node suite (npm test)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: npm test
+        run: npm test
+      - name: The shared vectors match what the Node brain answers
+        run: npm run test:vectors
+
+  cargo:
+    name: Rust tests (npm run test:cargo)
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            shell/src-tauri/target-dev
+          key: cargo-debug-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+      - name: npm run test:cargo
+        run: npm run test:cargo
+      - name: cargo test with the conformance feature
+        run: cargo test --manifest-path shell/src-tauri/Cargo.toml --workspace --features bellwether-shell/conformance
+
+  conformance:
+    name: Parity table (npm run test:rust) and the differential
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            shell/src-tauri/target-dev
+          key: cargo-conformance-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+      - name: Build the Rust binary with the conformance feature (debug, into target-dev/)
+        run: cargo build --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance
+      - name: Parity table (published as this job's summary)
+        # Fails only when a node cell is red, or a row the current milestone requires
+        # is red under rust (test/conformance.json).
+        run: npm run test:rust
+      - name: Differential, 10^5 cases per area
+        run: |
+          set -o pipefail
+          npm run --silent differential | tee differential.txt
+          { echo '## Differential'; echo; echo '```'; cat differential.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  release-check:
+    name: A release build has no hidden commands
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            shell/src-tauri/target-dev
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+      - name: cargo build --release (the compile step of `tauri build`; no features, as a release has)
+        run: cargo build --release --manifest-path shell/src-tauri/Cargo.toml
+      - name: "`__fixture` is an unknown command: exit 1"
+        run: |
+          home="$(mktemp -d)"
+          echo '{"port": 47999}' > "$home/config.json"
+          set +e
+          out="$(BELLWETHER_HOME="$home" shell/src-tauri/target-dev/release/bellwether-shell __fixture 2>&1)"
+          code=$?
+          set -e
+          printf '%s\n' "$out" | head -3
+          test "$code" -eq 1
+          printf '%s\n' "$out" | grep -q 'unknown command "__fixture"'
+
+  cross-check:
+    name: cargo check, ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+      # The platform-neutral crates only (plan D1). crates/core joins this list when
+      # milestone 3 creates it.
+      - name: cargo check -p bellwether-brain
+        run: cargo check --manifest-path shell/src-tauri/Cargo.toml -p bellwether-brain --all-targets --target ${{ matrix.target }}

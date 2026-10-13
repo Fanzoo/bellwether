@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -13,7 +12,7 @@ import { countGroups, hookBlock, install, isLegacyHandler, uninstall } from '../
 import { adoptLegacyHeaders } from '../brain/normalise.mjs';
 import { tokenInit } from '../brain/token.mjs';
 import { maskToken } from '../brain/util.mjs';
-import { AGENT_DIR, TOKEN, request, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, request, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * The rename from pasture to bellwether: for one release the old names (PASTURE_*
@@ -49,7 +48,7 @@ describe('old PASTURE_* variables', () => {
       const out = path.join(dir, `h-${Math.random().toString(36).slice(2)}.json`);
       const e = { PATH: process.env.PATH, HOME: dir, BELLWETHER_DATA_DIR: path.join(dir, 'd'), BELLWETHER_ENV: path.join(dir, 'none.env'), ...env };
       for (const k of Object.keys(e)) if (e[k] === undefined) delete e[k];
-      const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'hooks', 'print', '--out', out], { encoding: 'utf8', env: e });
+      const r = spawnBrainSync(['hooks', 'print', '--out', out], { encoding: 'utf8', env: e });
       assert.equal(r.status, 0, r.stderr);
       return fs.readFileSync(out, 'utf8');
     };
@@ -200,11 +199,11 @@ describe('pasture\'s LaunchAgents', () => {
 describe('the `pasture` command', () => {
   test('prints a deprecation note on stderr and forwards arguments and the exit code to `bellwether`', { skip: process.platform === 'win32' }, () => {
     const env = { PATH: process.env.PATH, HOME: tempDir('rn-shim-'), BELLWETHER_HOOK_TOKEN: TOKEN };
-    const ok = spawnSync('/bin/sh', [path.join(AGENT_DIR, 'pasture'), 'help'], { encoding: 'utf8', env });
+    const ok = spawnBrainSync(['help'], { shim: path.join(AGENT_DIR, 'pasture'),  encoding: 'utf8', env });
     assert.equal(ok.status, 0);
     assert.match(ok.stderr, /now `bellwether`/);
     assert.match(ok.stdout, /bellwether migrate/);
-    const bad = spawnSync('/bin/sh', [path.join(AGENT_DIR, 'pasture'), 'bogus-command'], { encoding: 'utf8', env });
+    const bad = spawnBrainSync(['bogus-command'], { shim: path.join(AGENT_DIR, 'pasture'),  encoding: 'utf8', env });
     assert.equal(bad.status, 1);
     assert.match(bad.stderr, /unknown command/);
   });

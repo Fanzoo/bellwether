@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "__proto__": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "k"
+          }
+        ]
+      }
+    ]
+  }
+}

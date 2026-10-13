@@ -1,12 +1,11 @@
 import { loadConfig } from '../brain/config.mjs';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { diffStats } from '../brain/diff.mjs';
+import { diffStats, unifiedDiff } from '../brain/diff.mjs';
 import { EVENTS, HTTP_UNSUPPORTED_EVENTS, countGroups, deepEqual, hookBlock, install, isBellwetherHandler, planEdit, uninstall } from '../brain/hooks.mjs';
-import { AGENT_DIR, FIXTURES, TOKEN, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, TOKEN, readInstallerVectors, readVectors, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * The installer. Every test works on a temp copy of an invented settings file shaped
@@ -28,7 +27,7 @@ function copyFixture() {
 
 /** Runs the real CLI with --settings, a test token and a temp data dir. */
 function cli(args, dataDir) {
-  const r = spawnSync(process.execPath, ['brain/cli.mjs', ...args], {
+  const r = spawnBrainSync([...args], {
     cwd: AGENT_DIR,
     encoding: 'utf8',
     // HOME points at a temp dir, so even a regression that fell back to the default
@@ -130,6 +129,16 @@ describe('install / uninstall', () => {
     const stats = diffStats(plan.oldText, plan.newText);
     assert.equal(stats.removed, 0, `removed: ${stats.removedLines.join(' | ')}`);
     assert.ok(stats.added > 16 * 20);
+    // The diff the preview is made with, against the shared vectors
+    // (test/fixtures/diff-vectors.json): the text and the counts, exactly.
+    for (const v of readVectors('diff')) {
+      assert.equal(unifiedDiff(v.old, v.new, v.options), v.expected, v.name);
+      const s = diffStats(v.old, v.new);
+      assert.deepEqual({ added: s.added, removed: s.removed }, v.stats, v.name);
+    }
+    const sample = readInstallerVectors().cases.find((c) => c.group === 'sample');
+    assert.equal(sample.settings, fs.readFileSync(path.join(FIXTURES, 'settings-sample.json'), 'utf8'), 'the sample vector is settings-sample.json');
+    assert.equal(diffStats(sample.settings, sample.installed).removed, 0);
   });
 
   test('invalid JSON is refused with exit 3 and nothing is written', () => {
@@ -189,7 +198,7 @@ describe('the CLI against a temp copy', () => {
 
   test('without BELLWETHER_HOOK_TOKEN, install refuses with exit 3', () => {
     const { dir, file } = copyFixture();
-    const r = spawnSync(process.execPath, ['brain/cli.mjs', 'hooks', 'install', '--settings', file], {
+    const r = spawnBrainSync(['hooks', 'install', '--settings', file], {
       cwd: AGENT_DIR,
       encoding: 'utf8',
       env: { ...process.env, BELLWETHER_HOOK_TOKEN: '', BELLWETHER_DATA_DIR: path.join(dir, 'data') },
@@ -266,21 +275,33 @@ describe('layout and fidelity', () => {
     assert.equal(cli(['hooks', 'uninstall', '--write', '--settings', file], data).code, 0);
     return fs.readFileSync(file, 'utf8');
   };
-  const base = { theme: 'dark', n: 1.5, hooks: { Stop: [{ hooks: [{ type: 'command', command: 'k' }] }] } };
-
-  for (const [name, text] of [
-    ['tabs', JSON.stringify(base, null, '\t') + '\n'],
-    ['4 spaces, CRLF', JSON.stringify(base, null, 4).replace(/\n/g, '\r\n') + '\r\n'],
-    ['no trailing newline', JSON.stringify(base, null, 2)],
-    ['number literals 1.0, 1e2 and 2^70', '{\n  "a": 1.0,\n  "b": 1e2,\n  "c": 1180591620717411303424,\n  "hooks": {}\n}\n'],
-    ['an empty hooks object', '{\n  "hooks": {}\n}\n'],
-    ['no hooks key', '{\n  "theme": "dark"\n}\n'],
-  ]) {
-    test(`round trip is byte-identical: ${name}`, () => assert.equal(roundTrip(text), text));
+  // The settings files are shared with the Rust port: test/fixtures/installer-vectors/,
+  // each with the bytes after install, the preview, and the bytes after uninstall.
+  const vectors = readInstallerVectors();
+  const vectorPlan = (text, action) => {
+    const { file, data } = write(text);
+    const plan = planEdit(file, action, { port: vectors.port, token: vectors.token, dataDir: data });
+    return { file, data, plan };
+  };
+  for (const v of vectors.cases.filter((c) => c.group === 'layout')) {
+    test(`round trip is byte-identical: ${v.name}`, () => {
+      assert.equal(roundTrip(v.settings), v.settings);
+      assert.ok(v.roundTrip && v.uninstalled === v.settings);
+      // In process, on the vectors' port: the installed bytes and the preview, exactly.
+      const { plan } = vectorPlan(v.settings, 'install');
+      assert.equal(plan.newText, v.installed);
+      assert.equal(unifiedDiff(plan.oldText, plan.newText, { oldName: 'settings.json (current)', newName: 'settings.json (after install)' }), v.installDiff);
+      assert.equal(plan.layoutKept, v.layoutKept);
+    });
   }
+  const base = { theme: 'dark', n: 1.5, hooks: { Stop: [{ hooks: [{ type: 'command', command: 'k' }] }] } };
+  assert.equal(vectors.cases.find((c) => c.name === 'tabs').settings, JSON.stringify(base, null, '\t') + '\n', 'the tabs vector is this base');
 
   test('a file not in bellwether\'s layout says so in the preview instead of "every other line is unchanged"', () => {
-    const { file, data } = write('{ "theme": "dark", "list": [1, 2] }\n');
+    const v = vectors.cases.find((c) => c.group === 'reformatted');
+    assert.equal(v.layoutKept, false);
+    assert.equal(vectorPlan(v.settings, 'install').plan.newText, v.installed);
+    const { file, data } = write(v.settings);
     const r = cli(['hooks', 'install', '--settings', file], data);
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stderr, /not laid out the way bellwether writes JSON/);
@@ -312,7 +333,10 @@ describe('layout and fidelity', () => {
 
 describe('untrusted keys never reach a prototype', () => {
   test('an event key "__proto__" under hooks survives install and uninstall as an ordinary key', () => {
-    const text = '{\n  "hooks": {\n    "__proto__": [\n      {\n        "hooks": [\n          {\n            "type": "command",\n            "command": "k"\n          }\n        ]\n      }\n    ]\n  }\n}\n';
+    // The settings file is shared with the Rust port (installer-vectors/a-proto-event-key).
+    const v = readInstallerVectors().cases.find((c) => c.group === 'proto');
+    const text = v.settings;
+    assert.ok(v.roundTrip && v.uninstalled === text);
     const dir = tempDir();
     const file = path.join(dir, 'settings.json');
     fs.writeFileSync(file, text);

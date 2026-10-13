@@ -1351,6 +1351,77 @@ Builds:
 - a release `tauri build` contains no `__` subcommands (`Bellwether __fixture` exits
   1 with "unknown command").
 
+#### M2 status (developer, 2026-10-13): done locally; the first CI run is pending
+
+Built:
+- the switch: `spawnBrain` / `spawnBrainSync` / `brainCommand` in `test/helpers.mjs`.
+  Every test that starts the brain or its CLI goes through it (17 test files, 56 call
+  sites, the `/bin/sh` shims included). Under `BELLWETHER_IMPL=rust` the helper:
+  - runs `$BELLWETHER_BIN` (default: the dev build, refused when older than its sources)
+    with argv[0] `bellwether`, so the binary is always its CLI, never the strip;
+  - turns the Node CLI's `BELLWETHER_CONFIG` / `BELLWETHER_DATA_DIR` into a temp
+    `BELLWETHER_HOME` whose `config.json` carries the same test port;
+  - throws on anything that would reach port 47417, and never runs `autostart`;
+  - stops, by pid, any Rust process a test left running.
+- the shared vectors, made by `test/fixtures/build-vectors.mjs` from the Node brain:
+  `redact-vectors.json` (149), `normalise-vectors.json` (26), `config-vectors.json` (39),
+  `diff-vectors.json` (23) and `installer-vectors/` (11 settings files, each with the
+  bytes after install, the preview, and the bytes after uninstall). The cases came out of
+  tester-m2, tester-m2-recheck, flock, brain, tester-m6 and hooks; those tests now read
+  them and assert the vectors' answers too. `crates/brain/tests/vectors.rs` reads the same
+  files. `npm run test:vectors` checks they are current.
+- the `conformance` feature of `shell/src-tauri` and `src/conformance.rs`: `__list`,
+  `__env` (working: `parse_env_value`), and `__redact`, `__normalise`, `__fixture`,
+  `__json`, `__diff`, which say "not ported yet (milestone N)" and exit 1.
+- `scripts/differential.mjs` (`npm run differential`): six areas, seeded generators,
+  10⁵ cases each; Node answers all of them, Rust answers the ported ones over JSON lines.
+- `test/conformance.mjs` (`npm run test:rust`) and `test/conformance.json`: the parity
+  table, also appended to `$GITHUB_STEP_SUMMARY`.
+- `.github/workflows/ci.yml`: the Node suite, the cargo tests with and without the
+  feature, the parity table and the differential, the release check, and the Linux and
+  Windows `cargo check`. No secrets, read-only token, actions pinned by SHA.
+- `test/DIVERGENCES.md`, with deviations 5 and 10, the `dropped` counter and the refused
+  `X-Pasture-*` headers, each with its pinning test; the two new tests are in
+  `crates/brain/tests/http.rs`.
+- `.gitattributes`, so git never converts the installer vectors' line endings.
+
+Progress against **Done when**:
+- [x] `npm test`: 958 tests, 958 pass. That is the same number as before M2; the plan's
+  "about 836" was out of date.
+- [x] `npm run test:rust` prints the parity table: hook-route-blackbox green under both,
+  most rust cells red (see the M2 findings below).
+- [x] `cargo check -p bellwether-brain --all-targets` is green for
+  `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`, run here after `rustup target
+  add`. There is no `crates/core` yet (deviation 16).
+- [x] A release build has no `__` commands: `bellwether-shell __fixture` from `cargo
+  build --release` (no features) printed `unknown command "__fixture"` and exited 1
+  (deviation 18). Cargo tests pin it too.
+- [ ] Only CI can prove: the workflow runs at all, the Node suite on a GitHub macOS
+  runner, the cross-checks on Ubuntu, and the job summary. It runs on the first push.
+
+#### M2 findings
+
+- **The shared `.env` reader differs from `node --env-file` in two shapes** (found by the
+  differential's oracle sample). Node reads a quoted value across lines until it closes,
+  and it stops reading the file at a line with no key or no `=`. `brain/envfile.mjs` and
+  `settings.rs` agree with each other on 10⁵ cases but not with Node there. This matters
+  only for importing a legacy token (M3); it is in DIVERGENCES.md, and the differential
+  fails on any other shape.
+- **A URL password containing `@` is only partly redacted.** The vector "URL credentials
+  with odd characters" pins today's answer: `https://u%40x:p@ss:w0rd@h.test/` becomes
+  `https://u%40x:•••@ss:w0rd@h.test/`. The Rust port must match it first (M3). Fixing it
+  is a change to both, with a new vector.
+- **What the parity table shows today.** `hook-route-blackbox` is green under both.
+  `tester-migrate` also passes under rust, but only because an unknown command prints no
+  token; the table marks such a pass `pass *`. Eleven of the files the later milestones
+  name test `brain/*.mjs` in process and never start the brain, so they show "not
+  wired" until their milestone runs them against the binary (through the `__` commands
+  or the CLI).
+- **Injected fault.** Changing one character of the Rust `parse_env_value` (`'#'` to
+  `'!'`) made the differential report 4068 differences in 10⁵ cases and exit 1;
+  reverted, 0 differences and exit 0. Rust redaction doesn't exist yet, so the M2 test
+  plan's "one-character change in Rust redact" has to wait for M3.
+
 ### M3. Brain port A: state, redaction, `/state`, `/control`, persistence
 
 Builds, in `crates/core` and `crates/brain`: config and defaults, the token file,
@@ -1813,3 +1884,53 @@ what is true, and what was done.
 15. **Test builds can't register the app login item** (F10), and `autostart uninstall`
     stops this bundle's running strip (F11). Neither is in D5; both are needed for
     M6.
+
+Recorded by the developer while building M2 (2026-10-13).
+
+16. **The cross-target check covers `bellwether-brain` only.**
+    - Plan: `cargo check` of core and brain for Linux and Windows.
+    - True: `crates/core` doesn't exist until M3 (deviation 1).
+    - Done: CI checks `-p bellwether-brain --all-targets` for both targets. The workflow
+      says where core joins the list.
+17. **The `__` commands: one works, the rest are stubs, and two were added.**
+    - Plan: `__fixture`, `__redact`, `__normalise`, `__json`, `__diff`.
+    - True: none of those has a Rust implementation yet. The `.env` reader is the only
+      ported area, and D2 lists `.env` lines for the differential.
+    - Done: `__env` works. `__list` tells the differential which areas are ported. The
+      five planned commands answer "not ported yet (milestone N)" with exit 1, until
+      their milestone. Every command takes cases as JSON lines on stdin and answers one
+      JSON line each, so 10⁵ cases go through one process.
+18. **The release check is `cargo build --release`, not a full `tauri build`.**
+    - Plan: a release `tauri build` contains no `__` commands.
+    - True: `tauri build` compiles with `cargo build --release` and the Tauri configs'
+      `build.features`, then bundles and signs. Running it here would replace M1's signed,
+      notarized bundle in `target-dev/release/bundle`. CI can't sign.
+    - Done: locally, `cargo build --release --target-dir
+      shell/src-tauri/target-dev/release-check`; in CI, `cargo build --release`. Then
+      `__fixture` must exit 1 with `unknown command "__fixture"`. A cargo test
+      (`release_builds_never_enable_the_conformance_feature`) checks that no default
+      feature, no Tauri config's `build.features` and nothing in
+      `scripts/build-app.mjs` turns the feature on.
+19. **What a parity-table row is.**
+    - Plan: CI publishes test file, node result, rust result.
+    - Done: the rows are the files `test/conformance.json` assigns to a milestone, plus
+      every other file that starts the brain through the helper. A file that only tests
+      `brain/*.mjs` in process has nothing to run against Rust, so its rust cell says
+      "not wired" (red), not a vacuous pass. A rust pass for a file that also tests JS in
+      process is marked `pass *`. The run fails when a node cell is red, or when a row
+      the current milestone requires (`"current": "M2"`, so only M1's
+      hook-route-blackbox) is red under rust.
+20. **`npm test` keeps its count by reading the vectors inside existing tests.** No Node
+    test was added or removed; the tests the cases came from loop over the vectors and
+    assert the Node answer as well as their original checks. `tester-m1`'s fixture
+    privacy scan now walks subdirectories, so `installer-vectors/` gets the same scan.
+21. **`Options::request_timeout` in the brain crate.** Pinning deviation 5 at the real
+    30 s would make a slow test, so `Options` (now built with `Options::new`) carries the
+    body timeout, `REQUEST_TIMEOUT` by default. Only tests set it shorter.
+22. **Under rust the helper refuses `autostart`.** The Rust `autostart` calls SMAppService
+    for real, and the Node tests that call it expect a LaunchAgent plist in a temp HOME.
+    Those tests are red under rust until M6 ports the command and tests it on a spare
+    account.
+23. **The differential's `.env` oracle sample.** Besides comparing Node with Rust, it
+    runs 200 generated `.env` files through `node --env-file` itself. Two known shapes
+    are reported, not failed (M2 findings, DIVERGENCES.md); any other difference fails.

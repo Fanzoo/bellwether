@@ -16,7 +16,9 @@
     "status": "node brain/cli.mjs status",
     "replay": "node brain/cli.mjs replay",
     "test": "NODE_OPTIONS=--import=./test/setup.mjs node --test --test-concurrency=1 test/*.test.mjs",
-    "test:rust": "BELLWETHER_IMPL=rust NODE_OPTIONS=--import=./test/setup.mjs node --test --test-concurrency=1 test/hook-route-blackbox.test.mjs",
+    "test:rust": "node test/conformance.mjs",
+    "test:vectors": "node --import=./test/setup.mjs test/fixtures/build-vectors.mjs --check",
+    "differential": "node --import=./test/setup.mjs scripts/differential.mjs",
     "test:cargo": "cargo test --manifest-path shell/src-tauri/Cargo.toml --workspace"
   }
 }

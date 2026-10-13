@@ -1,0 +1,494 @@
+{
+  "hooks": {
+    "__proto__": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "k"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "Elicitation": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ],
+    "ElicitationResult": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47555/hook",
+            "timeout": 1,
+            "headers": {
+              "X-Bellwether-Token": "testTokenNotReal_abcdefghijklmnop",
+              "X-Bellwether-Term-Program": "$TERM_PROGRAM",
+              "X-Bellwether-Iterm-Session": "$ITERM_SESSION_ID",
+              "X-Bellwether-Term-Session": "$TERM_SESSION_ID",
+              "X-Bellwether-Wt-Session": "$WT_SESSION",
+              "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
+              "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+            },
+            "allowedEnvVars": [
+              "TERM_PROGRAM",
+              "ITERM_SESSION_ID",
+              "TERM_SESSION_ID",
+              "WT_SESSION",
+              "TMUX_PANE",
+              "HERDR_PANE_ID",
+              "HERDR_SOCKET_PATH"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

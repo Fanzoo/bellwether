@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Tester re-verification of Milestone 1 after the developer's fixes (D1-D7, M1-6..17).
@@ -24,7 +23,7 @@ const freePort = () =>
   });
 
 function bellwether(args, { cwd = caller, extraEnv = {}, bin = path.join(agent, 'bellwether'), pathEnv } = {}) {
-  const r = spawnSync('/bin/sh', [bin, ...args], { encoding: 'utf8', cwd, env: { ...env, ...(pathEnv ? { PATH: pathEnv } : {}), ...extraEnv }, timeout: 30000 });
+  const r = spawnBrainSync([...args], { root: agent, shim: bin, encoding: 'utf8', cwd, env: { ...env, ...(pathEnv ? { PATH: pathEnv } : {}), ...extraEnv }, timeout: 30000 });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 const read = (f) => fs.readFileSync(f, 'utf8');
@@ -355,7 +354,7 @@ describe('new write paths: hooks print --out and record --out', () => {
   test('record --out refuses a file that is not a bellwether recording', () => {
     const precious = j({ theme: 'dark' });
     fs.writeFileSync(defaultSettings, precious);
-    const child = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'record', '--out', defaultSettings], { cwd: caller, env });
+    const child = spawnBrain(['record', '--out', defaultSettings], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
     return new Promise((resolve) => {
       let err = '';
       child.stderr.on('data', (d) => (err += d));
@@ -403,7 +402,7 @@ describe('M1-14/15: doctor', () => {
   });
 
   function brainProc(args) {
-    const c = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'serve', ...args], { cwd: caller, env });
+    const c = spawnBrain(['serve', ...args], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
     return new Promise((resolve) => {
       let err = '';
       c.stderr.on('data', (d) => {
@@ -414,7 +413,7 @@ describe('M1-14/15: doctor', () => {
   }
   const doctorAsync = (args) =>
     new Promise((resolve) => {
-      const c = spawn('/bin/sh', [path.join(agent, 'bellwether'), ...args], { cwd: caller, env });
+      const c = spawnBrain([...args], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
       let out = '';
       c.stdout.on('data', (d) => (out += d));
       c.on('close', (code) => resolve({ code, out }));
@@ -448,7 +447,7 @@ describe('M1-14/15: doctor', () => {
 describe('M1-16: event names', () => {
   test('a non-identifier hook_event_name is recorded and logged as unknown', async () => {
     const rec = path.join(caller, 'ev.jsonl');
-    const c = spawn('/bin/sh', [path.join(agent, 'bellwether'), 'record', '--out', rec], { cwd: caller, env });
+    const c = spawnBrain(['record', '--out', rec], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
     let err = '';
     await new Promise((r) => { c.stderr.on('data', (d) => { err += d; if (err.includes('recording to')) r(); }); });
     const body = JSON.stringify({ hook_event_name: 'Pre\nSECRET_EVENT text', session_id: 's' });
