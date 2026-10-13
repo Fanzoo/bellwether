@@ -542,7 +542,13 @@ export function checkLocatorLog(dataDir) {
   // Dock-width confinement (Milestone 10): the shell says at start whether it may.
   const dockLines = own.slice(Math.max(0, start)).filter((m) => m.startsWith('dock: Accessibility'));
   const dock = dockLines[dockLines.length - 1];
-  if (dock && /not granted|withdrawn/.test(dock)) out.push({ name: 'dock', status: 'INFO', detail: 'the strip uses its full width; to have the sheep stand on the Dock itself, run `./bellwether shell dock-permission` and turn bellwether-shell on in System Settings > Privacy & Security > Accessibility, then `bellwether shell restart`. The grant belongs to the built binary, so after a rebuild it must be given again' });
+  // A strip that had the grant in an earlier run and starts without it now: the binary
+  // was rebuilt, and System Settings still shows the old bellwether-shell entry switched
+  // on, which belongs to the previous build. Turning it off and on doesn't help; it has
+  // to be removed and granted again.
+  const grantedBefore = own.slice(0, Math.max(0, start)).some((m) => /^dock: Accessibility granted/.test(m));
+  if (dock && /not granted/.test(dock) && grantedBefore) out.push({ name: 'dock', status: 'WARN', detail: 'Accessibility was granted to an earlier build of the strip and is not granted to this one, so the sheep use the full-width strip. System Settings > Privacy & Security > Accessibility still lists the old bellwether-shell entry, which belongs to the previous binary: select it and remove it with −, then run `./bellwether shell dock-permission`, turn the new bellwether-shell on, and `bellwether shell restart`. After every rebuild it must be given again' });
+  else if (dock && /not granted|withdrawn/.test(dock)) out.push({ name: 'dock', status: 'INFO', detail: 'the strip uses its full width; to have the sheep stand on the Dock itself, run `./bellwether shell dock-permission` and turn bellwether-shell on in System Settings > Privacy & Security > Accessibility, then `bellwether shell restart`. The grant belongs to the built binary, so after a rebuild it must be given again. If bellwether-shell is already listed there and switched on, that entry is from an earlier build: remove it with − and grant again' });
   else if (dock) out.push({ name: 'dock', status: 'PASS', detail: 'Accessibility granted: sheep stand on the Dock\'s top edge' });
   if (herdr) out.push({ name: 'herdr CLI', status: 'WARN', detail: `the overlay couldn't run herdr at ${herdr[1]} (locator.herdrPath), so sheep in herdr panes are placed and focused through iTerm2/Terminal only` });
   return out;

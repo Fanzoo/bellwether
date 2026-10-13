@@ -12,17 +12,17 @@ bundle a `.app`; `cargo build` does not need it.
 
 | Package | Version | Where | Licence |
 |---|---|---|---|
-| @tauri-apps/cli | 2.12.1 | shell/package.json devDependency | not installed here, so not read (npm lists @tauri-apps/cli as Apache-2.0 OR MIT) |
+| @tauri-apps/cli | 2.12.1 | shell/package.json devDependency | Apache-2.0 OR MIT |
 
-## Rust crates (450)
+## Rust crates (453)
 
 | Licence | Crates |
 |---|---|
-| MIT OR Apache-2.0 | 205 |
+| MIT OR Apache-2.0 | 206 |
 | MIT | 108 |
 | Apache-2.0 OR MIT | 44 |
+| Zlib OR Apache-2.0 OR MIT | 19 |
 | Unicode-3.0 | 18 |
-| Zlib OR Apache-2.0 OR MIT | 17 |
 | MIT/Apache-2.0 | 12 |
 | Unlicense OR MIT | 9 |
 | MPL-2.0 | 5 |
@@ -198,6 +198,7 @@ bundle a `.app`; `cargo build` does not need it.
 | http-body | 1.1.0 | MIT |
 | http-body-util | 0.1.5 | MIT |
 | httparse | 1.10.1 | MIT OR Apache-2.0 |
+| httpdate | 1.0.3 | MIT OR Apache-2.0 |
 | hyper | 1.12.0 | MIT |
 | hyper-util | 0.1.21 | MIT |
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 |
@@ -274,6 +275,8 @@ bundle a `.app`; `cargo build` does not need it.
 | objc2-foundation | 0.3.2 | MIT |
 | objc2-io-surface | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-quartz-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
+| objc2-security | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
+| objc2-service-management | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-ui-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-user-notifications | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-web-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT |

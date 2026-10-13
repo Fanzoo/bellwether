@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the signed app's Info.plist (tauri.dist.conf.json, bundle.macOS.infoPlist). -->
+<plist version="1.0">
+<dict>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Bellwether asks your terminal (iTerm2 or Terminal) which tab a Claude Code session is in, so clicking its sheep brings that exact tab to the front.</string>
+</dict>
+</plist>

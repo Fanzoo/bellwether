@@ -1,0 +1,22 @@
+[package]
+name = "bellwether-brain"
+version = "0.1.0"
+edition = "2021"
+description = "bellwether's brain in Rust: the loopback hook listener (milestone 1: /hook and /health)"
+license = "MIT"
+publish = false
+# A member of the shell's workspace (shell/src-tauri/Cargo.toml), so both share one
+# Cargo.lock. It lives outside that directory, hence the pointer back.
+workspace = "../../shell/src-tauri"
+
+# Platform-neutral on purpose: std, tokio, hyper, sha2 and serde_json only. Nothing
+# here may pull in Tauri, AppKit or WebKit.
+[dependencies]
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "signal", "sync"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+sha2 = "0.10"
+serde_json = "1"
+

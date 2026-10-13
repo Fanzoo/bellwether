@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.fanzootechnology.bellwether",
+  "mainBinaryName": "Bellwether",
+  "bundle": {
+    "targets": ["app"],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true,
+      "entitlements": "macos/Bellwether.entitlements",
+      "infoPlist": "macos/Info.dist.plist",
+      "files": {
+        "Library/LaunchAgents/com.fanzootechnology.bellwether.brain.plist": "macos/com.fanzootechnology.bellwether.brain.plist"
+      }
+    }
+  }
+}

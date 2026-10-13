@@ -937,6 +937,394 @@ Builds:
 - recorded in the PR: the brain process's RSS at idle and its cold start time, and
   whether SMAppService calls work from the CLI under Terminal.
 
+#### M1 status (developer, 2026-10-12, by-hand checks 2026-10-13): done
+
+Built:
+- the brain crate, `crates/brain`: `/hook` (four guards, the `HookAnswer` type,
+  timeouts) and `/health`;
+- argv dispatch, `shell/src-tauri/src/dispatch.rs`;
+- the M1 CLI, `cli.rs`: `serve`, `doctor`, `autostart`, `version`, `help`;
+- the app-side action hand-off, `actions.rs`;
+- SMAppService, `login_items.rs`;
+- the bundled agent plist, the entitlements, the merged Info.plist and the
+  distribution overlay with the permanent id: `shell/src-tauri/macos/` and
+  `tauri.dist.conf.json`;
+- `scripts/build-app.mjs`;
+- the black-box suite `test/hook-route-blackbox.test.mjs`, run by `npm test` against
+  Node and by `npm run test:rust` against Rust.
+
+Progress against **Done when**. "The signed build" is the one the maintainer made
+with `node scripts/build-app.mjs --notarize --test-port 47418 --test-home /tmp/bw-m1`
+(Oct 12, 22:03).
+
+- [x] codesign, spctl, notarytool and stapler pass on the Developer ID build.
+  - The first attempt stopped at a keychain dialog for `codesign`, until the
+    maintainer chose Always Allow.
+  - On the signed build, `codesign --verify --deep --strict -vvv` says "valid on disk
+    / satisfies its Designated Requirement". `codesign -dvv` shows
+    `flags=0x10000(runtime)`, `Authority=Developer ID Application: Fanzoo Technology,
+    Inc. (TEAM ID)`, a secure `Timestamp=Oct 12, 2026 at 10:03:16 PM` and `Notarization
+    Ticket=stapled`.
+  - `xcrun stapler validate` says "The validate action worked!".
+  - `spctl -a -vvv -t exec` says "accepted, source=Notarized Developer ID".
+- [x] `codesign -d --entitlements -` shows only
+  `com.apple.security.automation.apple-events`.
+- [x] Logging out and in brings the Rust brain back. By hand, step 1: after login the
+  agent ran as `Bellwether serve --port 47418` with ppid 1. Registering also starts it at
+  once.
+- [x] Quitting the strip leaves `/hook` answering: a correctly tokened POST got 204 with
+  0 bytes. Tested on the ad-hoc build, with a `--demo` strip that quit through
+  `--quit-after`, not the tray's Quit.
+- [x] System Settings > Login Items lists Bellwether. By hand, step 2.
+- [x] The hardened, signed strip shows sheep, and the trace says the WebKit call was
+  applied. On the signed build, `--selftest` printed `selftest: done PASS`. A `--demo`
+  launched through LaunchServices logged "webview occlusion detection disabled: the
+  page stays visible while the strip is on screen" and "heartbeat 3, 13 sprites, page
+  visible", and its snapshot shows the flock.
+- [x] An Automation prompt naming Bellwether appears for iTerm2. By hand, step 3; F2
+  shows the attribution. Selecting the tab after a sheep click was not reported
+  separately: it needs a flock from `/state` (M5).
+- [x] An Accessibility grant survives a rebuilt, re-signed build. By hand, step 4; F8
+  shows the code-signing check behind it.
+- [x] The hook-route tests pass under `BELLWETHER_IMPL=rust`: 20 of 20 in the black-box
+  suite. The `/state` guard cases go to M3 (deviation 6).
+- [x] RSS, cold start and SMAppService from the CLI are recorded below (F4, F5).
+
+#### M1 by-hand checks (maintainer)
+
+Use the signed build at
+`shell/src-tauri/target-dev/release/bundle/macos/Bellwether.app`, built with
+`--test-port 47418 --test-home /tmp/bw-m1`. `A` below is that path. Its brain uses
+port 47418 and `/tmp/bw-m1`, so it never touches the repository install on 47417.
+Before step 1, `/tmp/bw-m1/hook-token` must exist (one line, 0600). The developer
+created it with the test token `testTokenNotReal_abcdefghijklmnop`.
+
+1. **Logout and login with the login items.**
+   1. Run `BELLWETHER_HOME=/tmp/bw-m1 "$A/Contents/MacOS/Bellwether" autostart install --write --brain-only`.
+      It should print `brain agent: enabled`.
+   2. Log out (Apple menu > Log Out) and log back in.
+   3. Run `curl -s http://127.0.0.1:47418/health`. Expect `"name":"bellwether"` and
+      `"port":47418`.
+   4. Run `ps -o pid,ppid,args -p <pid from /health>`. Expect `Bellwether serve --port
+      47418` with ppid 1.
+   5. Run `"$A/Contents/MacOS/Bellwether" doctor --port 47418`. Expect `PASS brain`
+      and `PASS login: brain`.
+   6. Optional, the app login item: `… autostart install --write` (without
+      `--brain-only`), log out and in again, and the strip starts. It shows no sheep
+      without a brain `/state` (M5). Afterwards run `… autostart uninstall --write`.
+2. **Login Items in System Settings.** While step 1's agent is registered, open System
+   Settings > General > Login Items & Extensions. Under "Allow in the Background",
+   Bellwether should be listed and on. Note its wording and icon for M6.
+3. **The Automation prompt from a sheep click.**
+   1. Start the Node brain's strip feed on another port, or use step 1's agent with
+      `bellwether replay` (M5 makes this simpler). Or prove only the prompt:
+      `open -n -a "$A" --args --action automation-iterm2` with iTerm2 running.
+   2. Expect a prompt saying "Bellwether" wants to control "iTerm2", with the usage
+      string from `Info.dist.plist`. Click Allow, and with a sheep, its tab is
+      selected.
+   3. Afterwards run `tccutil reset AppleEvents com.fanzootechnology.bellwether`.
+4. **Accessibility survives a re-signed rebuild.**
+   1. Run `open -n -a "$A" --args --demo`, then `"$A/Contents/MacOS/Bellwether" --ax-prompt`.
+   2. Turn Bellwether on in System Settings > Privacy & Security > Accessibility, then
+      quit the demo strip from the tray.
+   3. Rebuild and re-sign: `node scripts/build-app.mjs --test-port 47418 --test-home /tmp/bw-m1`.
+   4. Start `--demo` again. `shell.log` in the data folder should say "dock:
+      Accessibility granted to this binary", and the sheep should stand on the Dock.
+   5. Afterwards run `tccutil reset Accessibility com.fanzootechnology.bellwether`.
+5. **Clean up** after any of the above:
+   1. `BELLWETHER_HOME=/tmp/bw-m1 "$A/Contents/MacOS/Bellwether" autostart uninstall --write`
+      should print off and off.
+   2. `launchctl print gui/$(id -u)/com.fanzootechnology.bellwether.brain` should say
+      `Could not find service`.
+
+**Results (maintainer, 2026-10-13, on the notarized build):**
+1. Logout and login: after login, the brain agent ran as `Bellwether serve --port
+   47418` with ppid 1, started after the login. Doctor in a fresh Terminal.app window
+   showed PASS for signature, token, brain and brain token, and `login: brain` enabled.
+   - 1.6, the full install (`autostart install --write` without `--brain-only`):
+     after a second logout and login, `login: app` was enabled and a second strip ran
+     (pid 32629). The stale BTM app record from an ad-hoc copy (F7) did **not** block
+     it.
+   - That strip showed the maintainer's **live** flock (F10).
+2. System Settings > Login Items > Allow in the Background lists "Bellwether" (one
+   entry for both items) and "bellwether-shell" (the repository's legacy agent).
+3. The Automation prompt for iTerm2 appeared. It was reset afterwards.
+4. Accessibility survived the re-signed rebuild: the demo sheep stood on the Dock with
+   no new grant. It was reset afterwards.
+5. `autostart uninstall --write` printed off and off. The strip it had started kept
+   running, and had to be stopped with `kill` (F11).
+6. From a herdr terminal opened before the logout, doctor gave wrong answers (F9).
+
+#### M1 findings (prove first)
+
+**F1. SMAppService with the main executable as the agent's program works (R6).**
+Shown first on the ad-hoc build, then on the signed, notarized build, macOS 26.6.2,
+arm64.
+- `autostart install --write --brain-only` → `brain agent: enabled`.
+- `launchctl print gui/501/com.fanzootechnology.bellwether.brain` showed `state =
+  running`, `program identifier = Contents/MacOS/Bellwether (mode: 2)`, `properties =
+  partial import | runatload | resolve program | has LWCR`.
+- `ps` showed `Bellwether serve --port 47418` with parent pid 1.
+- `lsappinfo find pid=<pid>` returned nothing, so LaunchServices doesn't treat the
+  agent as an app launch (no Dock icon).
+- A tokened `POST /hook` got 204 with 0 bytes.
+- After `kill -9`, launchd had a new pid answering at once (KeepAlive `SuccessfulExit:
+  false`).
+- On the signed build, doctor said `PASS identity`, `PASS signature` (Developer ID,
+  hardened runtime), `PASS brain` (the Rust brain), `PASS brain token` and `PASS login:
+  brain`.
+- `uninstall --write` stopped it, and `launchctl print` then said `Could not find
+  service`.
+- `SMAppService.status` is `notFound` for a service that was never registered, not
+  only for a missing plist.
+- The fallback (a second executable) is not needed.
+
+**F2. Automation through `osascript` as a child: attributed to Bellwether, prompted,
+no -1743, and the entitlement is not what allows it.**
+- The app was launched through LaunchServices (`open -n -a …/Bellwether.app --args
+  --action automation-iterm2`) and sent `tell application id "com.googlecode.iterm2"
+  to count windows` through `/usr/bin/osascript`.
+- tccd logged `AttributionChain: responsible={TCCDProcess:
+  identifier=com.fanzootechnology.bellwether …}, accessing={… identifier=com.apple.osascript …}`.
+- It also logged `<… com.apple.osascript …> has the com.apple.private.tcc.allow-prompting
+  entitlement`, then `promptPolicy = 2`, then `Handling access request:
+  kTCCServiceAppleEvents … authValue: 1`, then UserNotificationCenter activated (the
+  prompt). osascript then waited for an answer, until the 120 s limit.
+- This was an ad-hoc copy signed **without** the apple-events entitlement, still under
+  the hardened runtime. The entitlement only matters to a process that sends Apple
+  Events itself, such as the in-process `NSAppleScript` fallback. It stays (no cost,
+  it matches the plan, and it's needed if the locator moves in-process).
+- A probe that asks for `version` (as D6 step 5 suggested) sends no Apple Event:
+  AppleScript reads an app's version, name and id from its bundle. tccd logged no
+  AppleEvents request for it (deviation 7).
+- One prompt for "Bellwether" (the ad-hoc test copy) was raised on the maintainer's
+  screen and left unanswered. `tccutil reset AppleEvents
+  com.fanzootechnology.bellwether` was run afterwards.
+
+**F3. No JIT entitlement is needed (A4). Confirmed on the signed, notarized build.**
+With only the apple-events entitlement and the hardened runtime:
+- `--selftest` printed `selftest: done PASS` (54 animations, 8 tinted sheets, parsed
+  by WebKit's own XML parser);
+- `--demo`, launched through LaunchServices, drew the flock, with `heartbeat 3, 13
+  sprites, page visible` and the WebKit occlusion line in the trace.
+
+The ad-hoc build had given the same result earlier.
+
+**F4. The brain's footprint while linking Tauri (R14): acceptable, so one executable
+stays.**
+
+5 runs each on this Mac (M-series, macOS 26.6.2). Cold start is spawn to the first
+`/health` 200, warm runs after the first. RSS is from `ps`.
+
+| Process | Cold start, first run | Cold start, warm | RSS idle | RSS after 100 hooks |
+|---|---|---|---|---|
+| `Bellwether serve`, the bundle executable (links Tauri, WebKit, AppKit; 5.3 MB) | 238 ms | 5.8–10.7 ms | 10.2 MB | 10.4 MB |
+| the same brain without Tauri (`crates/brain/examples/serve.rs`; 0.67 MB) | 305 ms | 4.4–5.7 ms | 2.1 MB | 2.3 MB |
+| the agent started by launchd, ad-hoc build | n/a | n/a | 10.4 MB | n/a |
+| the agent started by launchd, signed and notarized build | n/a | n/a | 10.4 MB | n/a |
+| today's Node brain (live, read with `ps` only) | n/a | n/a | 61.2 MB | n/a |
+
+Linking Tauri costs about 8 MB of RSS and about 3 ms of warm start. It is still about
+6× smaller than the Node brain.
+
+**F5. SMAppService works from the CLI under Terminal: no hand-off needed for
+`autostart` (for M6).**
+- The executable run by its own path from a terminal registered and unregistered the
+  agent and the main-app item directly. `--via-app` also works.
+- Through the lower-case symlink, `NSBundle.mainBundle` is not the app: the bundle id
+  read as nil, and `mainAppService` reported `notFound`. So the CLI re-runs
+  `autostart` from the bundle's real executable when started through a link, and
+  identity reads the bundle by path. After that fix, registering through the symlink
+  worked.
+- `permissions …` still needs the hand-off (R7). That is unchanged and not tested
+  here.
+
+**F6. Build isolation.** `tauri build` with the overlay wrote only to `target-dev/`.
+`shell/src-tauri/target/release/bellwether-shell` kept sha256 `35ceb697…ae22` and its
+mtime (Oct 11 09:19) throughout. The build script checks this itself.
+
+**F7. A login item registered from an ad-hoc build poisons the Developer ID one
+(matters for M6 and M8).**
+
+What happened, from the logs:
+- At 22:06:04 macOS SIGKILLed the signed brain agent: `xpcproxy exited due to
+  OS_REASON_CODESIGNING | Launch Constraint Violation … (Constraint not matched)`.
+  The crash report says `termination namespace CODESIGNING code 4`. `launchctl list`
+  showed `- 78`.
+- The developer had registered it, from the signed build, about 3 minutes after the
+  notarized build.
+- Cause: at 09:29:42, when the developer first registered the agent from an **ad-hoc**
+  copy, Background Task Management created item `F1BEC749…`
+  (`8.com.fanzootechnology.bellwether.brain`), with a launch constraint (LWCR) taken
+  from that signature.
+- Unregistering doesn't delete BTM items. Every later registration logged
+  `registerLaunchItem: found existing item: uuid=F1BEC749…`, including the one from
+  the Developer ID build at another path. Then `xpcproxy: Launch constraint set on
+  F1BEC749…`, and a Developer ID binary doesn't satisfy a constraint made for an
+  ad-hoc one.
+- After the failed spawn, launchd logged `Requesting LWCR update on next spawn`. At
+  22:06:14 BTM logged `invalidateLaunchItem: found item with UUID F1BEC749…`.
+- After `uninstall --write` and one more `install --write`, BTM used a new item,
+  `AC0B132C…`, whose constraint matched. The agent ran, and `/health` answered from
+  pid 90622.
+- Not the cause: /Applications (the app ran from `target-dev/`), quarantine and
+  translocation (none on a local build), and the plist (`BundleProgram` matches the
+  program; no `AssociatedBundleIdentifiers` is needed).
+
+Fixes made:
+- `autostart install` now refuses to register a bundle that is signed ad hoc and
+  carries the permanent id (tested: "refused: this build is signed ad hoc but carries
+  the permanent id …", nothing registered).
+- `build-app.mjs --adhoc` now builds under its own id,
+  `com.fanzootechnology.bellwether.adhoc`, with agent label
+  `com.fanzootechnology.bellwether.adhoc.brain`.
+- Doctor explains an enabled brain agent that doesn't answer, and how to recover:
+  uninstall, then install again.
+
+For M6 and M8:
+- Never register under the permanent id from anything but a Developer ID build.
+- After an update that changes the signature, check that the agent comes back (M9
+  measures this). If it hits a launch-constraint failure, unregister and register
+  again.
+
+**F8. Code-signing check behind TCC grants: re-signed code still matches.**
+- TCC stores the client's designated requirement and checks new code against it (the
+  `matchesCodeRequirement` lines in F2).
+- The signed build's requirement is `identifier "com.fanzootechnology.bellwether" and
+  anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */
+  and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate
+  leaf[subject.OU] = (TEAM ID)`. It contains no cdhash.
+- A copy with different code was re-signed with the same Developer ID: CDHash
+  `7ee0fe25…` against the notarized build's `3aebcd1e…`.
+  `codesign --verify -R="<that requirement>"` said "explicit requirement satisfied".
+- An ad-hoc build failed the same requirement ("code failed to satisfy specified code
+  requirement(s)").
+- So a grant should carry over to a rebuilt Developer ID build. The real grant is by-hand
+  step 4.
+
+**F9. A terminal from before the last login can't see login items, and doctor used to
+misreport that.**
+- The maintainer's herdr server outlived the logout. From its shells, doctor said
+  `login: brain` off, "macOS has never had it registered", and `signature (unavailable)`,
+  while the agent was running and enabled.
+- Reproduced from the developer's shell, which was in the same state. `launchctl list`
+  is empty, and `launchctl print gui/501` gives "Could not print domain: 141: Reentrancy
+  avoided".
+- `launchctl managername` gives "Could not get manager name." with exit 153. In a
+  current session it exits 0.
+- `codesign -dv` prints `Authority=(unavailable)`, because the certificate chain can't
+  be read. `security find-identity` lists no identity, so this session can't sign
+  either.
+- `open -a` fails with `kLSNoExecutableErr`, so the `--via-app` hand-off doesn't help
+  there.
+- Doctor now decides the session from `launchctl managername`. In an old session it
+  says, for both login items: "can't check or change login items from this terminal
+  session: it predates your last login (… a terminal whose server outlived a logout,
+  such as herdr or tmux). Open a new terminal window and run the command there". It
+  reports Accessibility as unknown rather than not granted.
+- A second check: when macOS reports the brain agent as notFound or notRegistered, but
+  the brain answering on the port runs **this bundle's executable** with ppid 1 (by
+  `proc_pidpath`), doctor WARNs that the terminal is probably from before the last
+  login, and never says "never registered".
+- `Authority=(unavailable)` is now an INFO line ("signed with a Team ID, hardened
+  runtime; the certificate name is unavailable (this terminal session predates your
+  last login …)"), not a WARN.
+- `autostart` refuses in an old session, with the same message and exit 2. Bad usage is
+  still exit 3.
+- Shown from the developer's stale shell, and unit-tested (`login_verdict`,
+  `signature_verdict`).
+
+**F10. The app login item ignores the test port and home.**
+- The strip started at login gets no environment and no arguments, so it uses the
+  defaults: port 47417 and the default home and token. From a test build that means a
+  live install's flock.
+- That is correct for a real install. Test builds must not register the app item.
+- Choice: refuse, rather than write test values somewhere the app reads at login (the
+  app has no such config until M5's app-data layout).
+- `autostart install` now refuses the app item when the bundled agent plist carries
+  `--port` or `BELLWETHER_HOME` (a test build), or when `BELLWETHER_HOME` is set: "use
+  --brain-only with test builds".
+- It also refuses the brain agent when `BELLWETHER_HOME` is set to something other
+  than the bundle's plist says, because the bundle decides.
+- Unit-tested (`agent_overrides`, `install_refusal`). Not run live: the developer's
+  shell is from before the last login, where `autostart` stops earlier (F9).
+- Recommendation for M5/M6: the app reads its port and home only from Application
+  Support, never from the environment. A test build then needs a test macOS user.
+
+**F11. `autostart uninstall` didn't stop what the login item had started.**
+- Unregistering the agent stops the brain (launchd does that). Unregistering the main
+  app leaves a running strip running.
+- Choice: stop it. After `uninstall --write` that removes the app item, `autostart`
+  sends SIGTERM to processes whose executable (by `proc_pidpath`) is **this exact
+  bundle's** and whose command line is the app (not `serve`, not the CLI, not
+  `--action`). That excludes itself and its parent, never touches another copy or the
+  repository's `bellwether-shell`, and waits up to 5 s.
+- It prints "stopped the running strip (pid N)", or how to quit one that didn't stop.
+- It reports anything of this bundle still running that it left alone, such as a
+  `serve` not started by launchd. With `--brain-only` it names a running strip and
+  doesn't stop it.
+- Unit-tested (`is_app_mode`). Not run live, for the reason in F10.
+
+**M1 review fixes (BR-3K: "fix first, only D1 is blocking"), 2026-10-13:**
+- **D1 (blocking).** `Bellwether --help`, `-h` and `--version` started the strip on the
+  default port, because every first argument starting with a dash went to the app.
+  - These three now go to the CLI under any argv[0]. `dispatch` tests cover them.
+  - Run live on a copy of the bundle with the new binary, with a test config as a guard:
+    `--help` and `-h` print the usage, `--version` prints "bellwether 0.1.0 (rust)", and
+    no strip starts.
+- **D2.** The F10 and stale-session guards were only in the CLI, so the app's
+  `--action main-app-register` skipped them.
+  - They now live in `login_items::preflight`, which `register` and `unregister` call
+    first, whichever path asks. The CLI also runs it for all items before registering
+    any.
+  - Unit-tested, including a check that both functions call it. Nothing was registered
+    to prove it.
+- **D3.** Doctor's "agent enabled but no brain answers … Launch Constraint Violation"
+  fired whenever `--port` differed from the agent's port.
+  - Doctor now takes the agent's own port: the plist's `--port`, else `port` in its
+    home's config.json, else 47417.
+  - When that differs from the port checked, it says "the brain agent listens on port
+    N, not M: run `bellwether doctor --port N`", with no F7 recovery. Unit-tested.
+- **D4.** With two `X-Bellwether-Token` headers, the first one won.
+  - Now anything but exactly one header is a 403. Node joins repeats into "a, b",
+    which never matches.
+  - Pinned by a crate test, and by a black-box test that runs against both brains (21
+    tests now).
+- **Smaller items:**
+  - `npm run test:cargo` runs `cargo test --manifest-path shell/src-tauri/Cargo.toml
+    --workspace` from the root (deviation 1).
+  - `npm run test:rust` doesn't build: a tester guard forbids `cargo build` in any npm
+    script. Instead the black-box suite refuses a default dev binary that is older than
+    the Rust sources, and says which `cargo build` to run (tried by touching a source).
+
+**Registered and removed on this Mac**, all under `com.fanzootechnology.bellwether`:
+- From ad-hoc copies, in the morning: the agent, registered and unregistered three
+  times; the main-app item, registered and unregistered at once, once.
+- From the signed build, in the evening: the agent, registered twice (the first time
+  hit F7) and unregistered after each.
+
+- The maintainer's by-hand run (2026-10-13) registered both items from the notarized
+  build and unregistered them in step 5 (off and off). The test strip was then stopped
+  by hand (F11).
+
+At the end:
+- `autostart status` said off and off;
+- `launchctl print` said `Could not find service`;
+- nothing listened on 47418.
+
+Also cleaned up:
+- the LaunchServices registrations of the scratch copies (`lsregister -u`);
+- the AppleEvents TCC decision for the id (`tccutil reset`).
+
+Left behind, which only the maintainer can clear:
+- BTM keeps disabled item records: the agent (`AC0B132C…`, from the Developer ID
+  build, harmless) and an app item `2.com.fanzootechnology.bellwether` made from an
+  ad-hoc scratch copy.
+- That app item might make the main-app login item from a Developer ID build hit the
+  same constraint failure as F7. By-hand step 1.6 would show it.
+- Clearing BTM records takes `sfltool resetbtm`. That resets every app's background
+  items and needs a restart, so it was not run.
+
 ### M2. Conformance harness and CI
 
 Builds:
@@ -949,7 +1337,10 @@ Builds:
 - the differential script;
 - the parity-table CI job;
 - cross-target `cargo check` of core and brain;
-- `test/DIVERGENCES.md`.
+- `test/DIVERGENCES.md`. It starts with what M1 already diverges on:
+  - a `/hook` body that hasn't arrived after 30 s gets an uncounted empty 204 from
+    Rust, where Node answers 408 (deviation 5);
+  - `/health` keys are written sorted (deviation 10).
 
 **Done when:**
 
@@ -966,6 +1357,16 @@ Builds, in `crates/core` and `crates/brain`: config and defaults, the token file
 normalise, redact, flock, publisher, persist, identity and labels, `/state` long-poll,
 `/control`, the CLI commands `serve`, `record`, `status [--watch] [--json]`,
 `mute`/`unmute`, `show`/`hide`, `replay`, `token init|rotate`.
+
+**Carried over from the M1 review (BR-3K):** the M1 brain accepts any number of
+connections. With more than about 250 idle connections open, new hooks waited up to
+the 10 s header timeout. M3 must:
+- bound connections, either with a cap that closes idle ones first or with a short
+  idle timeout;
+- add a test that holds 300 idle sockets while a tokened hook still gets its 204
+  quickly.
+
+M4's doctor probes go through the same listener.
 
 **Done when:**
 
@@ -1342,3 +1743,73 @@ The maintainer accepted these answers to the open questions above:
 28. Tauri configuration reference (`bundle.macOS.hardenedRuntime` defaults to true,
     `mainBinaryName`, `bundle.resources`, `createUpdaterArtifacts`):
     https://v2.tauri.app/reference/config/
+
+## Deviations
+
+Recorded by the developer while building M1 (2026-10-12). Each one: what the plan said,
+what is true, and what was done.
+
+1. **No move to `app/`, no root workspace yet.**
+   - Plan: the shell moves to `app/` in a workspace with `crates/core` and
+     `crates/brain`.
+   - True: the maintainer's live strip runs from
+     `shell/src-tauri/target/release/bellwether-shell`, and the Node CLI, the tests,
+     THIRD-PARTY and `.cargo/config.toml` all name `shell/src-tauri`. Moving the
+     directory moves that binary (and its Accessibility grant).
+   - Done: `shell/src-tauri` is the workspace root, and `crates/brain` is a member
+     that points back with `package.workspace`. There is one `Cargo.lock`, in the same
+     place. The move to `app/` waits until the live install has migrated off the
+     repository (M8). `crates/core` comes with M3.
+   - So plain `cargo test` from the repository root finds no workspace. Use `npm run
+     test:cargo`, or run cargo in `shell/src-tauri`.
+2. **The permanent id lives in an overlay, not in `tauri.conf.json`.**
+   - Plan: the id goes in `tauri.conf.json`.
+   - True: decision 2 keeps `local.bellwether` for dev builds, and a test pins it as
+     the identifier there.
+   - Done: `shell/src-tauri/tauri.dist.conf.json` (merged by `tauri build --config`)
+     holds the permanent id, `mainBinaryName`, the entitlements, `infoPlist` and the
+     agent plist. The merged Info.plist is `macos/Info.dist.plist` and is used only by
+     that overlay, so dev bundles are unchanged.
+3. **No legacy `X-Pasture-*` acceptance in the Rust brain.** M1 listed it; decision 14
+   ends it with the last repository release. A test pins that `X-Pasture-Token` is
+   refused.
+4. **Local notarization uses a notarytool keychain profile.**
+   - Plan: the bundler's `APPLE_API_*` environment variables.
+   - Done: `scripts/build-app.mjs` signs through the bundler, with the identity's
+     SHA-1 so no name carrying the Team ID is passed around. It then runs `xcrun
+     notarytool submit --keychain-profile bellwether --wait`, `stapler staple`,
+     `stapler validate` and `spctl`.
+   - CI (M9) can still use the API-key variables.
+   - `--adhoc` was added for local proving without the keychain.
+5. **A `/hook` body that doesn't arrive within 30 s.** Node's `requestTimeout` answers
+   408. A `HookAnswer` has only 204 and 403, so Rust logs it and answers an uncounted
+   204. This goes on the DIVERGENCES list in M2.
+6. **`brain-server.test.mjs` guard cases go to M3.** They test `/state` and
+   `/control`, which don't exist until M3. The `/hook` matrix is covered by the
+   black-box suite.
+7. **The Automation probe sends `count windows`, not `version`.** `version` sends no
+   Apple Event (F2), so D6 step 5 must not use it.
+8. **Logs with `BELLWETHER_HOME` set.** The brain writes `<home>/logs/brain.log`
+   instead of `~/Library/Logs/Bellwether/`, so a test home keeps everything inside it.
+9. **The local build is arm64 only.** Decision 3 says universal, but only
+   `aarch64-apple-darwin` is installed here. `--target universal-apple-darwin` needs
+   `rustup target add x86_64-apple-darwin`. Not done here; left for M9 and CI.
+10. **`/health` key order.** serde_json writes keys sorted. Node writes them in source
+    order. No consumer depends on the order, and the tests compare key sets.
+11. **THIRD-PARTY.** The four new crates (`httpdate`, `objc2-service-management`,
+    `objc2-security`, plus the path crate `bellwether-brain`) are listed. The
+    `@tauri-apps/cli` row used to depend on whether `shell/node_modules` was installed,
+    and installing the Tauri CLI to build the app made `--check` fail. Its licence is
+    now pinned in `scripts/third-party.mjs`, so both states render the same row.
+12. **`SMAppService` `notFound`** is also how macOS reports a service that was never
+    registered (F1). Doctor shows it as INFO with that meaning, not as a broken bundle.
+13. **Ad-hoc builds get their own id.** The plan has one id for every signed build.
+    F7 showed that a login item registered from an ad-hoc build under the permanent id
+    breaks the Developer ID build's. So `build-app.mjs --adhoc` uses
+    `com.fanzootechnology.bellwether.adhoc`, and `autostart install` refuses an ad-hoc
+    bundle that carries the permanent id.
+14. **`autostart` in an old login session** (F9) exits 2 with an explanation instead of
+    calling SMAppService. Doctor reports login items and Accessibility as unknown there.
+15. **Test builds can't register the app login item** (F10), and `autostart uninstall`
+    stops this bundle's running strip (F11). Neither is in D5; both are needed for
+    M6.

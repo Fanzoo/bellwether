@@ -5,7 +5,8 @@ import { describe, test } from 'node:test';
 import { FADE_IN_MS, FADE_OUT_MS, LINGER_MS, TUFT, fadeStep, frontmost, tuftPixels, tuftX } from '../shell/src/player/grass.mjs';
 import { familyExtent } from '../shell/src/player/lambs.mjs';
 import { familyHomes } from '../shell/src/player/layout.mjs';
-import { AGENT_DIR } from './helpers.mjs';
+import { checkLocatorLog } from '../brain/doctor.mjs';
+import { AGENT_DIR, tempDir } from './helpers.mjs';
 
 /** Milestone 10: grass while eating; sheep on the Dock's top edge. */
 
@@ -134,5 +135,32 @@ describe('M10-18: when the Dock can\'t hold them, the full-width layout; bad ext
     const lib = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'lib.rs'), 'utf8');
     assert.match(lib, /std::thread::spawn\(move \|\| loop \{\s*let \(trusted, dock\) = \(ax::trusted\(\), dock::read_prefs\(\)\);/);
     assert.match(lib, /\*dock_seen\.lock\(\)\.unwrap\(\)/, 'the privacy loop reads the last frame, never AX itself');
+  });
+});
+
+describe('doctor: a stale Accessibility entry after a rebuild', () => {
+  const run = (text) => {
+    const d = tempDir('gd-stale-');
+    fs.writeFileSync(path.join(d, 'shell.log'), text);
+    return checkLocatorLog(d).find((c) => c.name === 'dock');
+  };
+  const start = '1 bellwether-shell: starting: x\n';
+  test('granted in an earlier run, not granted now: WARN, remove the old bellwether-shell entry, then grant again', () => {
+    const stale = run(`${start}2 bellwether-shell: dock: Accessibility granted to this binary: x\n${start}4 bellwether-shell: dock: Accessibility not granted to this binary: the full-width strip is used\n`);
+    assert.equal(stale.status, 'WARN');
+    assert.match(stale.detail, /Privacy & Security > Accessibility still lists the old bellwether-shell entry/);
+    assert.match(stale.detail, /remove it with −/);
+    assert.match(stale.detail, /shell dock-permission/);
+    assert.match(stale.detail, /after every rebuild it must be given again/i);
+  });
+  test('granted before and now: PASS; never granted: INFO that still mentions a leftover entry', () => {
+    assert.equal(run(`${start}2 bellwether-shell: dock: Accessibility granted to this binary: x\n${start}4 bellwether-shell: dock: Accessibility granted to this binary: x\n`).status, 'PASS');
+    const never = run(`${start}2 bellwether-shell: dock: Accessibility not granted to this binary: x\n`);
+    assert.equal(never.status, 'INFO');
+    assert.match(never.detail, /remove it with − and grant again/);
+  });
+  test('the README says what to do when it was granted before and now says not granted', () => {
+    const readme = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');
+    assert.match(readme, /Remove the old `bellwether-shell`\s+entry \(select it, then −\), run `.\/bellwether shell dock-permission`/);
   });
 });

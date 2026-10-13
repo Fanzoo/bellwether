@@ -2,8 +2,13 @@
 //! it renders, does click-through, and owns the per-OS window work. It knows nothing
 //! about hooks.
 
+pub mod actions;
 mod brain;
+pub mod cli;
 mod clickthrough;
+pub mod dispatch;
+pub mod identity;
+pub mod login_items;
 mod ax;
 mod dock;
 mod locator;
@@ -302,6 +307,12 @@ fn flags() -> Flags {
 }
 
 pub fn run() {
+    // `Bellwether --action <name>`: the app's side of the CLI hand-off (actions.rs). One
+    // action, its outcome written down, then quit; no window, no brain.
+    let argv: Vec<String> = std::env::args().collect();
+    if let Some(i) = argv.iter().position(|a| a == "--action") {
+        std::process::exit(actions::run(argv.get(i + 1).map(String::as_str).unwrap_or("")));
+    }
     // `bellwether shell dock-permission`: ask macOS for Accessibility for this very binary
     // (the one the LaunchAgent runs), then quit. Only ever on the user's request.
     if std::env::args().any(|a| a == "--ax-prompt") {

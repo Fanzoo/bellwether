@@ -50,6 +50,9 @@ export function registryAvailable() {
   return regs.length > 0 && lockedCrates(fs.readFileSync(LOCK, 'utf8')).some((c) => regs.some((r) => fs.existsSync(path.join(r, `${c.name}-${c.version}`, 'Cargo.toml'))));
 }
 
+/** Licences npm lists for the dev tools, used when node_modules isn't installed. */
+const KNOWN_NPM_LICENCES = { '@tauri-apps/cli': 'Apache-2.0 OR MIT' };
+
 function render() {
   const regs = registryDirs();
   const crates = lockedCrates(fs.readFileSync(LOCK, 'utf8')).map((c) => {
@@ -61,7 +64,9 @@ function render() {
     const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
     for (const [kind, deps] of [['dependency', pkg.dependencies], ['devDependency', pkg.devDependencies]]) {
       for (const [name, version] of Object.entries(deps ?? {})) {
-        let licence = 'not installed here, so not read (npm lists @tauri-apps/cli as Apache-2.0 OR MIT)';
+        // The same line whether or not node_modules is installed (building the signed
+        // app installs the Tauri CLI; a fresh clone doesn't), so --check agrees on both.
+        let licence = KNOWN_NPM_LICENCES[name] ?? 'not installed here, so not read';
         try {
           licence = JSON.parse(fs.readFileSync(path.join(where, 'node_modules', name, 'package.json'), 'utf8')).license ?? 'not stated';
         } catch {}

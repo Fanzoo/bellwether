@@ -6,6 +6,10 @@ description = "bellwether's overlay: a transparent click-through strip of sheep,
 license = "MIT"
 publish = false
 
+# The brain crate (crates/brain) shares this workspace and its Cargo.lock.
+[workspace]
+members = [".", "../../crates/brain"]
+
 [lib]
 name = "bellwether_shell_lib"
 crate-type = ["rlib"]
@@ -21,6 +25,12 @@ serde_json = "1"
 sha2 = "0.10"
 libc = "0.2"
 ureq = { version = "=3.4.2", default-features = false, features = ["json"] }
+bellwether-brain = { path = "../../crates/brain" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSBundle"] }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
 [profile.release]
 codegen-units = 1

@@ -306,6 +306,12 @@ snout. It fades in, and fades out a moment after the sheep moves on.
   `bellwether shell restart`.
 - The grant belongs to the built binary, which is ad-hoc signed, so **after every
   rebuild it must be given again**. Until then, the full-width strip is used.
+- **Granted before, and now `doctor` (or `data/shell.log`) says "not granted"?** The
+  strip was rebuilt, and System Settings > Privacy & Security > Accessibility still
+  shows the old bellwether-shell entry, switched on. That entry belongs to the previous
+  binary, so switching it off and on does nothing. Remove the old `bellwether-shell`
+  entry (select it, then −), run `./bellwether shell dock-permission`, turn the new
+  entry on, and `bellwether shell restart`.
 
 **Two sessions in one project** get told apart in their labels and bubbles:
 `my-project · p2` and `my-project · p4` (the herdr pane). Otherwise it's the
@@ -547,6 +553,83 @@ A settings file that can't be written is reported before anything changes. If a 
 stops part-way, run the same command again: it finishes what is left.
 The token is never shown, and nothing changes without `--write`.
 
+## The signed app (in development)
+
+The distribution plan in `docs/` turns Bellwether into one signed, notarized
+`Bellwether.app`. Milestone 1 (a skeleton) is in the repository. Nothing in it replaces
+the setup above yet: its brain answers only `/hook` and `/health`, and its strip still
+needs the Node brain for sheep. Building it never touches the repository strip or its
+LaunchAgents.
+
+**One executable, three modes.** `Bellwether.app/Contents/MacOS/Bellwether`:
+- launched from Finder, it is the strip;
+- `Bellwether serve` is the Rust brain. It never starts Tauri, windows or WebKit;
+- called as `bellwether` (a lower-case symlink on PATH), or with a subcommand, it is
+  the CLI: `serve`, `doctor`, `autostart status|install|uninstall`, `version`, `help`.
+
+Its files live in `~/Library/Application Support/Bellwether/`. `BELLWETHER_HOME`
+overrides that folder; logs then go to `<home>/logs/`. The brain reads its token from
+`hook-token` there (one line, mode 0600), or from `BELLWETHER_HOOK_TOKEN`.
+
+**What you need once:**
+1. The **Developer ID Application** certificate, with its private key, in your login
+   keychain. `security find-identity -v -p codesigning` lists it.
+2. The first time `codesign` uses that key, macOS asks whether `codesign` may use it.
+   Choose **Always Allow** (it asks for your login keychain password). Until you do,
+   every build stops at signing.
+3. A notarytool keychain profile named `bellwether`, made from an App Store Connect
+   API key (Users and Access > Integrations; the `.p8` downloads only once):
+   `xcrun notarytool store-credentials bellwether --key <AuthKey.p8> --key-id <key id> --issuer <issuer id>`.
+4. The Tauri CLI, into `shell/node_modules` (gitignored):
+   `npm install --prefix shell --no-package-lock`.
+
+**Build:**
+
+```
+node scripts/build-app.mjs --notarize        # build, sign, notarize, staple, then check with spctl
+node scripts/build-app.mjs                   # build and sign only
+node scripts/build-app.mjs --adhoc           # no keychain: ad hoc, hardened, under its own id (…bellwether.adhoc)
+```
+
+- The app goes to `shell/src-tauri/target-dev/release/bundle/macos/Bellwether.app`.
+- `--test-port 47418 --test-home <dir>` makes a test build whose bundled brain agent
+  runs on that port with that home, so it can't collide with a brain on 47417.
+- The script refuses `--test-port 47417`, and fails if
+  `shell/src-tauri/target/release/bellwether-shell` changed during the build.
+- `BELLWETHER_SIGNING_IDENTITY` picks one identity (a name or SHA-1) when there are
+  several. `BELLWETHER_NOTARY_PROFILE` names another notarytool profile.
+- The Team ID is never written to a file, and the script masks it in what it prints.
+
+**Check and try it:**
+
+```
+A=shell/src-tauri/target-dev/release/bundle/macos/Bellwether.app
+codesign --verify --deep --strict -vvv "$A"
+codesign -d --entitlements - "$A"            # only com.apple.security.automation.apple-events
+spctl -a -vvv -t exec "$A"                   # after --notarize
+"$A/Contents/MacOS/Bellwether" doctor --port 47418
+"$A/Contents/MacOS/Bellwether" autostart install --write --brain-only   # the brain at login (SMAppService)
+"$A/Contents/MacOS/Bellwether" autostart uninstall --write --brain-only
+npm run test:rust                            # the /hook black-box suite against the Rust brain (debug build)
+```
+
+`autostart` registers the brain's login agent, which is the plist inside the bundle at
+`Contents/Library/LaunchAgents/`, and the app itself as a login item. It never writes
+to `~/Library/LaunchAgents`. `--brain-only` leaves the app login item alone, and
+`--via-app` hands the call to the app instead. It refuses an ad-hoc build carrying the
+permanent id: macOS would keep that registration's launch constraint and then kill the
+Developer ID build's brain ("Launch Constraint Violation"). If that happens anyway,
+`autostart uninstall --write`, then `install --write` again.
+
+More about `autostart`:
+- A test build (`--test-port`/`--test-home`) may only use `--brain-only`. The app
+  started at login gets no environment, so its strip would use the live defaults
+  (port 47417).
+- `uninstall --write` also stops this bundle's running strip.
+- In a terminal opened before your last login (a herdr or tmux server that outlived a
+  logout), macOS won't answer about login items. `autostart` and `doctor` then say so:
+  open a new terminal window.
+
 ## Licensing
 
 MIT (`LICENSE`), for this repository's code. `NOTICE` covers:
@@ -621,8 +704,14 @@ Windows (not built yet): `bellwether.cmd`. A symlink to `bellwether` on your PAT
 ## Tests
 
 ```
-npm test
+npm test               # the JS suite
+npm run test:cargo     # the Rust tests (shell and brain), from the repository root
+npm run test:rust      # the /hook black-box suite against the Rust brain (debug build;
+                       # it says when to rebuild: cargo build --manifest-path shell/src-tauri/Cargo.toml)
 ```
+
+`cargo test` on its own has to be run in `shell/src-tauri`, where the Cargo workspace
+is; from the root, use `npm run test:cargo`.
 
 Runs serially (`--test-concurrency=1`): several suites use live sockets and timing.
 Offline and self-contained. The installer tests only ever use temp copies of an
