@@ -556,20 +556,35 @@ The token is never shown, and nothing changes without `--write`.
 ## The signed app (in development)
 
 The distribution plan in `docs/` turns Bellwether into one signed, notarized
-`Bellwether.app`. Milestone 1 (a skeleton) is in the repository. Nothing in it replaces
-the setup above yet: its brain answers only `/hook` and `/health`, and its strip still
-needs the Node brain for sheep. Building it never touches the repository strip or its
-LaunchAgents.
+`Bellwether.app`. Milestones 1 (a skeleton) and 3 (the brain's state) are in the
+repository. Nothing in it replaces the setup above yet: its brain now keeps the flock and
+answers `/state` and `/control`, but its strip still reads the Node brain, and the hook
+installer and doctor are milestone 4. Building it never touches the repository strip or
+its LaunchAgents.
 
 **One executable, three modes.** `Bellwether.app/Contents/MacOS/Bellwether`:
 - launched from Finder, it is the strip;
 - `Bellwether serve` is the Rust brain. It never starts Tauri, windows or WebKit;
 - called as `bellwether` (a lower-case symlink on PATH), or with a subcommand, it is
-  the CLI: `serve`, `doctor`, `autostart status|install|uninstall`, `version`, `help`.
+  the CLI: `serve`, `record`, `status [--watch] [--json]`, `mute`/`unmute`, `show`/`hide`,
+  `replay`, `token init|rotate`, `doctor`, `autostart status|install|uninstall`,
+  `version`, `help`. The first seven take the Node CLI's flags and print its output.
 
-Its files live in `~/Library/Application Support/Bellwether/`. `BELLWETHER_HOME`
-overrides that folder; logs then go to `<home>/logs/`. The brain reads its token from
-`hook-token` there (one line, mode 0600), or from `BELLWETHER_HOOK_TOKEN`.
+Its files live in `~/Library/Application Support/Bellwether/`: `hook-token`, `config.json`
+(optional; every key has a default), `state.json`, `shell-state.json` and `recordings/`.
+`BELLWETHER_HOME` overrides that folder (logs then go to `<home>/logs/`), and
+`BELLWETHER_CONFIG` names another config file. The brain reads its token from `hook-token`
+(one line, mode 0600), or from `BELLWETHER_HOOK_TOKEN`:
+
+```
+bellwether token init                      # make hook-token, only if there is none (never printed)
+bellwether token init --from <repo>/.env   # or take the repository install's token, so its hooks keep working
+bellwether token init --force              # replace a token file that is there but unusable (init refuses, exit 3)
+bellwether token rotate --write            # a new token; a running brain switches and accepts the old one for a minute
+```
+
+`token rotate --write` refuses while hook entries in `~/.claude/settings.json` carry the
+current token: rewriting them is the installer's job, which comes with milestone 4.
 
 **What you need once:**
 1. The **Developer ID Application** certificate, with its private key, in your login
@@ -690,7 +705,9 @@ Windows (not built yet): `bellwether.cmd`. A symlink to `bellwether` on your PAT
   notification's message. It is redacted and cut to `bubble.maxChars`. Redaction
   covers anything named like a credential (`GITHUB_TOKEN=`, `"password":`,
   `--password x`, `?access_token=`, quoted values with spaces), Authorization headers,
-  `curl -u user:pass`, `mysql -pSECRET`, URL credentials, common token formats, and
+  `curl -u user:pass`, `mysql -pSECRET`, URL credentials (everything after the user name up
+  to the last `@` before the host, so a password containing `@` or `:` is hidden whole;
+  an `@` in the path or query is left alone), common token formats, and
   your `bubble.redactPatterns`. Only the secret becomes `•••`; the name stays, as in
   `DB_PASSWORD=•••`. Control and bidi characters are stripped. `bubble.detail:
   "tool"` shows only `Bash?`. Recordings never contain this text, and replaying a real
@@ -721,9 +738,16 @@ oracle until the Rust brain replaces it:
   `test/helpers.mjs`. `BELLWETHER_IMPL=rust` runs `$BELLWETHER_BIN` instead of
   `brain/cli.mjs`; by default that is the dev build
   `shell/src-tauri/target-dev/debug/bellwether-shell`, which must not be older than its
-  sources. Under rust the helper gives the binary a temp `BELLWETHER_HOME` whose
-  `config.json` has the test port, refuses anything that would use port 47417, and never
-  runs `autostart` (it would register login items on this Mac).
+  sources. Under rust the helper makes the test's data dir the binary's
+  `BELLWETHER_HOME` and passes the test's config as `BELLWETHER_CONFIG`, refuses anything
+  that would use port 47417, and never runs `autostart` (it would register login items on
+  this Mac).
+- Tests that check the brain's parts in process take them from `test/impl.mjs`: brain/*.mjs
+  under node, and under rust the Rust brain, called synchronously through its hidden
+  `__session` command (one call per line, over two FIFOs); `startBrain` is then a Rust
+  `serve` process. A test with nothing to check in the Rust brain yet (doctor and the hook
+  installer before milestone 4, the Node shim, the `.env` writer) is marked
+  `notUnderRust(reason)` and counts as skipped under rust, never as passed.
 - `npm run test:rust` (`test/conformance.mjs`) runs those test files against both brains
   and prints the parity table: test file, node, rust. `test/conformance.json` says which
   milestone turns each row green; the run fails only when a node cell is red or a row the
@@ -734,10 +758,11 @@ oracle until the Rust brain replaces it:
   cargo build --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance
   ```
 
-- The `conformance` feature adds hidden `__` commands (`__env`, and `__redact`,
-  `__normalise`, `__fixture`, `__json` and `__diff` as their milestones port them) that
-  take cases as JSON lines. No release build has it: `Bellwether __fixture` answers
-  "unknown command" with exit 1.
+- The `conformance` feature adds hidden `__` commands that take cases as JSON lines:
+  `__env`, `__redact`, `__normalise` and `__fixture` (ported), `__json` and `__diff`
+  (milestone 4), and `__session` (the bridge above). It also lets `serve` read test timings
+  from the environment. No release build has it: `Bellwether __fixture` answers "unknown
+  command" with exit 1.
 - The shared vectors in `test/fixtures/` (`redact-`, `normalise-`, `config-` and
   `diff-vectors.json`, `installer-vectors/`) hold cases and the Node brain's answers. The
   Node tests and the cargo tests read the same files. `node test/fixtures/build-vectors.mjs`
@@ -751,8 +776,9 @@ oracle until the Rust brain replaces it:
 **CI** (`.github/workflows/ci.yml`, GitHub Actions, no secrets): the Node suite and the
 vector check, the cargo tests with and without the `conformance` feature, the parity table
 (published as the job summary) and the differential, a release build's refusal of
-`__fixture`, and `cargo check` of the platform-neutral crate for Linux and Windows. Before
-the suite, CI does what a developer's checkout already has: `cargo fetch` (every
+`__fixture`, and `cargo check` of the platform-neutral crates (`crates/core`,
+`crates/brain`) for Linux and Windows. Before the suite, CI does what a developer's
+checkout already has: `cargo fetch` (every
 platform's crates, whose licences THIRD-PARTY.md lists), a debug build of the strip, and
 `pets fetch` (the pinned, hash-checked art; never committed). The redaction time budgets
 are written for a developer's Mac and scale with the machine's speed, measured in the same

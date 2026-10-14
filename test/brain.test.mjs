@@ -2,11 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { validateConfig } from '../brain/config.mjs';
-import { PALETTE_UPGRADED, withDefaults } from '../brain/defaults.mjs';
-import { fingerprint, normalise } from '../brain/normalise.mjs';
-import { createRecorder } from '../brain/server.mjs';
-import { AGENT_DIR, FIXTURES, readVectors, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, IMPL, readVectors, tempDir } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { PALETTE_UPGRADED, createRecorder, fingerprint, guardOutFile, isBellwetherRecording, normalise, validateConfig, withDefaults } from './impl.mjs';
 
 describe('package', () => {
   test('has no dependencies', () => {
@@ -16,8 +14,11 @@ describe('package', () => {
   });
 
   test('no brain module opens transcript_path', () => {
-    for (const f of fs.readdirSync(path.join(AGENT_DIR, 'brain'))) {
-      assert.doesNotMatch(fs.readFileSync(path.join(AGENT_DIR, 'brain', f), 'utf8'), /transcript_path/, f);
+    // The brain under test: brain/*.mjs, or the Rust brain's sources.
+    for (const d of IMPL === 'rust' ? ['crates/core/src', 'crates/brain/src'] : ['brain']) {
+      for (const f of fs.readdirSync(path.join(AGENT_DIR, d))) {
+        assert.doesNotMatch(fs.readFileSync(path.join(AGENT_DIR, d, f), 'utf8'), /transcript_path/, f);
+      }
     }
   });
 });
@@ -33,6 +34,16 @@ describe('config', () => {
     }
   };
   const want = (v) => (v.ok ? (v.step === 'withDefaults' ? { ok: true, effective: v.effective, paletteUpgraded: v.paletteUpgraded } : { ok: true }) : { ok: false, exitCode: v.exitCode, error: v.error });
+  // test/DIVERGENCES.md: for a pattern that doesn't compile, the Rust message names the
+  // pattern the same way, but the reason in brackets is the regex crate's, not V8's.
+  const reasonDiffers = (v) => IMPL === 'rust' && !v.ok && / is not a valid regular expression \(/.test(v.error);
+  const same = (got, v) => {
+    if (!reasonDiffers(v)) return assert.deepEqual(got, want(v), v.name);
+    const head = v.error.slice(0, v.error.indexOf(' is not a valid regular expression (') + ' is not a valid regular expression ('.length);
+    assert.equal(got.ok, false, v.name);
+    assert.equal(got.exitCode, v.exitCode, v.name);
+    assert.ok(got.error.startsWith(head) && got.error.endsWith(')') && got.error.length > head.length + 1, `${v.name}: ${got.error}`);
+  };
 
   test('the example config validates', () => {
     const example = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
@@ -40,7 +51,7 @@ describe('config', () => {
     const v = readVectors('config', 'ports and hosts').find((x) => x.name === 'the example config');
     assert.deepEqual(v.config, example, 'the vector holds today\'s config.example.json');
     // Defaults merged: every shared case answers as its vector says.
-    for (const d of readVectors('config', 'defaults')) assert.deepEqual(answer(d), want(d), d.name);
+    for (const d of readVectors('config', 'defaults')) same(answer(d), d);
   });
 
   test('a host key anywhere is rejected with exit 3', () => {
@@ -49,14 +60,14 @@ describe('config', () => {
     }
     const hosts = readVectors('config', 'ports and hosts').filter((v) => /host/i.test(v.name));
     assert.ok(hosts.length >= 3 && hosts.every((v) => !v.ok && v.exitCode === 3 && /not configurable/.test(v.error)));
-    for (const v of hosts) assert.deepEqual(answer(v), want(v), v.name);
+    for (const v of hosts) same(answer(v), v);
   });
 
   test('a bad port is rejected', () => {
     for (const port of [undefined, '47417', 80, 70000, 1.5]) {
       assert.throws(() => validateConfig({ port }), (e) => e.exitCode === 3);
     }
-    for (const v of readVectors('config', 'ports and hosts').filter((x) => !/host|example/i.test(x.name))) assert.deepEqual(answer(v), want(v), v.name);
+    for (const v of readVectors('config', 'ports and hosts').filter((x) => !/host|example/i.test(x.name))) same(answer(v), v);
   });
 });
 
@@ -143,7 +154,6 @@ describe('fixtures', () => {
 
 describe('record --out guard', () => {
   test('guardOutFile: empty file and bellwether recordings may be appended to; anything else is refused', async () => {
-    const { guardOutFile, isBellwetherRecording } = await import('../brain/outfile.mjs');
     const dir = tempDir();
     const rec = path.join(dir, 'r.jsonl');
     const r = createRecorder(rec);

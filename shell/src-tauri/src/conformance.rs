@@ -12,21 +12,31 @@
 //!   __redact      milestone 3: {"text", "maxChars", "redactPatterns"} -> {"value"}
 //!   __normalise   milestone 3: {"payload", "headers", "receivedAt", "clean"} -> the HookEvent
 //!   __fixture     milestone 3: a fixture's JSON lines -> its transition lines
+//!   __session     the test bridge (test/impl.mjs): one JSON call per line, answered in
+//!                 order, over two FIFOs (`--in <path> --out <path>`) so a Node test can
+//!                 call the Rust brain's pure parts synchronously: the cleaner, the
+//!                 normaliser, the config, a Flock or a publisher by handle, and so on
 //!   __json        milestone 4: settings bytes -> the lossless round trip
 //!   __diff        milestone 4: {"old", "new"} -> the unified diff
 //!
 //! An area that isn't ported yet exits 1 with "not ported yet" on stderr, which the
 //! harness reports as such; a release build says "unknown command" instead.
 
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 
 use bellwether_brain::exit;
+use bellwether_core::json::{self, Js, Obj};
+use bellwether_core::redact::Cleaner;
 
 /// Every area, and the milestone that ports it (None: ported).
-pub(crate) const AREAS: [(&str, Option<&str>); 6] = [("env", None), ("redact", Some("3")), ("normalise", Some("3")), ("fixture", Some("3")), ("json", Some("4")), ("diff", Some("4"))];
+pub(crate) const AREAS: [(&str, Option<&str>); 6] = [("env", None), ("redact", None), ("normalise", None), ("fixture", None), ("json", Some("4")), ("diff", Some("4"))];
 
 /// `command` is the whole word (`__env`). Returns the exit code.
 pub fn run(command: &str, args: &[String]) -> i32 {
+    if command == "__session" {
+        return crate::conformance_session::run(args);
+    }
     if let Some(a) = args.first() {
         eprintln!("bellwether: {command} takes no arguments (got {a:?}); it reads JSON lines on stdin");
         return exit::BAD_CONFIG;
@@ -41,6 +51,9 @@ pub fn run(command: &str, args: &[String]) -> i32 {
             exit::OK
         }
         "__env" => each_line(env_case),
+        "__redact" => each_js_line(redact_case),
+        "__normalise" => each_js_line(normalise_case),
+        "__fixture" => each_js_line(fixture_case),
         _ => match AREAS.iter().find(|(name, _)| command.strip_prefix("__") == Some(*name)) {
             Some((_, Some(m))) => {
                 eprintln!("bellwether: {command} is not ported yet (milestone {m}); this build has the conformance feature");
@@ -79,6 +92,104 @@ fn each_line(answer: fn(&str) -> serde_json::Value) -> i32 {
     exit::OK
 }
 
+/// Like each_line, for the areas whose cases carry JS strings (lone surrogates
+/// included): the line is read and the answer written with the JS-faithful JSON of
+/// crates/core, never serde_json.
+fn each_js_line(mut answer: impl FnMut(&Js) -> Js) -> i32 {
+    let stdin = std::io::stdin();
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    for line in stdin.lock().lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("bellwether: reading stdin: {e}");
+                return exit::UNEXPECTED;
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let reply = match json::parse(&line) {
+            Ok(case) => answer(&case),
+            Err(e) => Js::Obj(Obj::new().with("error", format!("not a JSON case: {e}"))),
+        };
+        if writeln!(out, "{}", json::stringify(&reply)).is_err() {
+            return exit::UNEXPECTED;
+        }
+    }
+    if out.flush().is_err() {
+        return exit::UNEXPECTED;
+    }
+    exit::OK
+}
+
+/// makeTextCleaner's options, as a case gives them: `{maxChars, redactPatterns}`.
+fn cleaner_from(o: &Js, cache: &mut HashMap<String, Result<std::rc::Rc<Cleaner>, String>>) -> Result<std::rc::Rc<Cleaner>, String> {
+    let key = json::stringify(o);
+    cache
+        .entry(key)
+        .or_insert_with(|| {
+            let max = o.get("maxChars").as_num().filter(|n| *n >= 0.0).unwrap_or(60.0) as usize;
+            let patterns: Vec<String> = match o.get("redactPatterns") {
+                Js::Arr(a) => a.iter().map(|p| p.as_str().unwrap_or("").to_string()).collect(),
+                _ => Vec::new(),
+            };
+            Cleaner::new(max, &patterns).map(std::rc::Rc::new).map_err(|e| e.to_string())
+        })
+        .clone()
+}
+
+thread_local! {
+    static CLEANERS: std::cell::RefCell<HashMap<String, Result<std::rc::Rc<Cleaner>, String>>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// `{"text", "maxChars", "redactPatterns"}` -> `{"value"}`, or `{"error": true, "message"}`
+/// when a pattern doesn't compile (the Node answer's shape).
+pub fn redact_case(case: &Js) -> Js {
+    let cleaner = CLEANERS.with(|c| cleaner_from(case, &mut c.borrow_mut()));
+    match cleaner {
+        Ok(c) => match case.get("text") {
+            Js::Str(t) => Js::Obj(Obj::new().with("value", c.clean(t))),
+            _ => Js::Obj(Obj::new()),
+        },
+        Err(message) => Js::Obj(Obj::new().with("error", true).with("message", message)),
+    }
+}
+
+/// `{"payload", "headers", "receivedAt", "clean"}` -> the HookEvent, as Node writes it.
+pub fn normalise_case(case: &Js) -> Js {
+    let headers = case.get("headers").as_obj().cloned().unwrap_or_default();
+    let received_at = case.get("receivedAt").as_num().unwrap_or(f64::NAN);
+    let clean = match case.get("clean") {
+        Js::Obj(_) => match CLEANERS.with(|c| cleaner_from(case.get("clean"), &mut c.borrow_mut())) {
+            Ok(c) => Some(c),
+            Err(e) => return Js::Obj(Obj::new().with("error", e)),
+        },
+        _ => None,
+    };
+    bellwether_core::normalise::normalise(case.get("payload"), &headers, received_at, clean.as_deref()).to_js()
+}
+
+/// `{"name", "lines", "snapshots"?}` -> `{"transitions"}` (and `"snapshots"` when asked):
+/// the fixture through the Rust reducer with the Node runner's fake clock.
+pub fn fixture_case(case: &Js) -> Js {
+    let lines = case.get("lines").as_arr().cloned().unwrap_or_default();
+    let config = match case.get("config") {
+        Js::Obj(_) => match bellwether_core::config::with_defaults(case.get("config")) {
+            Ok(m) => m.config,
+            Err(e) => return Js::Obj(Obj::new().with("error", e.message)),
+        },
+        _ => bellwether_core::config::Config::defaults().merged,
+    };
+    let keep = case.get("snapshots").truthy();
+    let run = bellwether_core::fixture::run_fixture(&lines, &config, 250.0, 3000.0, keep);
+    let mut out = Obj::new().with("transitions", Js::Arr(run.transitions));
+    if keep {
+        out.set("snapshots", Js::Arr(run.snapshots));
+    }
+    Js::Obj(out)
+}
+
 fn error(message: impl std::fmt::Display) -> serde_json::Value {
     serde_json::json!({ "error": message.to_string() })
 }
@@ -113,7 +224,7 @@ mod tests {
 
     #[test]
     fn unported_areas_say_so() {
-        assert_eq!(run("__redact", &[]), exit::UNEXPECTED);
+        assert_eq!(run("__fixture_nope", &[]), exit::UNEXPECTED);
         assert_eq!(run("__unknown", &[]), exit::UNEXPECTED);
         assert_eq!(run("__env", &["x".into()]), exit::BAD_CONFIG);
     }

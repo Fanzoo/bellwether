@@ -3,5 +3,5 @@
 //! `Bellwether serve` (the word `serve` itself is optional). Never shipped.
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).skip_while(|a| a == "serve").collect();
-    std::process::exit(bellwether_brain::cli_serve(&args));
+    std::process::exit(bellwether_brain::cli::run("serve", &args));
 }

@@ -1351,7 +1351,7 @@
       "text": "curl https://u%40x:p@ss:w0rd@h.test/",
       "maxChars": 60,
       "redactPatterns": [],
-      "expected": "curl https://u%40x:•••@ss:w0rd@h.test/"
+      "expected": "curl https://u%40x:•••@h.test/"
     },
     {
       "group": "unicode and controls",
@@ -1496,6 +1496,176 @@
       "maxChars": 60,
       "redactPatterns": [],
       "expected": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy password…"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "a password containing @ and :",
+      "text": "curl https://u%40x:p@ss:w0rd@h.test/",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://u%40x:•••@h.test/",
+      "mustNotContain": "ss:w0rd"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "@ in the path is not userinfo",
+      "text": "curl https://h.test/users/bob@example.com",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://h.test/users/bob@example.com",
+      "mustEqual": "curl https://h.test/users/bob@example.com"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "@ in the query is not userinfo",
+      "text": "curl \"https://h.test/x?email=a:b@c.test\"",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl \"https://h.test/x?email=a:b@c.test\"",
+      "mustEqual": "curl \"https://h.test/x?email=a:b@c.test\""
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "an email in the path after real credentials",
+      "text": "git clone https://bob:pw@h.test/bob@example.com/repo",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "git clone https://bob:•••@h.test/bob@example.com/repo",
+      "mustNotContain": "pw@"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "two URLs on one line",
+      "text": "curl https://a:pw1@h1.test/x https://c:p@w2@h2.test/y",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://a:•••@h1.test/x https://c:•••@h2.test/y",
+      "mustNotContain": "w2@"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "two URLs separated by a comma",
+      "text": "echo https://a:p@1@h1.test,https://b:q@2@h2.test",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "echo https://a:•••@h1.test,https://b:•••@h2.test",
+      "mustNotContain": "q@2"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "a percent-encoded @ in the password",
+      "text": "curl https://u:p%40ss@h.test/",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://u:•••@h.test/",
+      "mustNotContain": "p%40ss"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "an unencoded @ in the user name",
+      "text": "curl https://u@x:secret@h.test/",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://u@x:•••@h.test/",
+      "mustNotContain": "secret"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "no path, empty user, @ in the password",
+      "text": "export REDIS_URL=redis://:pa@ss@host:6379",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "export REDIS_URL=redis://:•••@host:6379",
+      "mustNotContain": "pa@ss"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "a port and a query without a path",
+      "text": "curl https://u:p@ss@h.test:8443?x=1",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://u:•••@h.test:8443?x=1",
+      "mustNotContain": "p@ss"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "a password longer than the old 500 limit",
+      "text": "curl https://u:p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@p@x@h.test/",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://u:•••@h.test/",
+      "mustNotContain": "p@p@"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "user name only: left alone (token shapes have their own rules)",
+      "text": "git clone https://git@h.test/x",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "git clone https://git@h.test/x",
+      "mustEqual": "git clone https://git@h.test/x"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "no scheme separator: scp syntax is not a URL",
+      "text": "scp f.txt user@host:/tmp/",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "scp f.txt user@host:/tmp/",
+      "mustEqual": "scp f.txt user@host:/tmp/"
+    },
+    {
+      "group": "URL credentials",
+      "test": "tester-m2.test.mjs",
+      "name": "an empty password is left alone",
+      "text": "curl https://u:@h.test/",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://u:@h.test/",
+      "mustEqual": "curl https://u:@h.test/"
+    },
+    {
+      "group": "URL credentials, known gaps",
+      "test": "tester-m2.test.mjs",
+      "name": "an unencoded / in the password ends the authority, so it leaks",
+      "text": "curl https://u:pa/ss@h.test/",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://u:pa/ss@h.test/",
+      "knownGap": "leak"
+    },
+    {
+      "group": "URL credentials, known gaps",
+      "test": "tester-m2.test.mjs",
+      "name": "whitespace in the password ends the authority, so it leaks",
+      "text": "curl https://u:pa ss@h.test/",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl https://u:pa ss@h.test/",
+      "knownGap": "leak"
+    },
+    {
+      "group": "URL credentials, known gaps",
+      "test": "tester-m2.test.mjs",
+      "name": "an @ in a query right after host:port is read as userinfo, so the host is hidden",
+      "text": "curl http://localhost:3000?email=me@x.io",
+      "maxChars": 500,
+      "redactPatterns": [],
+      "expected": "curl http://localhost:•••@x.io",
+      "knownGap": "over-redaction"
     },
     {
       "group": "user patterns",

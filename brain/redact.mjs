@@ -99,6 +99,34 @@ function scanReplace(re, decide) {
 }
 
 /**
+ * user:password@ in a URL. The userinfo runs from `scheme://` to the LAST `@` before the
+ * host: the authority ends at the first `/` or whitespace, so an `@` in the path or the
+ * query is never taken for it. Everything from the first `:` of the userinfo to that `@`
+ * is the password, `@` and `:` in it included (`https://u:p@ss@h/` becomes
+ * `https://u:•••@h/`); the user name stays readable. A userinfo without `:`, or with an
+ * empty password, is left alone. A plain scan, linear: each `://` reads only up to the
+ * next `/`, which ends any `://` after it. The Rust port does the same (redact.rs).
+ */
+function urlCredentials(text) {
+  let out = '';
+  let last = 0;
+  for (let i = text.indexOf('://'); i !== -1; i = text.indexOf('://', i + 1)) {
+    let colon = -1;
+    let at = -1;
+    for (let j = i + 3; j < text.length && text[j] !== '/' && !SPACE.test(text[j]); j++) {
+      if (text[j] === '@') at = j;
+      else if (text[j] === ':' && colon === -1) colon = j;
+    }
+    if (colon !== -1 && at !== -1 && colon + 1 < at) {
+      out += text.slice(last, colon + 1) + REDACTED;
+      last = at;
+    }
+  }
+  return out + text.slice(last);
+}
+const SPACE = /\s/;
+
+/**
  * Bare base64 credentials are best effort: a standalone run of base64 characters is
  * redacted only when it looks like encoded bytes rather than a word, a path or a
  * hash: 16+ characters, upper and lower case and digits, not hex, padded with = or
@@ -149,8 +177,8 @@ export const BUILTIN = [
   [/(\baws\s+configure\s+set\s+)([A-Za-z0-9_.-]{1,80})(\s{1,20})(\S+)/g, (m, lead, name, sep, value) => (isSecretName(name) ? `${lead}${name}${sep}${REDACTED}` : m)],
   // vault login <token>
   [/(\bvault\s+login\s{1,20})(?!-)\S+/g, '$1•••'],
-  // user:password@ in a URL
-  [/(:\/\/[^/\s:@]{0,200}:)[^/\s@]{1,500}(?=@)/g, '$1•••'],
+  // user:password@ in a URL, up to the last @ before the host (urlCredentials)
+  [null, urlCredentials],
   // Token formats recognisable on their own.
   [/\b(?:sk|pk|rk)[-_](?:live_|test_)?[A-Za-z0-9_-]{16,}/g, '•••'],
   [/\bxox[abposr]-[A-Za-z0-9-]+/g, '•••'],

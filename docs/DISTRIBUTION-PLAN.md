@@ -1511,6 +1511,202 @@ M4's doctor probes go through the same listener.
 - `replay --burst` against the Rust brain shows a `/hook` p99 no worse than the Node
   brain's on the same machine.
 
+#### M3 status (developer, 2026-10-13): done locally; CI not yet run
+
+Built:
+- **`crates/core`** (new; deviation 24), platform-neutral, no runtime:
+  - `jsstr.rs`: JS strings kept as UTF-16 code units, one `char` each, so lengths, slices,
+    sort order and regular-expression bounds count code units as Node does, and a lone
+    surrogate survives (deviation 25);
+  - `json.rs`: `JSON.parse` / `JSON.stringify` over JS values: JS key order, JS number
+    formatting, `undefined` left out, lone surrogates as `\udxxx`, a 1000-level depth limit;
+  - `redact.rs` (normalise, redact, truncate, user patterns), `normalise.rs`, `config.rs`,
+    `flock.rs` (identity and labels included), `fixture.rs` (the golden-fixture runner),
+    `publisher.rs` (the throttle, clock-free), `persist.rs`, `token.rs`, `envfile.rs`,
+    `shellstate.rs`, `status.rs`, `replay.rs` (rebuild, burst), `mask.rs`, `outfile.rs`
+    (`record --out`), `cliargs.rs` (Node's strict flag rules);
+  - tests: 23 unit tests, `tests/vectors.rs` (every redact, normalise and config vector),
+    `tests/fixtures.rs` (the 21 fixtures, byte for byte).
+- **`crates/brain`**: the state machine's task (`actor.rs`: flock, publisher, recorder,
+  state.json, timers), `/state` long-poll and `/control` (`state.rs`), the connection bounds
+  (`conns.rs`), a blocking client (`client.rs`), and the commands `serve`, `record`,
+  `status [--watch] [--json]`, `mute`/`unmute`, `show`/`hide`, `replay` and
+  `token init|rotate` (`cli.rs`). `/hook` hands events over with a `try_send` (`dropped`
+  counts a full queue). New cargo tests: `/state` and `/control`, `reload-token`, the cap,
+  the idle timeout (`tests/http.rs`), and `token init` / `rotate` (`tests/token_cli.rs`).
+- **The `__` commands**: `__redact`, `__normalise` and `__fixture` are real; `__json` and
+  `__diff` stay stubs (M4). `__session` is new: the test bridge (deviation 26).
+- **The redaction fix** (maintainer's decision for M3), in both brains: a URL's userinfo
+  runs from `scheme://` to the last `@` before the host (the authority ends at the first `/`
+  or whitespace). Everything from the userinfo's first `:` to that `@` is redacted; the user
+  name stays. It is a plain scan, `urlCredentials` in brain/redact.mjs and `url_credentials`
+  in redact.rs. **A behaviour change of the Node brain**, live for the maintainer only when
+  his brain restarts. The vector "URL credentials with odd characters" now expects
+  `curl https://u%40x:•••@h.test/` (it pinned the leak `…:•••@ss:w0rd@h.test/`), and a new
+  group "URL credentials" has 14 vectors: `@` and `:` in the password, `@` in the path and
+  in the query, an email in the path after real credentials, two URLs on a line (space- and
+  comma-separated), a percent-encoded `@`, an `@` in the user name, no path, a port and query
+  without a path, a password past the old 500 limit, and three left alone (user name only,
+  `scp` syntax, an empty password). No other vector changed. The two brains agree, so there
+  is no DIVERGENCES entry. tester-m2 has a new test reading the group.
+- **The connection cap** (from the M1 review; DIVERGENCES 11): at start the brain raises its
+  soft descriptor limit (to at most 8192); a connection with nothing in flight that sends
+  nothing for 5 s is closed; past 1024 connections (fewer under a lower limit) a new one
+  closes the one idle longest, else the oldest `/state` long poll; a hook in flight is never
+  closed.
+- **Wiring** (`test/impl.mjs`, deviation 26): the M3 files take the brain from
+  `test/impl.mjs`, which is brain/*.mjs under node and the Rust brain under rust;
+  `test/fixture-runner.mjs` too, so the JS runner drives the Rust reducer. Tests that have
+  nothing in the Rust brain yet say so with `notUnderRust(reason)` and count as skipped
+  (deviation 27).
+- CI: the cross-target `cargo check` covers `-p bellwether-core -p bellwether-brain`
+  (closes deviation 16). `crates/core` is in the workspace; THIRD-PARTY.md lists
+  `unicode-normalization` 0.1.25 and `tokio-macros` 2.7.2 (MIT OR Apache-2.0, MIT).
+
+Progress against **Done when** (run on this Mac, 2026-10-13):
+- [x] Under rust, all 12 files M3 names pass (parity table, `npm run test:rust`; current is
+  M3, so they are required now):
+
+  | file | node | rust |
+  |---|---|---|
+  | hook-route-blackbox (M1) | pass 23/23 | pass 23/23 |
+  | brain-server | pass 22/22 | pass 22/22 |
+  | brain | pass 32/32 | pass 32/32 |
+  | flock | pass 78/78 | pass 78/78 |
+  | palette-labels | pass 9/9 | pass 8/8, 1 skipped * |
+  | privacy | pass 7/7 | pass 6/6, 1 skipped * |
+  | tester-m1-reverify | pass 70/70 | pass 2/2, 68 skipped |
+  | tester-m1 | pass 40/40 | pass 10/10, 30 skipped |
+  | tester-m2-recheck | pass 67/67, 1 skipped | pass 67/67, 1 skipped |
+  | tester-m2 | pass 104/104 | pass 101/101, 3 skipped |
+  | tester-m5 | pass 14/14 | pass 14/14 |
+  | token | pass 13/13 | pass 4/4, 9 skipped * |
+
+  The skips under rust, every one marked `notUnderRust` with its reason:
+  - M4 (doctor, hooks install/uninstall/print): palette-labels "doctor says so"; privacy
+    "doctor warns about them"; token "hooks install preview…" and "a failing check names
+    itself…"; tester-m1 the "installer ownership" suite and 11 doctor tests; tester-m2 the
+    three hooks `--port` tests; tester-m1-reverify the D1, M1-7 and M1-8/9 suites, the two
+    `hooks print --out` tests, the example-token test (doctor and hooks) and the `--hang`
+    and `--slow` doctor tests;
+  - retired with the Node CLI (DIVERGENCES 6): token's seven `.env` writer tests;
+    tester-m1-reverify "an already-exported token wins over the .env"; the shim suites
+    (tester-m1 "shim", tester-m1-reverify M1-13);
+  - tester-m2-recheck's real-recordings test skips under both (data/recordings is private).
+  - `*` in the rust column: the file still imports brain/*.mjs for its node-only tests.
+  - This is the final run, after the review fixes below (skips counted inside skipped
+    suites): node 28 of 28 files green, rust 13 of 28, all 12 required rows green, exit 0. An earlier run at load average 6–7 had one red
+    node cell: brain-server's "/hook p99 under 5 ms" for the Node brain (8.6 ms, and
+    5.7–6.4 ms in 3 reruns alone); the Rust brain passed it in the same run (M3 findings).
+- [x] The 21 golden fixtures match byte for byte: `crates/core/tests/fixtures.rs` (cargo),
+  and `test/flock.test.mjs` through `test/fixture-runner.mjs` under rust, which now also
+  compares each transition line's JSON text with the file's. `__fixture`: 0 differences.
+- [x] Differential, 10⁵ cases each: redact 0 differences, normalise 0 (seeds 1 and 7);
+  fixture 0 (21 cases); env 0. The redact generator now also makes URL userinfo with `@`,
+  `:`, `%40` and `#`, values straddling the 200-unit bounds with astral characters and lone
+  surrogates, 1000-unit cookies, and JS-dialect user patterns. Injected fault (the M2 test
+  plan's): `"pin"` changed to `"pim"` in the Rust secret words gave 514 differences in
+  20 000 cases; reverted, 0.
+- [x] `replay --burst` (release build of the Rust brain, the Node brain with the test
+  preload, each on its own test port, 3 runs each), `/hook` p99:
+
+  | events/s | client | Rust brain | Node brain |
+  |---|---|---|---|
+  | 200 | Rust CLI | 0.41, 0.40, 0.41 ms | 0.84, 0.64, 0.56 ms |
+  | 200 | Node CLI | 0.86, 0.83, 0.84 ms | 0.97, 0.96, 1.02 ms |
+  | 1000 | Rust CLI | 0.30, 0.25, 0.32 ms | 0.39, 0.38, 0.28 ms |
+  | 1000 | Node CLI | 0.46, 0.44, 0.63 ms | 0.50, 0.73, 0.51 ms |
+
+  Every answer was an empty 204. With the same client, the Rust brain's p99 is no worse.
+- [x] The redaction risks D2 names: look-around becomes a match plus a check of the
+  neighbours, and `(?!-)` folds into a class; `\d \w \b` are ASCII and `\s` is JS's set,
+  with case-insensitive words spelled out (vectors with Arabic-Indic digits and NBSP);
+  NFKC is unicode-normalization 0.1.25 (Unicode 16) against Node 22.14's ICU 76.1
+  (Unicode 16); the rules run in Node's order, each left to right; truncation is by code
+  point. User patterns with look-around or backreferences are exit 3 naming the pattern
+  (DIVERGENCES 5).
+- [x] Counts: `npm test` 963 tests, 962 pass and 1 skipped (the private recordings). That is
+  958 plus five new tests: URL credentials, 300 idle sockets, the full stderr pipe,
+  `record --out` into an unwritable directory, and an unusable `token init`.
+  `npm run test:cargo` runs 115 tests, 117 with `--features bellwether-shell/conformance`.
+  `npm run test:vectors`: all 60 files match.
+- [x] The connection test: `test/hook-route-blackbox.test.mjs` holds 300 idle sockets
+  against a brain started with a 256-file soft limit, then sends a tokened hook on a new
+  connection: 204 at once on both brains. Run against a Rust brain with the fix switched
+  off (`BELLWETHER_TEST_NO_FD_RAISE`, cap lifted) it fails with ECONNRESET.
+- [x] Release check: `cargo build --release --target-dir
+  shell/src-tauri/target-dev/release-check`; `__fixture` and `__session` answer
+  `unknown command`, exit 1. `shell/src-tauri/target/release/bellwether-shell` kept sha256
+  `35ceb697…ae22`.
+- [ ] Only CI can prove: the workflow on GitHub's runners (the parity job builds the
+  conformance binary and runs the M3 rows as required), the Windows and Linux checks there
+  (they pass here with both targets installed), and the timing tests on a shared runner.
+
+#### M3 review fixes (BR-3K: "ship", 2026-10-13)
+
+- **A stderr nobody read froze the Rust brain** (BR-3K defect 1: at about 64 KB of log,
+  `/hook` and `/health` timed out). Logging now goes through a queue of 1024 lines per sink
+  (stderr, brain.log) to a writer thread; a full queue drops the line and counts it in
+  `/health` `counters.logDropped` (DIVERGENCES 3). The serving thread never writes a log
+  line itself. At exit the queues get 500 ms to drain. New black-box test, both brains:
+  3000 hooks with stderr piped and never read, each an empty 204 (slowest under 1 s), and
+  `/health` answering with `accepted` up by 3000; under rust `logDropped > 0`. With the old
+  blocking write put back, the test hangs until its timeout.
+- **Unlisted differences** (BR-3K defect 2):
+  - `serve`/`record --port`, `bellwether version` and the help text are listed as
+    DIVERGENCES 13, with pinning tests.
+  - `record --out` into a directory that can't be written: **the Node brain changed**. It
+    now exits 3 with `cannot open <file>: EACCES` instead of a stack trace. The Rust brain
+    gives the same line, and now opens the recording before binding the port, as Node
+    does. One test runs against both brains (brain-server.test.mjs).
+  - `token init` with a token that is there but unusable (for example `short`): **both CLIs
+    changed to match**.
+    - The Rust one used to replace it silently. The Node one left it alone and said
+      "already set".
+    - Now both leave it alone, name the problem ("isn't a usable token (shorter than 16
+      characters, or not all of [A-Za-z0-9_-])") and exit 3. `--force` replaces it, says so,
+      and never prints the token. `--force` never replaces a usable token.
+    - `token init --force` is new in the Node CLI too. One test runs against both brains
+      (token.test.mjs). The unit tests are `token.rs`, `init_writes_once_and_imports`.
+- **Skipped suites hid their size** (BR-3K observation 3). The parity table's rust column
+  now counts every test the node run of the file has and the rust run didn't run.
+  tester-m1 reads "pass 10/10, 30 skipped" and tester-m1-reverify "pass 2/2, 68 skipped".
+  With `--impl rust` alone it falls back to TAP's count and says so.
+- **The "/hook p99 under 5 ms" test** (BR-3K observation 2) judges the best of up to three
+  2 s bursts:
+  - p99 under 5 ms times `machineSlowdown()` (exactly 5 ms on this Mac), and p50 under
+    2 ms, in that burst;
+  - every burst must still have no failures and at most 4 snapshots a second;
+  - it is the same test for both brains.
+- **Redaction: two known gaps, pinned, not changed** (BR-3K observation 1). Both brains
+  have them, and both predate M3:
+  - an unencoded `/` or whitespace in a URL password ends the authority before the `@`,
+    so `https://u:pa/ss@h.test/` leaks;
+  - an `@` in a query that follows host:port with no `/` is read as userinfo, so
+    `http://localhost:3000?email=me@x.io` becomes `http://localhost:•••@x.io`.
+
+  New vector group "URL credentials, known gaps" (3 vectors) pins today's output. tester-m2
+  checks it, and so do the cargo vectors.
+  - **Follow-ups:** decide whether a `/` that is followed by `…@host` with no other `/`
+    can be a password character, and whether `?`/`#` should end the authority (which would
+    leak a raw `#` or `?` in a password).
+
+#### M3 findings
+
+- **Node's own p99 test is load-sensitive.** brain-server's "/hook p99 under 5 ms" holds
+  for the Rust brain (debug build, optimised server crates: 1.4–2.2 ms on the same JS
+  client) but failed for the Node brain at load average 6–7 (5.7–8.6 ms). It is the M2 CI
+  run's unexplained "brain-server, node 20/21" again. Not changed here; a calibrated budget
+  like the redaction tests' (`machineSlowdown`) would be the fix.
+- **The M1 fd problem, measured:** a Rust brain started with a 256-file soft limit and
+  neither fix reached 259 descriptors with 300 idle sockets open, and a new hook got
+  ECONNRESET (5 of 5 runs). With the limit raised, 204 in 6 ms.
+- **Node's hook path vs Rust's:** at 200 events/s the Rust brain's median is lower too (p50
+  0.19–0.21 against 0.21–0.26 ms with the Rust CLI as client; 0.31–0.35 against
+  0.39–0.43 ms with the Node CLI), with the state machine, logging and state.json on the
+  same thread. Early versions had spikes: the built-in regexes compiled on
+  the first hook, and state.json saved with fsync; both fixed (deviation 30).
+
 ### M4. Brain port B: hook installer, doctor, migrate, pets
 
 Builds:
@@ -1993,3 +2189,74 @@ Recorded by the developer while building M2 (2026-10-13).
 23. **The differential's `.env` oracle sample.** Besides comparing Node with Rust, it
     runs 200 generated `.env` files through `node --env-file` itself. Two known shapes
     are reported, not failed (M2 findings, DIVERGENCES.md); any other difference fails.
+
+Recorded by the developer while building M3 (2026-10-13).
+
+24. **`crates/core` uses more than std and serde.**
+    - Plan (Cargo layout): core "uses only std and serde".
+    - True: redaction needs `regex` and `unicode-normalization`, the WebFetch summary needs
+      the WHATWG host (`url`), the fingerprint and sheep ids need `sha2`, the token needs
+      `getrandom`, and the flock's ordered maps are `indexmap`. All but
+      `unicode-normalization` were already in the lockfile; the Stack table lists most.
+    - Done: those six, and no serde: core's JSON is its own (deviation 25).
+25. **JS strings and JS JSON in Rust.**
+    - Plan: serde_json for snapshots and IPC; a hand-written lossless JSON for the
+      installer only (M4).
+    - True: `/state`, recordings, state.json and the fixture lines are `JSON.stringify`
+      output, and the bubble text inside them is bounded and cut in UTF-16 code units.
+      serde_json sorts no keys the JS way, formats numbers differently and refuses lone
+      surrogates.
+    - Done: `jsstr.rs` keeps every JS string as code units (one `char` each, a surrogate
+      mapped into U+F0000–U+F07FF), and `json.rs` is `JSON.parse` / `JSON.stringify` over
+      JS values (f64 numbers, JS key order, a 1000-level depth limit). The M4 lossless
+      module is still to come. serde_json stays for `/health` and the strip. So lone
+      surrogates turned out not to be a divergence.
+26. **The test bridge: `__session` and `test/impl.mjs`.**
+    - Plan (M3 brief): wire the in-process files through the `__` commands or the CLI.
+    - True: those files call stateful objects (a Flock, a publisher) synchronously, call
+      by call; flock.test's identity cap alone makes about 6000 calls. A process per call
+      is too slow, and the tests read each answer in line.
+    - Done: `__session --in <fifo> --out <fifo>` (conformance builds only) keeps objects by
+      handle and answers one JSON line per call; `test/impl.mjs` has the brain/*.mjs names,
+      sends each call and blocks on the answer FIFO. `startBrain` is a real `serve` (or
+      `record`) process; `brain.flock` reads `/state` and state.json. `test/conformance.mjs`
+      counts a file that imports `test/impl.mjs` as wired.
+27. **Tests with nothing in the Rust brain yet are skipped under rust, with the reason.**
+    - Plan: the files M3 names pass under rust.
+    - True: several of them also test M4 commands (doctor, hooks) or Node-only parts (the
+      `/bin/sh` shim, the `.env` writer).
+    - Done: `notUnderRust(reason)` (test/helpers.mjs) skips such a test under rust only; the
+      parity table shows it as skipped, never as passed. Each is listed in the M3 status.
+      M4 removes its ones.
+28. **The harness's Rust environment.**
+    - M2: the binary got a temp home whose config.json held only the test port.
+    - Done: the home is the Node CLI's `BELLWETHER_DATA_DIR` (so state.json,
+      shell-state.json and recordings land where the tests look), and the whole config file
+      passes as `BELLWETHER_CONFIG` (the Rust CLI reads it, as the Configuration table says).
+      A config with no port or 47417 is copied with the suite's port; the live-port refusal
+      is kept.
+29. **Test knobs in `serve`.** `BELLWETHER_TEST_TICK_MS`, `_PERSIST_MS`, `_PUBLISH_MS`,
+    `_MAX_CONNECTIONS` and `_NO_FD_RAISE` are read only in conformance builds (a `conformance`
+    feature of bellwether-brain that only the shell's turns on; a cargo test checks neither
+    is a default). They stand in for brain.mjs's `tickMs`, `persistMs` and `publishMs`
+    options. `serve` and `record` also take `--port` (0 means any free port).
+30. **Dev builds optimise the hot crates.** `profile.dev.package` gives regex,
+    unicode-normalization, sha2, tokio, hyper and their helpers opt-level 3 (debug
+    assertions off for the regex and server crates), and core and brain opt-level 2. A
+    plain debug build missed the 5 MB redaction budgets (up to 34 s) and the 5 ms p99.
+    Also: state.json is written without fsync (as Node writes it; it is rewritten every few
+    seconds on the brain's only thread), the token file with it; the built-in patterns
+    compile when the cleaner is made, not on the first hook.
+31. **`token rotate` does steps 1 and 3 of D3; step 2 waits for the installer.**
+    - Plan: write the token file, rewrite the hook entries, tell the brain.
+    - True: rewriting hook entries is the installer (M4).
+    - Done: `token rotate` is a dry run; `--write` writes a new token file and posts
+      `reload-token` with the old token (the brain accepts it for a minute more). When the
+      settings file (`--settings`, default `~/.claude/settings.json`) carries the current
+      token, `--write` refuses (exit 3, nothing changed), since those hooks would fail. M4
+      adds the rewrite. `token init --from <.env>` imports a repository install's token (the
+      one use D3 leaves the `.env` reader).
+32. **Both bounds on connections.** The M1 review asked for a cap that closes idle
+    connections first, or a short idle timeout. Done: both, plus raising the descriptor
+    limit: 5 s idle timeout; a cap of 1024 (fd limit minus 64 when lower); eviction of the
+    connection idle longest, else the oldest `/state` long poll (DIVERGENCES 11).

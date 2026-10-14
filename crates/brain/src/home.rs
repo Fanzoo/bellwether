@@ -2,11 +2,13 @@
 //!
 //!   ~/Library/Application Support/Bellwether/   (BELLWETHER_HOME overrides it)
 //!     hook-token     one line, 0600, in a 0700 directory
-//!     config.json    optional; only `port` is read in milestone 1
+//!     config.json    optional; every key has a default (BELLWETHER_CONFIG names another file)
+//!     state.json     muted, and per identity its colour, slots and label
+//!     shell-state.json, recordings/
 //!   ~/Library/Logs/Bellwether/brain.log           (<BELLWETHER_HOME>/logs when it is set)
 //!
 //! BELLWETHER_HOOK_TOKEN in the environment overrides the token file (tests, CI).
-//! Milestone 1 only reads these; `token init` (milestone 3) writes the token file.
+//! `bellwether token init` writes the token file (crates/core's token module).
 
 use std::path::{Path, PathBuf};
 
@@ -55,21 +57,17 @@ pub fn token_file(home: &Path) -> PathBuf {
 }
 
 /// The token: BELLWETHER_HOOK_TOKEN if set and not empty, else the first line of
-/// `hook-token`. Never logged or printed.
+/// `hook-token` (crates/core's token module). Never logged or printed.
 pub fn token(home: &Path) -> Result<String, BrainError> {
     if let Some(t) = std::env::var("BELLWETHER_HOOK_TOKEN").ok().filter(|t| !t.is_empty()) {
         return Ok(t);
     }
     let file = token_file(home);
-    let text = std::fs::read_to_string(&file).map_err(|e| {
-        let why = if e.kind() == std::io::ErrorKind::NotFound { "it doesn't exist".to_string() } else { e.to_string() };
-        BrainError::new(format!("no hook token: {} can't be read ({why}). Set BELLWETHER_HOOK_TOKEN or create that file (one line, mode 0600)", file.display()), exit::BAD_CONFIG)
-    })?;
-    let token = text.lines().next().unwrap_or("").trim().to_string();
-    if token.is_empty() {
-        return Err(BrainError::new(format!("no hook token: {} is empty", file.display()), exit::BAD_CONFIG));
+    match bellwether_core::token::read_file(home) {
+        Ok(Some(t)) => Ok(t),
+        Ok(None) => Err(BrainError::new(format!("no hook token: {} doesn't exist or is empty. Make one with `bellwether token init` (or set BELLWETHER_HOOK_TOKEN)", file.display()), exit::BAD_CONFIG)),
+        Err(e) => Err(BrainError::new(e.message, exit::BAD_CONFIG)),
     }
-    Ok(token)
 }
 
 /// `port` from `<home>/config.json`, if that file exists. `host` is refused, as in the
@@ -90,13 +88,7 @@ pub fn configured_port(home: &Path) -> Result<Option<u16>, BrainError> {
 
 /// Creates a directory (and its parents) for files only this user may read.
 pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
-    }
-    #[cfg(not(unix))]
-    std::fs::create_dir_all(dir)
+    bellwether_core::persist::create_private_dir(dir)
 }
 
 #[cfg(test)]

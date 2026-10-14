@@ -9,8 +9,18 @@ use std::time::Duration;
 use crate::login_items::{self, Service, Status};
 use bellwether_brain::exit;
 
-const USAGE: &str = "usage (the app's built-in CLI; milestone 1 of the distribution plan):
-  bellwether serve [--port <n>] [--hang | --slow=<ms>]   run the hook listener in the foreground
+const USAGE: &str = "usage (the app's built-in CLI; milestones 1 and 3 of the distribution plan):
+  bellwether serve [--port <n>] [--hang | --slow=<ms>]   run the brain in the foreground
+  bellwether record [--out <file>]                       serve, and record event shapes (no content) to recordings/
+  bellwether status [--watch] [--json]                   the flock as text (long-polls /state with --watch)
+  bellwether mute | unmute                               do-not-disturb (the tray's Mute; kept across restarts)
+  bellwether show | hide                                 show or hide the strip (the tray's Hide; kept across restarts)
+  bellwether replay <file.jsonl> [--speed N] [--port P] [--tag <pane>]
+  bellwether replay --burst <events/s> [--seconds S] [--port P]
+  bellwether token init [--from <.env>] [--force]        make the hook token file, only if there is none (never printed);
+                                                         --from takes the token of a repository install's .env;
+                                                         --force replaces one that is there but unusable
+  bellwether token rotate [--write] [--settings <path>]  a new token, and the running brain told to switch (dry run unless --write)
   bellwether doctor [--port <n>]                         check the app, its brain, token and login items
   bellwether autostart status                            the two login items (brain agent, app at login)
   bellwether autostart install [--write] [--brain-only] [--via-app]
@@ -50,7 +60,7 @@ fn command_result(command: &str, tail: &[String]) -> CliResult {
             println!("bellwether {} (rust)", bellwether_brain::VERSION);
             Ok(exit::OK)
         }
-        "serve" => Ok(bellwether_brain::cli_serve(tail)),
+        "serve" | "record" | "status" | "mute" | "unmute" | "show" | "hide" | "replay" | "token" => Ok(bellwether_brain::cli::run(command, tail)),
         "doctor" => doctor(tail),
         "autostart" => autostart(tail),
         // The conformance harness's hidden commands: only in a build with the
@@ -664,13 +674,28 @@ mod tests {
             assert!(v["build"].get("features").is_none(), "build.features in a Tauri config");
             assert!(!conf.contains("conformance"));
         }
+        // The brain crate's own feature (test knobs in `serve`) is on only through the shell's.
+        let brain = include_str!("../../../crates/brain/Cargo.toml");
+        let brain_features = brain.split("[features]").nth(1).expect("the brain's [features]").split("\n[").next().unwrap();
+        assert!(!brain_features.lines().any(|l| l.trim_start().starts_with("default")), "a default feature in crates/brain");
         let script = include_str!("../../../scripts/build-app.mjs");
         assert!(!script.contains("--features") && !script.contains("conformance"), "scripts/build-app.mjs passes a feature");
     }
 
+    /// test/DIVERGENCES.md 13: the app's help is its own text (the Node CLI's lists `shell`,
+    /// `hooks`, `pets`, `migrate`); it names every brain command milestone 3 ported.
+    #[test]
+    fn help_lists_the_brain_commands() {
+        for c in ["serve [--port <n>]", "record [--out <file>]", "status [--watch] [--json]", "mute | unmute", "show | hide", "replay <file.jsonl>", "replay --burst", "token init", "token rotate", "version"] {
+            assert!(USAGE.contains(&format!("bellwether {c}")), "{c}");
+        }
+    }
+
     #[test]
     fn unknown_commands_exit_1_and_bad_flags_exit_3() {
-        assert_eq!(run(&s(&["bellwether", "__fixture"])), exit::UNEXPECTED);
+        // A hidden command that isn't ported yet (milestone 4): "unknown command" without the
+        // conformance feature, "not ported yet" with it; exit 1 either way.
+        assert_eq!(run(&s(&["bellwether", "__json"])), exit::UNEXPECTED);
         assert_eq!(run(&s(&["bellwether", "autostart", "install", "--nope"])), exit::BAD_CONFIG);
         assert_eq!(run(&s(&["bellwether", "autostart", "sideways"])), exit::BAD_CONFIG);
         assert_eq!(run(&s(&["bellwether", "version"])), exit::OK);

@@ -92,5 +92,15 @@ export function readToken(env = process.env) {
   return token;
 }
 
+/**
+ * Why a token can't be used, in a few words, or null when it can. The same rules as
+ * readToken (and the Rust brain's token check).
+ */
+export function tokenProblem(token) {
+  if (token.length < 16 || !/^[A-Za-z0-9_-]+$/.test(token)) return 'shorter than 16 characters, or not all of [A-Za-z0-9_-]';
+  if (KNOWN_EXAMPLE_TOKENS.includes(token)) return 'a published example value';
+  return null;
+}
+
 /** Token values that have been committed as examples somewhere. Never accepted. */
 export const KNOWN_EXAMPLE_TOKENS = ['q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh'];

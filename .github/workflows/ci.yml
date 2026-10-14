@@ -166,7 +166,6 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup target add ${{ matrix.target }}
-      # The platform-neutral crates only (plan D1). crates/core joins this list when
-      # milestone 3 creates it.
-      - name: cargo check -p bellwether-brain
-        run: cargo check --manifest-path shell/src-tauri/Cargo.toml -p bellwether-brain --all-targets --target ${{ matrix.target }}
+      # The platform-neutral crates only (plan D1): the brain's logic and its server.
+      - name: cargo check -p bellwether-core -p bellwether-brain
+        run: cargo check --manifest-path shell/src-tauri/Cargo.toml -p bellwether-core -p bellwether-brain --all-targets --target ${{ matrix.target }}

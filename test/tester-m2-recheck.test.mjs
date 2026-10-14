@@ -2,13 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { withDefaults } from '../brain/defaults.mjs';
-import { Flock } from '../brain/flock.mjs';
-import { normalise } from '../brain/normalise.mjs';
-import { makeTextCleaner } from '../brain/redact.mjs';
-import { rebuild } from '../brain/replay.mjs';
-import { loadState } from '../brain/persist.mjs';
 import { AGENT_DIR, cleaningProblems, readVectors, tempDir } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { Flock, loadState, makeTextCleaner, normalise, rebuild, withDefaults } from './impl.mjs';
 
 const example = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
 const clean = makeTextCleaner({ maxChars: 500, redactPatterns: [] });

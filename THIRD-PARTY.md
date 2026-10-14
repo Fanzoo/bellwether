@@ -14,12 +14,12 @@ bundle a `.app`; `cargo build` does not need it.
 |---|---|---|---|
 | @tauri-apps/cli | 2.12.1 | shell/package.json devDependency | Apache-2.0 OR MIT |
 
-## Rust crates (453)
+## Rust crates (455)
 
 | Licence | Crates |
 |---|---|
-| MIT OR Apache-2.0 | 206 |
-| MIT | 108 |
+| MIT OR Apache-2.0 | 207 |
+| MIT | 109 |
 | Apache-2.0 OR MIT | 44 |
 | Zlib OR Apache-2.0 OR MIT | 19 |
 | Unicode-3.0 | 18 |
@@ -397,6 +397,7 @@ bundle a `.app`; `cargo build` does not need it.
 | tinystr | 0.8.4 | Unicode-3.0 |
 | tinyvec | 1.13.3 | Zlib OR Apache-2.0 OR MIT |
 | tokio | 1.53.2 | MIT |
+| tokio-macros | 2.7.2 | MIT |
 | tokio-util | 0.7.20 | MIT |
 | toml | 0.8.2 | MIT OR Apache-2.0 |
 | toml | 1.1.8+spec-1.1.0 | MIT OR Apache-2.0 |
@@ -420,6 +421,7 @@ bundle a `.app`; `cargo build` does not need it.
 | typenum | 1.20.1 | MIT OR Apache-2.0 |
 | uds_windows | 1.2.1 | MIT |
 | unicode-ident | 1.0.26 | (MIT OR Apache-2.0) AND Unicode-3.0 |
+| unicode-normalization | 0.1.25 | MIT OR Apache-2.0 |
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
 | ureq | 3.4.2 | MIT OR Apache-2.0 |
 | ureq-proto | 0.6.4 | MIT OR Apache-2.0 |

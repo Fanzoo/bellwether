@@ -6,7 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, FIXTURES, TOKEN, hookHeaders, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, TOKEN, hookHeaders, notUnderRust, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Independent tester probes for Milestone 1. Everything runs against a COPY of the
@@ -244,7 +244,7 @@ describe('recorder keeps no free text', () => {
   });
 });
 
-describe('installer ownership and unusual settings shapes', () => {
+describe('installer ownership and unusual settings shapes', notUnderRust('hooks install, uninstall and print are ported in milestone 4'), () => {
   const run = (name, obj, args = ['hooks', 'install', '--write'], { text } = {}) => {
     const f = path.join(root, `${name}.json`);
     fs.writeFileSync(f, text ?? JSON.stringify(obj, null, 2) + '\n');
@@ -419,7 +419,7 @@ describe('doctor', () => {
   };
   const check = (r, name) => JSON.parse(r.out).checks.find((c) => c.name === name);
 
-  test('brain down: exit 2, "brain not running — run `bellwether serve`", and no token value in the output', () => {
+  test('brain down: exit 2, "brain not running — run `bellwether serve`", and no token value in the output', notUnderRust('doctor is ported in milestone 4'), () => {
     const f = settingsWith(() => {});
     const r = cli(['doctor', '--settings', f]);
     assert.equal(r.code, 2);
@@ -427,7 +427,7 @@ describe('doctor', () => {
     assert.ok(!(r.out + r.err).includes(TOKEN));
   });
 
-  test('timeouts: 600, missing, 0, a string and 2.5 all FAIL naming the event; 0.5 and 2 pass', () => {
+  test('timeouts: 600, missing, 0, a string and 2.5 all FAIL naming the event; 0.5 and 2 pass', notUnderRust('doctor is ported in milestone 4'), () => {
     for (const bad of [600, undefined, 0, '1', 2.5, -1, null]) {
       const f = settingsWith((s) => { if (bad === undefined) delete s.hooks.Stop[0].hooks[0].timeout; else s.hooks.Stop[0].hooks[0].timeout = bad; });
       const c = check(doctor(f), 'hook timeout');
@@ -440,7 +440,7 @@ describe('doctor', () => {
     }
   });
 
-  test('a timeout only wrong on a bellwether entry that shares a group with another tool is still found', () => {
+  test('a timeout only wrong on a bellwether entry that shares a group with another tool is still found', notUnderRust('doctor is ported in milestone 4'), () => {
     const f = settingsWith((s) => {
       s.hooks.Stop[0].hooks.unshift({ type: 'command', command: 'x', timeout: 600 });
       s.hooks.Stop[0].hooks[1].timeout = 99;
@@ -448,7 +448,7 @@ describe('doctor', () => {
     assert.equal(check(doctor(f), 'hook timeout').status, 'FAIL');
   });
 
-  test('settings: missing file, invalid JSON, token mismatch, disableAllHooks, allowedHttpHookUrls', () => {
+  test('settings: missing file, invalid JSON, token mismatch, disableAllHooks, allowedHttpHookUrls', notUnderRust('doctor is ported in milestone 4'), () => {
     const missing = check(doctor(path.join(root, 'nope.json')), 'hooks installed');
     assert.equal(missing.status, 'FAIL');
     assert.match(missing.detail, /no such file/);
@@ -461,7 +461,7 @@ describe('doctor', () => {
     assert.equal(check(doctor(settingsWith((s) => { s.allowedHttpHookUrls = []; })), 'allowedHttpHookUrls').status, 'FAIL');
   });
 
-  test('missing token: exit 3 naming BELLWETHER_HOOK_TOKEN; short or odd token: exit 3', () => {
+  test('missing token: exit 3 naming BELLWETHER_HOOK_TOKEN; short or odd token: exit 3', notUnderRust('doctor is ported in milestone 4'), () => {
     const f = settingsWith(() => {});
     for (const t of [undefined, '', 'short', 'has space in it-----------', 'quote"quote_quote_quote']) {
       const e = { ...env };
@@ -472,7 +472,7 @@ describe('doctor', () => {
     }
   });
 
-  test('missing/invalid config.json: names the file, exit 3, no stack', () => {
+  test('missing/invalid config.json: names the file, exit 3, no stack', notUnderRust('doctor is ported in milestone 4'), () => {
     fs.writeFileSync(path.join(root, 'config.json'), '{ "port": ');
     try {
       const r = cli(['doctor', '--settings', settingsPath]);
@@ -489,7 +489,7 @@ describe('doctor', () => {
     }
   });
 
-  test('brain up with the right token: brain and brain token PASS, exit 0 on a full install', async () => {
+  test('brain up with the right token: brain and brain token PASS, exit 0 on a full install', notUnderRust('doctor is ported in milestone 4'), async () => {
     const b = await startBrain();
     try {
       const f = settingsWith(() => {});
@@ -501,7 +501,7 @@ describe('doctor', () => {
     }
   });
 
-  test('brain with a different token: FAIL "brain token" naming the cause', async () => {
+  test('brain with a different token: FAIL "brain token" naming the cause', notUnderRust('doctor is ported in milestone 4'), async () => {
     const b = await startBrain([], { BELLWETHER_HOOK_TOKEN: 'someOtherTokenValue1234567890' });
     try {
       const r = doctor(settingsWith(() => {}));
@@ -513,7 +513,7 @@ describe('doctor', () => {
     }
   });
 
-  test('brain hung (--hang): doctor says so rather than pass or crash', async () => {
+  test('brain hung (--hang): doctor says so rather than pass or crash', notUnderRust('doctor is ported in milestone 4'), async () => {
     const b = await startBrain(['--hang']);
     try {
       const r = doctor(settingsWith(() => {}));
@@ -528,7 +528,7 @@ describe('doctor', () => {
     }
   });
 
-  test('wrong thing on the port: an unrelated HTTP server, a raw TCP listener, and a silent listener', async () => {
+  test('wrong thing on the port: an unrelated HTTP server, a raw TCP listener, and a silent listener', notUnderRust('doctor is ported in milestone 4'), async () => {
     const servers = [
       http.createServer((q, s) => s.end('hello')),
       net.createServer((s) => s.end('not http at all\r\n')),
@@ -553,7 +553,7 @@ describe('doctor', () => {
     }
   });
 
-  test('a fake bellwether /health in front of a /hook that never answers is not reported as healthy', async () => {
+  test('a fake bellwether /health in front of a /hook that never answers is not reported as healthy', notUnderRust('doctor is ported in milestone 4'), async () => {
     const s = http.createServer((q, res) => {
       if (q.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -604,7 +604,7 @@ describe('fixtures and recordings', () => {
   });
 });
 
-describe('shim', () => {
+describe('shim', notUnderRust('the /bin/sh shim and bellwether.cmd run the Node CLI; the app has neither'), () => {
   test('exits 3 with a message when node is not on PATH, and passes the exit code through otherwise', { skip: process.platform === 'win32' }, () => {
     const shim = path.join(AGENT_DIR, 'bellwether');
     const noNode = spawnBrainSync(['doctor'], { shim, encoding: 'utf8', env: { PATH: '/nonexistent' } });

@@ -168,6 +168,38 @@ const UNICODE = [
   ['look-behind boundary: a name glued to a word', 'x.password=abcdef123456 -password=abcdef123456', 80],
 ];
 
+/**
+ * URL credentials: the userinfo runs to the LAST `@` before the host (milestone 3 fix; the
+ * old rule stopped at the first `@` and left the rest of such a password readable).
+ * [name, text, the fragment that must not survive, or null when nothing may be redacted].
+ */
+const URLS = [
+  ['a password containing @ and :', 'curl https://u%40x:p@ss:w0rd@h.test/', 'ss:w0rd'],
+  ['@ in the path is not userinfo', 'curl https://h.test/users/bob@example.com', null],
+  ['@ in the query is not userinfo', 'curl "https://h.test/x?email=a:b@c.test"', null],
+  ['an email in the path after real credentials', 'git clone https://bob:pw@h.test/bob@example.com/repo', 'pw@'],
+  ['two URLs on one line', 'curl https://a:pw1@h1.test/x https://c:p@w2@h2.test/y', 'w2@'],
+  ['two URLs separated by a comma', 'echo https://a:p@1@h1.test,https://b:q@2@h2.test', 'q@2'],
+  ['a percent-encoded @ in the password', 'curl https://u:p%40ss@h.test/', 'p%40ss'],
+  ['an unencoded @ in the user name', 'curl https://u@x:secret@h.test/', 'secret'],
+  ['no path, empty user, @ in the password', 'export REDIS_URL=redis://:pa@ss@host:6379', 'pa@ss'],
+  ['a port and a query without a path', 'curl https://u:p@ss@h.test:8443?x=1', 'p@ss'],
+  ['a password longer than the old 500 limit', `curl https://u:${'p@'.repeat(300)}x@h.test/`, 'p@p@'],
+  ['user name only: left alone (token shapes have their own rules)', 'git clone https://git@h.test/x', null],
+  ['no scheme separator: scp syntax is not a URL', 'scp f.txt user@host:/tmp/', null],
+  ['an empty password is left alone', 'curl https://u:@h.test/', null],
+];
+
+/**
+ * Known gaps in the URL rule, pinned as they are today in both brains (BR-3K, milestone 3).
+ * Not wanted behaviour: follow-ups in the plan's M3 status. [name, text, the gap].
+ */
+const URL_GAPS = [
+  ['an unencoded / in the password ends the authority, so it leaks', 'curl https://u:pa/ss@h.test/', 'leak'],
+  ['whitespace in the password ends the authority, so it leaks', 'curl https://u:pa ss@h.test/', 'leak'],
+  ['an @ in a query right after host:port is read as userinfo, so the host is hidden', 'curl http://localhost:3000?email=me@x.io', 'over-redaction'],
+];
+
 /** tester-m2: redact first, then truncate, with the secret near the cut. */
 const STRADDLE = [
   ...[30, 40, 45, 50, 52, 54, 56].map((pad) => [`sk- key after ${pad} characters`, `${'x'.repeat(pad)} sk-abcdefghijklmnopqrstuvwxyz0123456789 tail`]),
@@ -186,6 +218,8 @@ function redactVectors() {
   for (const c of BIDI) add('bidi controls', 'flock.test.mjs', `U+${c.codePointAt(0).toString(16).toUpperCase()}`, `ls ${c}fdp.exe`, 60, [], { mustNotContain: c });
   for (const [name, text, maxChars] of UNICODE) add('unicode and controls', 'tester-m2.test.mjs', name, text, maxChars, []);
   for (const [name, text] of STRADDLE) add('redact before truncate', 'tester-m2.test.mjs', name, text, 60, []);
+  for (const [name, text, secret] of URLS) add('URL credentials', 'tester-m2.test.mjs', name, text, 500, [], secret === null ? { mustEqual: text } : { mustNotContain: secret });
+  for (const [name, text, gap] of URL_GAPS) add('URL credentials, known gaps', 'tester-m2.test.mjs', name, text, 500, [], { knownGap: gap });
   add('user patterns', 'flock.test.mjs', 'a (?i) user pattern', 'echo HUNTER2 and hunter3 but not hunterx', 60, ['(?i)hunter\\d']);
   return { ...header('Cases for makeTextCleaner({maxChars, redactPatterns})(text): `expected` is the Node answer; mustNotContain / mustEqual are what the test asserts.', 'the tests named in each vector'), examplePatterns: EXAMPLE_PATTERNS, vectors };
 }

@@ -9,6 +9,8 @@ mod clickthrough;
 // Hidden `__` subcommands for the conformance harness; never in a release build.
 #[cfg(feature = "conformance")]
 pub mod conformance;
+#[cfg(feature = "conformance")]
+mod conformance_session;
 pub mod dispatch;
 pub mod identity;
 pub mod login_items;

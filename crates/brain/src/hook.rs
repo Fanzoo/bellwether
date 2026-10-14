@@ -14,7 +14,9 @@
 //!
 //! Everything past the guards fails open and silent: a malformed or oversize body or an
 //! unknown event still gets 204. The answer goes out once the body has arrived and
-//! before it is parsed. X-Pasture-* headers are not accepted (maintainer decision 14).
+//! before it is parsed; the event then goes to the state machine with a `try_send`, and a
+//! full queue counts `dropped` instead of delaying anything. X-Pasture-* headers are not
+//! accepted (maintainer decision 14).
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -24,6 +26,9 @@ use sha2::{Digest, Sha256};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use bellwether_core::json::{self, Js};
+
+use crate::actor::Msg;
 use crate::{now_ms, Brain, Mode};
 
 pub const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
@@ -80,7 +85,7 @@ pub enum Rejection {
 }
 
 impl Rejection {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Rejection::Origin => "origin",
             Rejection::Host => "host",
@@ -100,7 +105,14 @@ fn same(a: &[u8; 32], b: &[u8; 32]) -> bool {
 }
 
 /// The four guards, in order. `None` means the request may proceed.
+#[cfg(test)]
 pub fn rejection(headers: &hyper::HeaderMap, port: u16, expected: &[u8; 32]) -> Option<Rejection> {
+    rejection_with(headers, port, expected, None, true)
+}
+
+/// The guards with an optional second accepted token (the previous one, for a minute
+/// after a rotation) and, for /state and /control, no Content-Type check.
+pub fn rejection_with(headers: &hyper::HeaderMap, port: u16, expected: &[u8; 32], previous: Option<&[u8; 32]>, content_type: bool) -> Option<Rejection> {
     if headers.contains_key("origin") {
         return Some(Rejection::Origin);
     }
@@ -108,22 +120,34 @@ pub fn rejection(headers: &hyper::HeaderMap, port: u16, expected: &[u8; 32]) -> 
     if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
         return Some(Rejection::Host);
     }
-    let media = headers.get("content-type").map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned()).unwrap_or_default();
-    if media.split(';').next().unwrap_or("").trim().to_ascii_lowercase() != "application/json" {
-        return Some(Rejection::ContentType);
+    if content_type {
+        let media = headers.get("content-type").map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned()).unwrap_or_default();
+        if media.split(';').next().unwrap_or("").trim().to_ascii_lowercase() != "application/json" {
+            return Some(Rejection::ContentType);
+        }
     }
     // Exactly one token header. Node joins repeated headers into one value ("a, b"),
     // which never matches, so two tokens are refused here too, even if one is right.
     let mut tokens = headers.get_all("x-bellwether-token").iter();
     match (tokens.next(), tokens.next()) {
-        (Some(given), None) if same(&digest(given.as_bytes()), expected) => None,
+        (Some(given), None) => {
+            let d = digest(given.as_bytes());
+            // Both compared, so the time doesn't say which one matched.
+            let current = same(&d, expected);
+            let old = previous.is_some_and(|p| same(&d, p));
+            if current | old {
+                None
+            } else {
+                Some(Rejection::Token)
+            }
+        }
         _ => Some(Rejection::Token),
     }
 }
 
 pub(crate) async fn handle(brain: Arc<Brain>, req: Request<Incoming>) -> HookAnswer {
     let c = &brain.counters;
-    if let Some(reason) = rejection(req.headers(), brain.port, &brain.expected) {
+    if let Some(reason) = brain.rejection(req.headers(), true) {
         match reason {
             Rejection::Origin => &c.rejected_origin,
             Rejection::Host => &c.rejected_host,
@@ -137,6 +161,7 @@ pub(crate) async fn handle(brain: Arc<Brain>, req: Request<Incoming>) -> HookAns
     }
 
     let received_at = now_ms();
+    let req_headers = req.headers().clone();
     let body = if brain.mode == Mode::Hang {
         Some(read_body(req.into_body()).await)
     } else {
@@ -157,8 +182,9 @@ pub(crate) async fn handle(brain: Arc<Brain>, req: Request<Incoming>) -> HookAns
     c.accepted.fetch_add(1, Ordering::Relaxed);
     // Parsed after the answer: on this single-threaded runtime the spawned task runs
     // once the connection task has written the 204.
+    let headers = bellwether_core::normalise::headers_from_http(req_headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes())));
     let b = brain.clone();
-    tokio::task::spawn(async move { consume(&b, body, received_at) });
+    tokio::task::spawn(async move { consume(&b, body, headers, received_at) });
     HookAnswer::NoContent
 }
 
@@ -188,20 +214,22 @@ async fn read_body(mut body: Incoming) -> Option<Vec<u8>> {
     }
 }
 
-fn consume(brain: &Brain, body: Option<Vec<u8>>, received_at: u64) {
+fn consume(brain: &Brain, body: Option<Vec<u8>>, headers: bellwether_core::json::Obj, received_at: u64) {
     let c = &brain.counters;
     let Some(body) = body else {
         c.oversize.fetch_add(1, Ordering::Relaxed);
         brain.log.log(&format!("dropped /hook body over {MAX_BODY_BYTES} bytes"));
         return;
     };
-    let payload: Option<serde_json::Value> = serde_json::from_str(&String::from_utf8_lossy(&body)).ok();
-    let Some(payload) = payload.filter(|p| p.is_object()) else {
+    // `body.toString('utf8')` then JSON.parse: invalid UTF-8 becomes U+FFFD; strings keep
+    // lone surrogates (crates/core's JSON).
+    let payload = json::parse(&String::from_utf8_lossy(&body)).ok().filter(Js::is_plain_object);
+    let Some(payload) = payload else {
         c.malformed.fetch_add(1, Ordering::Relaxed);
         brain.log.log("dropped /hook body: not a JSON object");
         return;
     };
-    let event = payload.get("hook_event_name").and_then(|v| v.as_str()).unwrap_or("");
+    let event = payload.get("hook_event_name").as_str().unwrap_or("");
     if !EVENTS.contains(&event) {
         c.unknown_event.fetch_add(1, Ordering::Relaxed);
     }
@@ -209,8 +237,10 @@ fn consume(brain: &Brain, body: Option<Vec<u8>>, received_at: u64) {
         return;
     }
     *c.last_event_at.lock().unwrap() = Some(received_at);
-    // Milestone 3: the event goes to the state machine here (a try_send; a full
-    // channel counts `dropped` and never delays the answer).
+    if brain.inbox.try_send(Msg::Hook { payload, headers, received_at: received_at as f64 }).is_err() {
+        c.dropped.fetch_add(1, Ordering::Relaxed);
+        brain.log.log("dropped an event: the state machine's queue is full");
+    }
 }
 
 #[cfg(test)]

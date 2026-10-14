@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { DEFAULT_PALETTE, OLD_DEFAULT_PALETTE, PALETTE_UPGRADED, withDefaults } from '../brain/defaults.mjs';
 import { runDoctor } from '../brain/doctor.mjs';
 import { MAX_LABEL, displayLabels, terminalTag } from '../shell/src/player/labels.mjs';
-import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, notUnderRust, tempDir } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { DEFAULT_PALETTE, OLD_DEFAULT_PALETTE, PALETTE_UPGRADED, withDefaults } from './impl.mjs';
 
 /** Milestone 10 additions: a palette you can tell apart, and same-project labels told apart. */
 
@@ -35,7 +36,7 @@ describe('the sheep palette', () => {
     assert.deepEqual(mine.pets.palette, ['#123456', '#654321']);
     assert.equal(mine[PALETTE_UPGRADED], undefined);
   });
-  test('doctor says so (INFO), without touching config.json', async () => {
+  test('doctor says so (INFO), without touching config.json', notUnderRust('doctor is ported in milestone 4'), async () => {
     const r = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: path.join(tempDir(), 'none.json'), configLoader: () => ({ config: withDefaults({ port: 1, pets: { palette: [...OLD_DEFAULT_PALETTE] } }), usingExample: false }), dataDir: tempDir(), home: tempDir(), probeTimeoutMs: 100 });
     const p = r.checks.find((c) => c.name === 'palette');
     assert.equal(p?.status, 'INFO');

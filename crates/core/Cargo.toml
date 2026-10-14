@@ -1,0 +1,21 @@
+[package]
+name = "bellwether-core"
+version = "0.1.0"
+edition = "2021"
+description = "bellwether's brain logic without I/O runtimes: config, the token file, redaction, the normaliser, the flock, the publisher's throttle, persistence"
+license = "MIT"
+publish = false
+# A member of the shell's workspace (shell/src-tauri/Cargo.toml), so all three share one
+# Cargo.lock. It lives outside that directory, hence the pointer back.
+workspace = "../../shell/src-tauri"
+
+# Platform-neutral on purpose (distribution plan D1): no tokio, no Tauri, no AppKit.
+# regex has no look-around or backreferences, so the redaction patterns that use them
+# are matched in two steps (see redact.rs); unicode-normalization does the NFKC fold.
+[dependencies]
+regex = "1"
+unicode-normalization = "0.1.25"
+url = "2"
+sha2 = "0.10"
+getrandom = "0.3"
+indexmap = "2"

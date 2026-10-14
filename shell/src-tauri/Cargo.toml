@@ -6,9 +6,9 @@ description = "bellwether's overlay: a transparent click-through strip of sheep,
 license = "MIT"
 publish = false
 
-# The brain crate (crates/brain) shares this workspace and its Cargo.lock.
+# The brain crates (crates/core, crates/brain) share this workspace and its Cargo.lock.
 [workspace]
-members = [".", "../../crates/brain"]
+members = [".", "../../crates/core", "../../crates/brain"]
 
 [lib]
 name = "bellwether_shell_lib"
@@ -20,7 +20,7 @@ crate-type = ["rlib"]
 # scripts/build-app.mjs turns it on, so a release build answers `Bellwether __fixture`
 # with "unknown command" (pinned by cli.rs's tests and the CI release check).
 [features]
-conformance = []
+conformance = ["bellwether-brain/conformance"]
 
 [build-dependencies]
 tauri-build = { version = "=2.7.1", features = [] }
@@ -34,11 +34,67 @@ sha2 = "0.10"
 libc = "0.2"
 ureq = { version = "=3.4.2", default-features = false, features = ["json"] }
 bellwether-brain = { path = "../../crates/brain" }
+bellwether-core = { path = "../../crates/core" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSBundle"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
+
+# Dev builds run the conformance suite and the differential: the regex engine, the
+# NFKC tables and the redaction scans are optimised even there, or 5 MB inputs would
+# take seconds in a debug build. Release builds are unaffected.
+[profile.dev.package.bellwether-core]
+opt-level = 2
+[profile.dev.package.regex]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.regex-automata]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.regex-syntax]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.aho-corasick]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.memchr]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.unicode-normalization]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.sha2]
+opt-level = 3
+# The brain's server stack, so a dev build's /hook latency is like a release build's
+# (brain-server.test.mjs holds /hook p99 under 5 ms against either brain).
+[profile.dev.package.bellwether-brain]
+opt-level = 2
+[profile.dev.package.tokio]
+opt-level = 3
+debug-assertions = false
+[profile.dev.package.hyper]
+opt-level = 3
+debug-assertions = false
+[profile.dev.package.hyper-util]
+opt-level = 3
+debug-assertions = false
+[profile.dev.package.http]
+opt-level = 3
+[profile.dev.package.http-body-util]
+opt-level = 3
+[profile.dev.package.httparse]
+opt-level = 3
+[profile.dev.package.bytes]
+opt-level = 3
+[profile.dev.package.mio]
+opt-level = 3
 
 [profile.release]
 codegen-units = 1

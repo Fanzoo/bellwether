@@ -5,14 +5,9 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { startBrain } from '../brain/brain.mjs';
-import { call } from '../brain/client.mjs';
-import { withDefaults } from '../brain/defaults.mjs';
-import { Flock } from '../brain/flock.mjs';
-import { normalise } from '../brain/normalise.mjs';
-import { makeTextCleaner } from '../brain/redact.mjs';
-import { rebuild } from '../brain/replay.mjs';
-import { AGENT_DIR, TOKEN, cleaningProblems, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, cleaningProblems, notUnderRust, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { Flock, call, makeTextCleaner, normalise, rebuild, startBrain, withDefaults } from './impl.mjs';
 
 /**
  * Independent tester probes for Milestone 2. In-process pieces use port 0 and temp
@@ -43,6 +38,23 @@ describe('redaction: nothing that looks like a credential survives into a bubble
       }
     });
   }
+
+  test('URL credentials run to the last @ before the host; @ in a path or query is never userinfo (milestone 3 fix)', () => {
+    const vectors = readVectors('redact', 'URL credentials');
+    assert.ok(vectors.length >= 12);
+    for (const v of vectors) {
+      const out = makeTextCleaner({ maxChars: v.maxChars, redactPatterns: v.redactPatterns })(v.text);
+      assert.equal(out, v.expected, v.name);
+      if (v.mustNotContain) assert.ok(!out.includes(v.mustNotContain), `${v.name}: ${out}`);
+      if (v.mustEqual) assert.equal(out, v.mustEqual, v.name);
+    }
+    assert.equal(makeTextCleaner({ maxChars: 60 })('curl https://u%40x:p@ss:w0rd@h.test/'), 'curl https://u%40x:•••@h.test/');
+    // Known gaps, pinned as they are today (follow-ups in the plan's M3 status): a change
+    // to them must be deliberate, and must reach both brains.
+    const gaps = readVectors('redact', 'URL credentials, known gaps');
+    assert.equal(gaps.length, 3);
+    for (const v of gaps) assert.equal(makeTextCleaner({ maxChars: v.maxChars, redactPatterns: v.redactPatterns })(v.text), v.expected, `${v.name} (known ${v.knownGap})`);
+  });
 
   test('redact happens before truncation: a secret straddling the cut leaves no recognisable prefix', () => {
     const clean = makeTextCleaner({ maxChars: 60, redactPatterns: [] });
@@ -632,7 +644,7 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   const cmd = (c) => ({ type: 'command', command: c });
   const http_ = (url, extra = {}) => ({ type: 'http', url, ...extra });
 
-  test('foreign URLs near ours are never claimed: install and uninstall leave them byte-identical', () => {
+  test('foreign URLs near ours are never claimed: install and uninstall leave them byte-identical', notUnderRust('hooks install and uninstall are ported in milestone 4'), () => {
     const u = `http://127.0.0.1:${port}`;
     const foreign = [
       http_(`${u}/hooks`), http_(`${u}/hook2`), http_(`${u}/hook/sub`), http_(`${u}/hook?x=1`), http_(`${u}/hook#f`), http_(`${u}/hook `),
@@ -647,7 +659,7 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
     assert.equal(read(f), text);
   });
 
-  test('--port removes only the exact old-port entries; the configured install is untouched; install/print refuse --port', () => {
+  test('--port removes only the exact old-port entries; the configured install is untouched; install/print refuse --port', notUnderRust('hooks install and uninstall are ported in milestone 4'), () => {
     const f = settings('portmove.json', { hooks: { Stop: [{ hooks: [cmd('keep')] }] } });
     assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
     const withOld = JSON.parse(read(f));
@@ -674,7 +686,7 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
     assert.equal(JSON.parse(read(f)).hooks.Stop.length, after.hooks.Stop.length);
   });
 
-  test('--port naming the configured port behaves like a normal uninstall and a foreign tool on another port needs an explicit --port', () => {
+  test('--port naming the configured port behaves like a normal uninstall and a foreign tool on another port needs an explicit --port', notUnderRust('hooks install and uninstall are ported in milestone 4'), () => {
     const f = settings('portsame.json', { hooks: { Stop: [{ hooks: [http_('http://127.0.0.1:3000/hook')] }] } });
     assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
     assert.equal(bellwether(['hooks', 'uninstall', '--write', '--settings', f]).code, 0);

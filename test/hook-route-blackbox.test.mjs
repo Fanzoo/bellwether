@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, IMPL, TOKEN, hookHeaders, request, spawnBrain, tempDir } from './helpers.mjs';
+import { spawn } from 'node:child_process';
+import { AGENT_DIR, IMPL, TOKEN, brainCommand, hookHeaders, request, spawnBrain, tempDir } from './helpers.mjs';
 
 /**
  * The /hook guard matrix from hook-route.test.mjs, black-box: against a brain process,
@@ -29,8 +30,13 @@ function freePort() {
   });
 }
 
-/** Starts one brain on a free port (never 47417) and waits for /health. */
-async function startBrain(extra = []) {
+/**
+ * Starts one brain on a free port (never 47417) and waits for /health. `fdSoftLimit`
+ * starts it through /bin/sh with that soft limit on open files (`ulimit -S -n`), the way
+ * launchd starts an agent with 256. `readStderr: false` never reads the brain's stderr
+ * pipe, so it fills up, as under a parent that stops draining it.
+ */
+async function startBrain(extra = [], { fdSoftLimit = null, readStderr = true } = {}) {
   const port = await freePort();
   const dir = tempDir('bw-blackbox-');
   const env = { ...process.env, BELLWETHER_HOOK_TOKEN: TOKEN };
@@ -46,9 +52,15 @@ async function startBrain(extra = []) {
     env.BELLWETHER_CONFIG = config;
     env.BELLWETHER_DATA_DIR = path.join(dir, 'data');
   }
-  const child = spawnBrain(args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
+  let child;
+  if (fdSoftLimit) {
+    const { file, args: a, options } = brainCommand(args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
+    child = spawn('/bin/sh', ['-c', `ulimit -S -n ${Number(fdSoftLimit)} && exec "$0" "$@"`, file, ...a], options);
+  } else {
+    child = spawnBrain(args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
+  }
   let stderr = '';
-  child.stderr.on('data', (d) => (stderr += d));
+  if (readStderr) child.stderr.on('data', (d) => (stderr += d));
   const deadline = Date.now() + 15000;
   for (;;) {
     try {
@@ -70,6 +82,8 @@ async function startBrain(extra = []) {
     }),
   };
 }
+
+const health = async (port) => JSON.parse((await request(port, { method: 'GET', path: '/health', headers: { Host: `127.0.0.1:${port}` } })).body);
 
 function assertEmpty(res, status) {
   assert.equal(res.status, status);
@@ -199,6 +213,71 @@ describe(`/hook, black-box (${IMPL} brain)`, () => {
     assert.equal(h.mode, 'normal');
     for (const k of ['accepted', 'malformed', 'oversize', 'unknownEvent', 'consumerErrors']) assert.equal(typeof h.counters[k], 'number', k);
     assert.deepEqual(Object.keys(h.counters.rejected).sort(), ['contentType', 'host', 'origin', 'token']);
+  });
+});
+
+describe(`connections, black-box (${IMPL} brain)`, () => {
+  // The M1 review found new hooks waiting for the 10 s header timeout once about 250 idle
+  // connections were open (launchd gives an agent 256 file descriptors). Milestone 3 bounds
+  // connections (crates/brain/src/conns.rs).
+  test('300 idle connections open under a 256-file limit: a tokened hook still gets its empty 204 at once', { skip: process.platform === 'win32' }, async () => {
+    const brain = await startBrain([], { fdSoftLimit: 256 });
+    const sockets = [];
+    try {
+      for (let i = 0; i < 300; i++) {
+        const s = net.connect(brain.port, '127.0.0.1');
+        s.on('error', () => {});
+        sockets.push(s);
+      }
+      await Promise.all(sockets.map((s) => new Promise((r) => (s.once('connect', r), s.once('close', r)))));
+      await new Promise((r) => setTimeout(r, 300));
+      // On a new connection, as Claude Code sends each hook (a pooled keep-alive socket
+      // from the /health polling above would skip accept(), where the limit bites).
+      const body = '{"hook_event_name":"Stop","session_id":"cap"}';
+      const t0 = process.hrtime.bigint();
+      const answer = await new Promise((resolve) => {
+        const sock = net.connect(brain.port, '127.0.0.1');
+        let data = '';
+        sock.on('data', (d) => (data += d));
+        sock.on('end', () => resolve(data));
+        sock.on('error', (e) => resolve(`error ${e.code}`));
+        sock.setTimeout(5000, () => (sock.destroy(), resolve(data || 'no answer within 5 s')));
+        sock.write([`POST /hook HTTP/1.1`, `Host: 127.0.0.1:${brain.port}`, 'Content-Type: application/json', `X-Bellwether-Token: ${TOKEN}`, `Content-Length: ${body.length}`, 'Connection: close', '', body].join('\r\n'));
+      });
+      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      assert.match(answer, /^HTTP\/1\.1 204 /, `with 300 idle connections open: ${answer.slice(0, 60)}`);
+      assert.doesNotMatch(answer.toLowerCase(), /content-type/);
+      assert.ok(ms < 1000, `/hook took ${ms.toFixed(0)} ms with 300 idle connections open`);
+    } finally {
+      for (const s of sockets) s.destroy();
+      await brain.stop();
+    }
+  });
+});
+
+describe(`a stderr nobody reads, black-box (${IMPL} brain)`, () => {
+  // BR-3K's M3 finding: with stderr piped and never read, logging blocked the Rust brain's
+  // only thread at about 64 KB, and /hook with it. The brain's logging may drop lines; /hook
+  // must never wait (plan D1).
+  test('3000 hooks with a full stderr pipe: each an empty 204 at once, and /health still answers', async () => {
+    const brain = await startBrain([], { readStderr: false });
+    try {
+      const before = await health(brain.port);
+      let slowest = 0;
+      for (let i = 0; i < 3000; i++) {
+        const t0 = process.hrtime.bigint();
+        const res = await request(brain.port, { headers: hookHeaders(brain.port), body: JSON.stringify({ hook_event_name: 'PreToolUse', session_id: `stderr-${i % 7}`, tool_name: 'Read', tool_use_id: `t${i}`, tool_input: { file_path: `/w/f${i}.txt` } }) });
+        slowest = Math.max(slowest, Number(process.hrtime.bigint() - t0) / 1e6);
+        assertEmpty(res, 204);
+      }
+      assert.ok(slowest < 1000, `the slowest /hook took ${slowest.toFixed(0)} ms`);
+      const after = await health(brain.port);
+      assert.equal(after.counters.accepted, before.counters.accepted + 3000);
+      // The Rust brain drops log lines it can't write, and says how many (DIVERGENCES 3).
+      if (IMPL === 'rust') assert.ok(after.counters.logDropped > 0, JSON.stringify(after.counters));
+    } finally {
+      await brain.stop();
+    }
   });
 });
 

@@ -39,6 +39,12 @@ pub fn wanted_names(config: &Value) -> Vec<String> {
 /// can). The same rules as brain/privacy.mjs, which `bellwether doctor` uses.
 pub fn sharing_warnings(config: &Value) -> Vec<String> {
     let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(windows) { "win32" } else { "linux" };
+    sharing_warnings_for(config, os)
+}
+
+/// The same rules for one platform's list (`darwin`, `win32`, `linux`), as
+/// sharingProcessWarnings(config, platform) in brain/privacy.mjs has them.
+pub fn sharing_warnings_for(config: &Value, os: &str) -> Vec<String> {
     let Some(list) = config.pointer(&format!("/privacy/sharingProcesses/{os}")) else { return Vec::new() };
     let Some(list) = list.as_array() else { return vec![format!("privacy.sharingProcesses.{os} is not a list of process names")] };
     list.iter()

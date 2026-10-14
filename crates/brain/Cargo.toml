@@ -2,17 +2,24 @@
 name = "bellwether-brain"
 version = "0.1.0"
 edition = "2021"
-description = "bellwether's brain in Rust: the loopback hook listener (milestone 1: /hook and /health)"
+description = "bellwether's brain in Rust: the loopback listener (/hook, /health, /state, /control) and the brain's CLI commands"
 license = "MIT"
 publish = false
 # A member of the shell's workspace (shell/src-tauri/Cargo.toml), so both share one
 # Cargo.lock. It lives outside that directory, hence the pointer back.
 workspace = "../../shell/src-tauri"
 
-# Platform-neutral on purpose: std, tokio, hyper, sha2 and serde_json only. Nothing
-# here may pull in Tauri, AppKit or WebKit.
+# `conformance`: test knobs (shorter timings, a lower connection cap) read from the
+# environment by `serve`. Turned on only by the shell's own `conformance` feature, which
+# no release build has.
+[features]
+conformance = []
+
+# Platform-neutral on purpose: std, tokio, hyper, sha2, serde_json and crates/core.
+# Nothing here may pull in Tauri, AppKit or WebKit.
 [dependencies]
-tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "signal", "sync"] }
+bellwether-core = { path = "../core" }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "signal", "sync", "macros"] }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 http-body-util = "0.1"
@@ -20,3 +27,5 @@ bytes = "1"
 sha2 = "0.10"
 serde_json = "1"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

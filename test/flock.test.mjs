@@ -2,13 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { withDefaults } from '../brain/defaults.mjs';
-import { Flock } from '../brain/flock.mjs';
-import { identityOf } from '../brain/identity.mjs';
-import { normalise } from '../brain/normalise.mjs';
-import { makeTextCleaner } from '../brain/redact.mjs';
 import { readJsonl, runFixture } from './fixture-runner.mjs';
-import { AGENT_DIR, FIXTURES, readVectors } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, IMPL, readVectors } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { Flock, LIMITS, identityOf as identityOfImpl, makeTextCleaner, normalise, withDefaults } from './impl.mjs';
+
+const identityOf = identityOfImpl;
 
 /**
  * The reducer, with a fake clock throughout: every event carries its own time and
@@ -23,8 +22,11 @@ describe('fixtures reproduce their expected transitions exactly', () => {
   for (const f of scenarios) {
     test(f, () => {
       const expectedFile = path.join(FIXTURES, f.replace(/\.jsonl$/, '.expected.jsonl'));
-      const expected = fs.readFileSync(expectedFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-      assert.deepEqual(runFixture(readJsonl(path.join(FIXTURES, f))).transitions, expected);
+      const lines = fs.readFileSync(expectedFile, 'utf8').split('\n').filter(Boolean);
+      const got = runFixture(readJsonl(path.join(FIXTURES, f))).transitions;
+      assert.deepEqual(got, lines.map((l) => JSON.parse(l)));
+      // Byte for byte, as the file has them (crates/core's tests/fixtures.rs does the same).
+      assert.deepEqual(got.map((t) => JSON.stringify(t)), lines);
     });
   }
 });
@@ -300,8 +302,12 @@ describe('control', () => {
 describe('content never kept', () => {
   test('no brain module reads prompt, tool_output, tool_response, last_assistant_message, compact_summary, agent_transcript_path or transcript_path', () => {
     const names = ['prompt', 'tool_output', 'tool_response', 'last_assistant_message', 'compact_summary', 'agent_transcript_path', 'transcript_path', 'custom_instructions', 'requested_schema', 'form_values', 'error_details'];
-    for (const f of fs.readdirSync(path.join(AGENT_DIR, 'brain')).filter((f) => f.endsWith('.mjs'))) {
-      const code = fs.readFileSync(path.join(AGENT_DIR, 'brain', f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    // The brain under test: brain/*.mjs, or the Rust brain's sources (crates/core, crates/brain).
+    const dirs = IMPL === 'rust' ? ['crates/core/src', 'crates/brain/src'] : ['brain'];
+    const sources = dirs.flatMap((d) => fs.readdirSync(path.join(AGENT_DIR, d)).filter((f) => /\.(mjs|rs)$/.test(f)).map((f) => path.join(d, f)));
+    assert.ok(sources.length > 5, sources.join());
+    for (const f of sources) {
+      const code = fs.readFileSync(path.join(AGENT_DIR, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
       for (const n of names) {
         assert.doesNotMatch(code, new RegExp(`(\\.${n}\\b|\\[\\s*['"\`]${n}['"\`]\\s*\\]|['"\`]${n}['"\`])`), `${f} names ${n}`);
       }
@@ -375,7 +381,6 @@ describe('M2 verification fixes', () => {
   });
 
   test('identities are capped: the least recently seen absent ones go first', async () => {
-    const { LIMITS } = await import('../brain/flock.mjs');
     const f = new Flock({ config: CONFIG });
     // Each sheep arrives, exits and is gone before the next, so none is present.
     for (let i = 0; i <= LIMITS.identities + 5; i++) {
@@ -431,7 +436,6 @@ describe('M2 re-check fixes', () => {
   });
 
   test('at most 200 sheep at once; the least recently seen one without an alert makes room', async () => {
-    const { LIMITS } = await import('../brain/flock.mjs');
     const f = new Flock({ config: CONFIG });
     f.apply({ event: 'PermissionRequest', sessionId: 'alerting', receivedAt: 0, toolName: 'Bash', toolFingerprint: 'f', terminal: {} });
     for (let i = 0; i < LIMITS.sheep + 50; i++) f.apply({ event: 'UserPromptSubmit', sessionId: `x${i}`, receivedAt: 1 + i, terminal: {} });

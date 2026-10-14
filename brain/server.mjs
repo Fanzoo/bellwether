@@ -103,8 +103,14 @@ export function describe(ev) {
  * reach the file.
  */
 export function createRecorder(file) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const fd = fs.openSync(file, 'a');
+  let fd;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fd = fs.openSync(file, 'a');
+  } catch (e) {
+    // A directory that can't be written: one line and exit 3, not a stack trace.
+    throw new CliError(`cannot open ${file}: ${e.code ?? e.message}`, EXIT.BAD_CONFIG);
+  }
   return {
     file,
     write(payload, headers, receivedAt) {

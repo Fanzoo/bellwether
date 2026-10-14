@@ -124,8 +124,15 @@ function redactCase(r) {
       () => r.pick(odd),
       () => r.pick(['git push origin main', 'ls -la', 'docker run -p 8080:80 x', 'echo "hi"', 'curl -u', 'mysql -uroot', 'aws configure set', 'vault login']),
       () => r.pick(['"', "'", '`', '\\', ' ', '  ', ';', '|', '&&', '{', '}']),
+      // URL userinfo up to the last @ (milestone 3): @ and : in passwords, @ in paths and
+      // queries, several URLs, no path, percent-encoded @.
+      () => `${r.pick(['https', 'redis', 'git+ssh', 'x'])}://${r.pick(['', word(r, 3), `${word(r, 2)}@${word(r, 2)}`, '%40u'])}${r.pick([':', ''])}${r.repeat(1 + r.int(3), () => r.pick([word(r, 3), '@', ':', '%40', '😀', '#']))}@${word(r, 4)}${r.pick(['', ':8443', '?q=a:b@c', '/p/a@b.test', '/x?e=u:v@w', ',https://a:b@c@d/'])}`,
+      // Values near the 200-unit bounds, with astral characters counting twice (JS without
+      // the u flag counts code units).
+      () => `${r.pick(names)}${r.pick(['=', '="', ': '])}${r.repeat(90 + r.int(30), () => r.pick(['a', '😀', 'é', '\ud83d']))}${r.pick(['', '"'])}`,
+      () => `Cookie: ${r.repeat(990 + r.int(20), () => r.pick(['a', '😀', ';']))}`,
     ])();
-  const patterns = r.chance(0.2) ? [r.pick(['(?i)hunter\\d', 'secret-[a-z]+', '(?i)corp_[0-9]{3,}'])] : [];
+  const patterns = r.chance(0.2) ? [r.pick(['(?i)hunter\\d', 'secret-[a-z]+', '(?i)corp_[0-9]{3,}', '\\bkey-[0-9a-f]{4,}\\b', '[^\\s]{30,}', '(?i)p[a@]ss\\w*', 'x.y', '[\\d-]{6}', 'a{', '(?:ab|cd)+e?'])] : [];
   return { text: r.repeat(1 + r.int(8), () => piece() + (r.chance(0.6) ? ' ' : '')), maxChars: r.pick([8, 20, 60, 200, 500]), redactPatterns: patterns };
 }
 

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { envAssignments } from './envfile.mjs';
+import { tokenProblem } from './config.mjs';
 import { CliError, EXIT } from './util.mjs';
 
 const KEY = 'BELLWETHER_HOOK_TOKEN';
@@ -26,7 +27,7 @@ export const OLD_KEY = 'PASTURE_HOOK_TOKEN';
  *   installed keep matching. `value` (from `bellwether migrate`) does the same with a
  *   token read from elsewhere.
  */
-export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toString('base64url'), value = null } = {}) {
+export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toString('base64url'), value = null, force = false } = {}) {
   let real = envFile;
   let text = '';
   let mode = 0o600;
@@ -47,11 +48,15 @@ export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toS
   }
   const all = envAssignments(text, KEY);
   const last = all[all.length - 1];
-  if (last && last.value !== '') {
+  // A value that is there but can't be used (too short, odd characters, a published
+  // example) is left alone too, and said so: only --force replaces it.
+  const problem = last && last.value !== '' ? tokenProblem(last.value) : null;
+  if (last && last.value !== '' && !(problem && force)) {
+    if (problem) return { changed: false, unusable: true, message: `${KEY} is already set in ${envFile} but isn't a usable token (${problem}); left alone. Fix it, or run \`bellwether token init --force\` to replace it` };
     return { changed: false, message: `${KEY} is already set in ${envFile}; left alone (to replace it, edit the file, then re-run \`bellwether hooks install --write\`)` };
   }
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const old = envAssignments(text, OLD_KEY).at(-1)?.value || null;
+  const old = problem ? null : envAssignments(text, OLD_KEY).at(-1)?.value || null;
   const from = value ? 'the old install' : old ? `${OLD_KEY} in the same file` : null;
   const token = value || old || generate();
   const assignment = `${KEY}=${token}`;
@@ -86,6 +91,6 @@ export function tokenInit(envFile, { generate = () => crypto.randomBytes(24).toS
     } catch {}
     throw new CliError(`can't write ${envFile} (${e.code ?? e.message}); it was not changed`, EXIT.BAD_CONFIG);
   }
-  const what = from ? `${KEY} (the same value as ${from}, so installed hooks keep working)` : `a new ${KEY}`;
+  const what = problem ? `a new ${KEY} in place of the unusable one` : from ? `${KEY} (the same value as ${from}, so installed hooks keep working)` : `a new ${KEY}`;
   return { changed: true, message: `added ${what} to ${envFile}${last ? ' (filled the empty line)' : ''}${exists ? `; the previous contents are in ${real}.bak` : ''}; the value isn't shown` };
 }

@@ -42,8 +42,8 @@ export function newestRustSource() {
       else if (/\.(rs|toml)$/.test(e.name)) newest = Math.max(newest, fs.statSync(p).mtimeMs);
     }
   };
-  for (const d of [path.join(AGENT_DIR, 'crates', 'brain', 'src'), path.join(AGENT_DIR, 'shell', 'src-tauri', 'src')]) walk(d);
-  for (const f of [path.join(AGENT_DIR, 'crates', 'brain', 'Cargo.toml'), path.join(AGENT_DIR, 'shell', 'src-tauri', 'Cargo.toml')]) newest = Math.max(newest, fs.statSync(f).mtimeMs);
+  for (const d of [path.join(AGENT_DIR, 'crates', 'core', 'src'), path.join(AGENT_DIR, 'crates', 'brain', 'src'), path.join(AGENT_DIR, 'shell', 'src-tauri', 'src')]) walk(d);
+  for (const f of [path.join(AGENT_DIR, 'crates', 'core', 'Cargo.toml'), path.join(AGENT_DIR, 'crates', 'brain', 'Cargo.toml'), path.join(AGENT_DIR, 'shell', 'src-tauri', 'Cargo.toml')]) newest = Math.max(newest, fs.statSync(f).mtimeMs);
   return newest;
 }
 
@@ -60,8 +60,8 @@ export function rustBin() {
   return RUST_BIN;
 }
 
-// One Rust home per Node config and data dir, so the calls of one test share a home the
-// way its Node calls share a config and a data dir.
+// One Rust home per Node config, for calls that give no data dir: the calls of one test
+// share a home the way its Node calls share a data dir.
 const rustHomes = new Map();
 
 /** The port in a config file, or null. */
@@ -74,38 +74,58 @@ function portIn(file) {
   }
 }
 
+/** Whether a file holds a JSON object (a config the Rust binary would act on). */
+function isJsonObject(file) {
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return !!v && typeof v === 'object' && !Array.isArray(v);
+  } catch {
+    return false;
+  }
+}
+
 /**
- * The environment for the Rust binary, from the one a test gives the Node CLI. The Rust
- * binary reads BELLWETHER_HOME (config.json, hook-token, logs) and BELLWETHER_HOOK_TOKEN;
- * the Node CLI's BELLWETHER_CONFIG and BELLWETHER_DATA_DIR become a temp home whose
- * config.json carries the same port. The preload's guard can't see inside a Rust
- * process, so the live port is refused here: a home or an argument that would make the
- * binary use 47417 throws.
+ * The environment for the Rust binary, from the one a test gives the Node CLI:
+ *
+ * - its home (state.json, shell-state.json, recordings, logs) is BELLWETHER_HOME if the
+ *   test sets one, else the Node CLI's BELLWETHER_DATA_DIR, so files land where the test
+ *   looks for them, else a temp home per config;
+ * - its config is the file the Node CLI would read (BELLWETHER_CONFIG, else a copied
+ *   checkout's own config.json or config.example.json, else the suite's isolated one),
+ *   passed whole as BELLWETHER_CONFIG. A config whose port is missing or 47417 is copied
+ *   with the suite's test port instead (the Rust brain defaults a missing port to 47417).
+ *
+ * The preload's guard can't see inside a Rust process, so the live port is refused here:
+ * an argument or a config that would make the binary use 47417 throws. A config that isn't
+ * a JSON object is passed as it is: the binary refuses it (exit 3) before it binds.
  */
 function rustEnv(args, given, root) {
   const env = { ...given };
   const at = args.findIndex((a) => a === '--port' || a.startsWith('--port='));
   const argPort = at < 0 ? null : Number(args[at].includes('=') ? args[at].split('=')[1] : args[at + 1]);
   if (argPort === LIVE_PORT) throw new Error(`refused under BELLWETHER_IMPL=rust: --port ${LIVE_PORT} is the live brain's port`);
-  if (!env.BELLWETHER_HOME) {
-    // The config the Node CLI would read: BELLWETHER_CONFIG, else a copied checkout's
-    // own config, else the suite's isolated one (never this checkout's config.json).
-    let config = env.BELLWETHER_CONFIG;
-    if (!config && root !== AGENT_DIR) config = ['config.json', 'config.example.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
-    config ??= ISOLATED.BELLWETHER_CONFIG;
-    const key = `${path.resolve(config)}|${env.BELLWETHER_DATA_DIR ?? ''}`;
-    if (!rustHomes.has(key)) {
-      const home = tempDir('bw-rust-home-');
-      let port = portIn(config);
-      if (port === null || port === LIVE_PORT) port = portIn(ISOLATED.BELLWETHER_CONFIG);
-      fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ port }, null, 2) + '\n');
-      rustHomes.set(key, home);
+  let config = env.BELLWETHER_CONFIG;
+  if (!config && root !== AGENT_DIR) config = ['config.json', 'config.example.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
+  config = path.resolve(config ?? ISOLATED.BELLWETHER_CONFIG);
+  if (isJsonObject(config)) {
+    const port = portIn(config);
+    if (port === null || port === LIVE_PORT) {
+      const copy = path.join(tempDir('bw-rust-config-'), 'config.json');
+      fs.writeFileSync(copy, JSON.stringify({ ...JSON.parse(fs.readFileSync(config, 'utf8')), port: portIn(ISOLATED.BELLWETHER_CONFIG) }, null, 2) + '\n');
+      config = copy;
     }
-    env.BELLWETHER_HOME = rustHomes.get(key);
   }
-  const homePort = portIn(path.join(env.BELLWETHER_HOME, 'config.json'));
-  if (argPort === null && (homePort === null || homePort === LIVE_PORT)) {
-    throw new Error(`refused under BELLWETHER_IMPL=rust: ${env.BELLWETHER_HOME} has no config.json with a test port, so the Rust binary would use the live port ${LIVE_PORT}; pass --port or give the home a config.json`);
+  env.BELLWETHER_CONFIG = config;
+  if (!env.BELLWETHER_HOME) {
+    if (env.BELLWETHER_DATA_DIR) env.BELLWETHER_HOME = path.resolve(env.BELLWETHER_DATA_DIR);
+    else {
+      if (!rustHomes.has(config)) rustHomes.set(config, tempDir('bw-rust-home-'));
+      env.BELLWETHER_HOME = rustHomes.get(config);
+    }
+  }
+  const effective = portIn(config);
+  if (argPort === null && isJsonObject(config) && (effective === null || effective === LIVE_PORT)) {
+    throw new Error(`refused under BELLWETHER_IMPL=rust: ${config} would make the Rust binary use the live port ${LIVE_PORT}; pass --port or give the config a test port`);
   }
   return env;
 }
@@ -154,6 +174,16 @@ if (IMPL === 'rust') {
       process.exit(sig === 'SIGTERM' ? 143 : 130);
     });
   }
+}
+
+/**
+ * Test options for a test that has nothing to check in the Rust brain yet, with the reason
+ * (`test(name, notUnderRust('…'), fn)`). Under node it runs as always; under rust the
+ * parity table counts it as skipped, never as passed. Each use names the milestone or the
+ * test/DIVERGENCES.md entry that explains it.
+ */
+export function notUnderRust(why) {
+  return IMPL === 'rust' ? { skip: `not under rust: ${why}` } : {};
 }
 
 /** `spawn` for the brain or its CLI (see brainCommand). */

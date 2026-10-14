@@ -11,10 +11,12 @@
  *                                                GITHUB_STEP_SUMMARY, which is used too)
  *
  * The rows: every file test/conformance.json names, with the milestone that turns it
- * green, plus every other file that starts the brain through test/helpers.mjs. A file
- * that never starts the brain (it imports brain/*.mjs and tests it in process) has no
- * rust result until its milestone wires it to the Rust binary: its rust cell says
- * "not wired", and counts as red.
+ * green, plus every other file that starts the brain through test/helpers.mjs. A file is
+ * wired to the Rust brain when it starts the brain through the helper or takes the brain's
+ * parts from test/impl.mjs (the Rust brain's `__session` under rust). A file that only
+ * imports brain/*.mjs has no rust result until its milestone wires it: its rust cell says
+ * "not wired", and counts as red. A test with nothing to check in the Rust brain yet says
+ * so (`notUnderRust` in helpers.mjs, with its reason) and is counted as skipped.
  *
  * Exit 1 when a node cell is red, or when a row whose milestone is at or before the
  * manifest's `current` is red under rust. Most rust cells are expected to be red until
@@ -58,10 +60,14 @@ function fail(message) {
   process.exit(3);
 }
 
-/** What a test file does: starts the brain through the helper, imports brain/*.mjs. */
+/**
+ * What a test file does: starts the brain through the helper or uses test/impl.mjs (either
+ * makes it "wired"), and whether it still imports brain/*.mjs directly.
+ */
 function scan(file) {
   const text = fs.readFileSync(path.join(TEST_DIR, file), 'utf8');
-  return { spawns: /\bspawnBrain(Sync)?\(/.test(text), inProcess: /from '\.\.\/brain\//.test(text) || /import\(['"`]\.\.\/brain\//.test(text) };
+  const spawns = /\bspawnBrain(Sync)?\(/.test(text) || /from '\.\/impl\.mjs'/.test(text);
+  return { spawns, inProcess: /from '\.\.\/brain\//.test(text) || /import\(['"`]\.\.\/brain\//.test(text) };
 }
 
 const milestoneNumber = (m) => Number(String(m).replace(/^M/, ''));
@@ -146,8 +152,12 @@ function cell(r, row = null, impl = null) {
   if (!r) return '–';
   if (r.status === 'not wired') return 'not wired';
   if (r.timedOut) return 'TIMEOUT';
-  // Skipped tests are neither passes nor failures: shown apart.
-  const n = `${r.pass}/${r.tests - r.skipped - r.todo}${r.skipped ? `, ${r.skipped} skipped` : ''}`;
+  // Skipped tests are neither passes nor failures: shown apart. A skipped suite registers
+  // none of its tests (TAP counts it once), so under rust the skips are counted from the
+  // node run of the same file: every test node has that rust didn't run.
+  let skipped = r.skipped;
+  if (impl === 'rust' && row?.node?.tests) skipped = Math.max(r.skipped, row.node.tests - (r.pass + r.fail + r.cancelled + r.todo));
+  const n = `${r.pass}/${r.pass + r.fail + r.cancelled}${skipped ? `, ${skipped} skipped` : ''}`;
   // A rust pass for a file that also tests brain/*.mjs in process covers only its tests
   // that start the brain.
   const star = impl === 'rust' && row?.inProcess ? ' *' : '';
@@ -163,6 +173,7 @@ function table(results, manifest, impls) {
   for (const row of results) {
     const notes = [];
     if (!row.spawns) notes.push('in-process JS only');
+    if (row[impls.at(-1)]?.skipped && impls.includes('rust')) notes.push('skips: each says why (notUnderRust: nothing in the Rust brain yet; or the file\'s own skip)');
     else if (row.inProcess) notes.push('also tests brain/*.mjs in process');
     if (row.milestone && milestoneNumber(row.milestone) <= milestoneNumber(manifest.current)) notes.push(`required now (${manifest.current})`);
     const rust = row.rust;
@@ -225,6 +236,9 @@ async function main() {
     impls.includes('node') ? `- node: ${results.length - red.node.length} of ${results.length} files green` : null,
     impls.includes('rust') ? `- rust: ${greenRust} of ${results.length} files green; required by ${manifest.current}: ${required.length - red.rustRequired.length} of ${required.length} green` : null,
     '- "not wired": the file tests brain/*.mjs in process, so it has no rust result until its milestone runs it against the Rust binary.',
+    impls.includes('node') && impls.includes('rust')
+      ? '- "skipped" in the rust column counts every test the node run of the same file has and the rust run didn\'t run, those inside a skipped suite included.'
+      : '- "skipped" is TAP\'s count: a skipped suite counts once, however many tests it holds.',
     '- "pass *": the file also tests brain/*.mjs in process; the rust result speaks only for its tests that start the brain (for some, only that an unported command leaks nothing).',
     ...nodeFailures(results),
   ]

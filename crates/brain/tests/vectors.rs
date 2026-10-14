@@ -2,13 +2,11 @@
 //! tests check every answer in them against brain/*.mjs; test/fixtures/build-vectors.mjs
 //! makes them.
 //!
-//! Milestone 2 has no Rust redaction, normaliser, config loader, installer or diff yet
-//! (they come with milestones 3 and 4, in crates/core), so this checks that each file is
-//! complete and readable here: every case has what the port will need to answer it and
-//! the Node answer to compare with. When a module is ported, its comparison goes here,
-//! next to the shape check, and any answer that differs is a bug or an entry in
-//! test/DIVERGENCES.md. The `.env` vectors are already compared: see the shell's
-//! settings.rs and conformance.rs.
+//! This checks that each file is complete and readable: every case has what the port
+//! needs to answer it and the Node answer to compare with. The answers themselves are
+//! compared where each module is ported: redaction, normalising and config in
+//! crates/core/tests/vectors.rs (milestone 3); the installer and the diff in milestone 4.
+//! The `.env` vectors: crates/core's envfile.rs and the shell's settings.rs.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -51,7 +49,7 @@ fn redact_vectors_are_complete() {
             assert!(!expected.contains(secret), "{}: the Node answer keeps {secret:?}", v["name"]);
         }
     }
-    // Milestone 3 compares crates/core's cleaner with every `expected` here.
+    // crates/core/tests/vectors.rs compares the cleaner with every `expected` here.
 }
 
 #[test]
@@ -61,7 +59,7 @@ fn normalise_vectors_are_complete() {
         assert!(v["expected"]["event"].is_string(), "{}: no event", v["name"]);
         assert!(v["expected"]["terminal"].is_object(), "{}: no terminal", v["name"]);
     }
-    // Milestone 3 compares crates/core's normaliser with every `expected` here.
+    // crates/core/tests/vectors.rs compares the normaliser with every `expected` here.
 }
 
 #[test]
@@ -77,7 +75,7 @@ fn config_vectors_are_complete() {
             }
         }
     }
-    // Milestone 3 compares crates/core's config loading with these.
+    // crates/core/tests/vectors.rs compares the config loading with these.
 }
 
 #[test]

@@ -28,7 +28,8 @@ const USAGE = `bellwether — Claude Code sessions as sheep (brain CLI)
   bellwether status [--watch] [--json]        the flock as text (long-polls /state with --watch)
   bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]
                                            move a pasture install over: token, config, colours, hooks, LaunchAgents (preview unless --write)
-  bellwether token init                       add a BELLWETHER_HOOK_TOKEN to the .env, only if there is none (never printed)
+  bellwether token init [--force]             add a BELLWETHER_HOOK_TOKEN to the .env, only if there is none (never printed);
+                                           --force replaces one that is there but unusable
   bellwether mute | unmute                    do-not-disturb (the same as the tray's Mute; kept across restarts)
   bellwether show | hide                      show or hide the strip (the same as the tray's Hide; kept across restarts)
   bellwether replay <file.jsonl> [--speed N] [--port P] [--tag <pane>]
@@ -65,7 +66,7 @@ async function main(argv) {
     case 'unmute':
       return muteCommand(command, args(rest, { booleans: [], values: [] }));
     case 'token':
-      return tokenCommand(args(rest, { booleans: [], values: [], positionals: 1 }));
+      return tokenCommand(args(rest, { booleans: ['force'], values: [], positionals: 1 }));
     case 'show':
     case 'hide':
       return showCommand(command, args(rest, { booleans: [], values: [] }));
@@ -234,10 +235,10 @@ function migrateCommand(args) {
 }
 
 function tokenCommand(args) {
-  if (args._[0] !== 'init') throw new CliError('usage: bellwether token init', EXIT.BAD_CONFIG);
-  const { message } = tokenInit(envFilePath());
+  if (args._[0] !== 'init') throw new CliError('usage: bellwether token init [--force]', EXIT.BAD_CONFIG);
+  const { message, unusable } = tokenInit(envFilePath(), { force: args.force === true });
   process.stdout.write(message + '\n');
-  return EXIT.OK;
+  return unusable ? EXIT.BAD_CONFIG : EXIT.OK;
 }
 
 /**

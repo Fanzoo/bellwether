@@ -1,6 +1,7 @@
 //! The brain over real HTTP: every /hook answer is status-only, the guards refuse with
-//! an empty 403, and /health carries only names and numbers. Raw sockets, so every
-//! header (Host, Origin) is under the test's control.
+//! an empty 403, /health carries only names and numbers, /state and /control answer the
+//! token holder only, and connections are bounded. Raw sockets, so every header (Host,
+//! Origin) is under the test's control.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -151,8 +152,151 @@ fn hook_answers_are_status_only_and_the_guards_refuse() {
     let r = request(p, "GET", "/hook", &hook_headers(p), b"").unwrap();
     assert_eq!(r.status, 404);
     assert!(r.body.is_empty());
-    let r = request(p, "GET", "/state", &hook_headers(p), b"").unwrap();
-    assert_eq!(r.status, 404, "/state arrives in milestone 3");
+    let r = request(p, "GET", "/state", &[("Host", format!("127.0.0.1:{p}"))], b"").unwrap();
+    assert_eq!(r.status, 403, "/state needs the token");
+    assert!(r.body.is_empty());
+}
+
+fn state_headers(port: u16, token: &str) -> Vec<(&'static str, String)> {
+    vec![("Host", format!("127.0.0.1:{port}")), ("X-Bellwether-Token", token.to_string())]
+}
+
+fn json_body(r: &Reply) -> serde_json::Value {
+    serde_json::from_slice(&r.body).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&r.body)))
+}
+
+/// /state and /control (brain/state-routes.mjs): the guards first, JSON with no CORS
+/// headers, the long poll answering at the next publish, /control's 4xx answers.
+#[test]
+fn state_and_control() {
+    let b = start(bellwether_brain::Mode::Normal);
+    let p = b.port;
+    for (what, h) in [
+        ("no token", vec![("Host", format!("127.0.0.1:{p}"))]),
+        ("an Origin", with(state_headers(p, TOKEN), "Origin", Some("https://evil.example"))),
+        ("a foreign Host", with(state_headers(p, TOKEN), "Host", Some("evil.example"))),
+    ] {
+        let r = request(p, "GET", "/state?after=-1&wait=0", &h, b"").unwrap();
+        assert_eq!(r.status, 403, "{what}");
+        assert!(r.body.is_empty(), "{what}");
+        let c = request(p, "POST", "/control", &with(h, "Content-Type", Some("application/json")), br#"{"action":"mute"}"#).unwrap();
+        assert_eq!(c.status, 403, "{what}");
+    }
+    let r = request(p, "GET", "/state?after=-1&wait=0", &state_headers(p, TOKEN), b"").unwrap();
+    assert_eq!(r.status, 200);
+    assert_eq!(r.header("content-type"), Some("application/json"));
+    assert_eq!(r.header("cache-control"), Some("no-store"));
+    assert!(r.header("access-control-allow-origin").is_none());
+    let rev = json_body(&r)["rev"].as_u64().unwrap();
+
+    // Nothing changes: the long poll answers after `wait`.
+    let t0 = std::time::Instant::now();
+    let idle = request(p, "GET", &format!("/state?after={rev}&wait=300"), &state_headers(p, TOKEN), b"").unwrap();
+    assert!(t0.elapsed() >= Duration::from_millis(280));
+    assert_eq!(json_body(&idle)["rev"].as_u64(), Some(rev));
+
+    // A hook changes the flock: the waiting poll answers at once.
+    let waiter = std::thread::spawn(move || request(p, "GET", &format!("/state?after={rev}&wait=10000"), &state_headers(p, TOKEN), b"").unwrap());
+    std::thread::sleep(Duration::from_millis(100));
+    let t1 = std::time::Instant::now();
+    let mut h = hook_headers(p);
+    h.push(("X-Bellwether-Herdr-Pane", "w5:p5".into()));
+    assert_empty(&request(p, "POST", "/hook", &h, br#"{"hook_event_name":"UserPromptSubmit","session_id":"lp","cwd":"/p/longpoll"}"#).unwrap(), 204);
+    let changed = json_body(&waiter.join().unwrap());
+    assert!(t1.elapsed() < Duration::from_secs(1), "answered promptly");
+    assert!(changed["rev"].as_u64().unwrap() > rev);
+    assert_eq!(changed["flock"][0]["label"], "longpoll");
+    assert_eq!(changed["flock"][0]["identityKey"], "herdr:#w5:p5");
+
+    let ctl = |body: &[u8], ct: &str| {
+        let h = with(state_headers(p, TOKEN), "Content-Type", Some(ct));
+        request(p, "POST", "/control", &h, body).unwrap()
+    };
+    let m = ctl(br#"{"action":"mute"}"#, "application/json");
+    assert_eq!((m.status, json_body(&m)), (200, serde_json::json!({ "ok": true })));
+    std::thread::sleep(Duration::from_millis(300));
+    let s = request(p, "GET", "/state?after=-1&wait=0", &state_headers(p, TOKEN), b"").unwrap();
+    assert_eq!(json_body(&s)["muted"], true);
+    assert_eq!(ctl(br#"{"action":"explode"}"#, "application/json").status, 400);
+    assert_eq!(ctl(b"{nope", "application/json").status, 400);
+    assert_eq!(ctl(br#"{"action":"mute"}"#, "text/plain").status, 415);
+    let big = format!(r#"{{"action":"mute","pad":"{}"}}"#, "x".repeat(20_000));
+    assert_eq!(ctl(big.as_bytes(), "application/json").status, 413);
+    assert_eq!(request(p, "PUT", "/state", &state_headers(p, TOKEN), b"").unwrap().status, 405);
+}
+
+/// `/control {"action":"reload-token"}` (plan D3, rotation): the brain reads its token file
+/// again, and the old token keeps working for a minute; any other token is refused.
+#[test]
+fn reload_token_keeps_the_old_token_for_a_minute() {
+    let home = std::env::temp_dir().join(format!("bw-reload-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let new_token = "rotatedToken_ABCDEFGHIJKLMNOP";
+    bellwether_core::token::write(&home, TOKEN).unwrap();
+    let mut opts = bellwether_brain::Options::new(TOKEN.into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+    opts.token_file = Some(bellwether_core::token::file(&home));
+    let b = start_with(opts);
+    let p = b.port;
+    let post = |token: &str| request(p, "POST", "/hook", &with(hook_headers(p), "X-Bellwether-Token", Some(token)), br#"{"hook_event_name":"Stop"}"#).unwrap().status;
+    assert_eq!(post(new_token), 403, "not before the reload");
+    bellwether_core::token::write(&home, new_token).unwrap();
+    let r = request(p, "POST", "/control", &with(state_headers(p, TOKEN), "Content-Type", Some("application/json")), br#"{"action":"reload-token"}"#).unwrap();
+    assert_eq!((r.status, json_body(&r)), (200, serde_json::json!({ "ok": true })));
+    assert_eq!(post(new_token), 204, "the new token");
+    assert_eq!(post(TOKEN), 204, "the old one, within the minute");
+    assert_eq!(post("someOtherToken_0123456789"), 403);
+    let s = request(p, "GET", "/state?after=-1&wait=0", &state_headers(p, new_token), b"").unwrap();
+    assert_eq!(s.status, 200);
+    let _ = std::fs::remove_dir_all(&home);
+
+    // A brain whose token came from the environment can't reload it.
+    let env_brain = start(bellwether_brain::Mode::Normal);
+    let q = env_brain.port;
+    let r = request(q, "POST", "/control", &with(state_headers(q, TOKEN), "Content-Type", Some("application/json")), br#"{"action":"reload-token"}"#).unwrap();
+    assert_eq!(r.status, 400);
+    assert!(json_body(&r)["error"].as_str().unwrap().contains("BELLWETHER_HOOK_TOKEN"));
+}
+
+/// The connection cap (milestone 3, from the M1 review): past `max_connections` the brain
+/// closes the connection idle longest, so with 300 idle sockets open a hook on a new
+/// connection still gets its 204 at once.
+#[test]
+fn the_cap_closes_idle_connections_first() {
+    let mut opts = bellwether_brain::Options::new(TOKEN.into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+    opts.max_connections = 50;
+    let b = start_with(opts);
+    let mut idle = Vec::new();
+    for _ in 0..300 {
+        let s = TcpStream::connect(("127.0.0.1", b.port)).unwrap();
+        idle.push(s);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let t0 = std::time::Instant::now();
+    assert_empty(&request(b.port, "POST", "/hook", &hook_headers(b.port), br#"{"hook_event_name":"Stop"}"#).unwrap(), 204);
+    assert!(t0.elapsed() < Duration::from_millis(500), "{:?}", t0.elapsed());
+    // The oldest idle sockets were closed by the brain: a read sees the end.
+    let mut closed = 0;
+    for s in &mut idle {
+        s.set_read_timeout(Some(Duration::from_millis(5))).unwrap();
+        let mut buf = [0u8; 1];
+        closed += matches!(s.read(&mut buf), Ok(0)) as usize;
+    }
+    assert!(closed >= 200, "only {closed} of 300 idle connections were closed with a cap of 50");
+}
+
+/// A connection with nothing in flight that sends nothing is closed after the idle timeout.
+#[test]
+fn idle_connections_time_out() {
+    let mut opts = bellwether_brain::Options::new(TOKEN.into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+    opts.idle_timeout = Duration::from_millis(300);
+    let b = start_with(opts);
+    let mut s = TcpStream::connect(("127.0.0.1", b.port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let t0 = std::time::Instant::now();
+    let mut buf = [0u8; 16];
+    assert_eq!(s.read(&mut buf).unwrap(), 0, "closed by the brain");
+    assert!(t0.elapsed() >= Duration::from_millis(250) && t0.elapsed() < Duration::from_secs(2), "{:?}", t0.elapsed());
 }
 
 #[test]
@@ -166,6 +310,7 @@ fn health_carries_no_content() {
     assert_eq!(h["name"], "bellwether");
     assert_eq!(h["mode"], "normal");
     assert_eq!(h["counters"]["dropped"], 0);
+    assert_eq!(h["counters"]["logDropped"], 0);
     assert!(h["lastEventAt"].is_null());
     request(b.port, "POST", "/hook", &hook_headers(b.port), br#"{"hook_event_name":"BellwetherDoctorPing"}"#).unwrap();
     settle();
@@ -244,7 +389,7 @@ fn health_keys_are_written_sorted() {
     let top = ["\"counters\"", "\"lastEventAt\"", "\"mode\"", "\"name\"", "\"ok\"", "\"pid\"", "\"port\"", "\"version\""];
     let at: Vec<usize> = top.iter().map(|k| text.find(k).unwrap_or_else(|| panic!("{k} missing: {text}"))).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "top-level keys not in sorted order: {text}");
-    let counters = ["\"accepted\"", "\"consumerErrors\"", "\"dropped\"", "\"lastRejectedAt\"", "\"malformed\"", "\"oversize\"", "\"rejected\"", "\"unknownEvent\""];
+    let counters = ["\"accepted\"", "\"consumerErrors\"", "\"dropped\"", "\"lastRejectedAt\"", "\"logDropped\"", "\"malformed\"", "\"oversize\"", "\"rejected\"", "\"unknownEvent\""];
     let at: Vec<usize> = counters.iter().map(|k| text.find(k).unwrap_or_else(|| panic!("{k} missing: {text}"))).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "counter keys not in sorted order: {text}");
 }

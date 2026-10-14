@@ -1,6 +1,7 @@
 import fs from 'node:fs';
-import { withDefaults } from '../brain/defaults.mjs';
-import { Flock } from '../brain/flock.mjs';
+// The brain under test: brain/flock.mjs, or under BELLWETHER_IMPL=rust the Rust reducer,
+// called through test/impl.mjs, so this same loop drives both.
+import { Flock, withDefaults } from './impl.mjs';
 
 /**
  * Replays a fixture through the reducer with a fake clock: each event is applied at
