@@ -3,6 +3,10 @@
 //! HTTP; the CLI and the conformance commands call them directly.
 
 pub mod json;
+pub mod lossless;
+pub mod diff;
+pub mod hooks;
+pub mod settings_checks;
 pub mod jsstr;
 pub mod redact;
 pub mod normalise;

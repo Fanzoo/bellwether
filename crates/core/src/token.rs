@@ -62,7 +62,7 @@ pub fn read(home: &Path, env: Option<String>) -> Result<(String, Source), Config
         return Ok((t, Source::Env));
     }
     let f = file(home);
-    let token = read_file(home)?.ok_or_else(|| ConfigError::new(format!("no hook token: {} doesn't exist or is empty. Make one with `bellwether token init` (or set BELLWETHER_HOOK_TOKEN)", f.display())))?;
+    let token = read_file(home)?.ok_or_else(|| ConfigError::new(format!("no hook token: BELLWETHER_HOOK_TOKEN is not set, and {} doesn't exist or is empty. Make one with `bellwether token init`", f.display())))?;
     check(&token)?;
     Ok((token, Source::File(f)))
 }

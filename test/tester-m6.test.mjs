@@ -8,10 +8,8 @@ import { Sprite } from '../shell/src/player/sprite.mjs';
 import { resolveAnimationMap, validatePet } from '../shell/src/player/pet.mjs';
 import { FIXTURES, readVectors } from './helpers.mjs';
 import { layoutBubbles } from '../shell/src/player/bubbles.mjs';
-import { withDefaults } from '../brain/defaults.mjs';
-import { Flock } from '../brain/flock.mjs';
-import { normalise } from '../brain/normalise.mjs';
-import { makeTextCleaner } from '../brain/redact.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { Flock, makeTextCleaner, normalise, withDefaults } from './impl.mjs';
 
 /** Tester probes for Milestone 6: lamb attribution, family layout, bubbles with lambs, agent_type safety. */
 

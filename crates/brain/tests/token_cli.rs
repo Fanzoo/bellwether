@@ -1,9 +1,10 @@
 //! `bellwether token init` and `token rotate` through the CLI functions (one test, since
 //! they read BELLWETHER_HOME and HOME from the process environment): the token file is
 //! made once, 0600; a legacy `.env` token is imported; rotate is a dry run without
-//! --write, refuses a settings file whose hooks carry the current token (the installer
-//! that rewrites them is milestone 4), and with --write tells the running brain, which
-//! keeps accepting the old token for a minute.
+//! --write; with --write it tells the running brain (which keeps accepting the old token
+//! for a minute) and then rewrites bellwether's hook entries with the new token, with a
+//! backup (plan D3, step 2: milestone 4). A settings file that can't be rewritten stops
+//! the rotation before anything changes.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -46,20 +47,26 @@ fn token_init_and_rotate() {
     assert_eq!(run(&["token", "bogus"]), 3);
     assert_eq!(run(&["token", "init", "--nope"]), 3);
 
-    // rotate: a dry run changes nothing; hooks carrying the token are refused.
+    // rotate: a dry run changes nothing, hook entries or not; a settings file that isn't
+    // JSON stops --write before the token file changes.
     std::fs::write(home.join("config.json"), r#"{"port": 47993}"#).unwrap();
     assert_eq!(run(&["token", "rotate"]), 0);
     assert_eq!(bellwether_core::token::read_file(&home).unwrap().as_deref(), Some("legacyToken_0123456789abc"));
     let settings = root.join("user").join(".claude").join("settings.json");
-    std::fs::write(&settings, r#"{"hooks":{"Stop":[{"hooks":[{"type":"http","url":"http://127.0.0.1:47993/hook","headers":{"X-Bellwether-Token":"legacyToken_0123456789abc"}}]}]}}"#).unwrap();
+    std::fs::write(&settings, "{ not json").unwrap();
     assert_eq!(run(&["token", "rotate", "--write"]), 3);
     assert_eq!(bellwether_core::token::read_file(&home).unwrap().as_deref(), Some("legacyToken_0123456789abc"), "refused, so unchanged");
-    std::fs::remove_file(&settings).unwrap();
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{ not json");
 
-    // rotate --write with a running brain: it switches, and the old token works a minute more.
+    // rotate --write with a running brain and installed hooks: the brain switches, the old
+    // token works a minute more, and the entries carry the new token, with a backup.
     let bound = bellwether_brain::bind(0).unwrap();
     let port = bound.port;
     std::fs::write(home.join("config.json"), format!(r#"{{"port": {port}}}"#)).unwrap();
+    let hooks = format!(r#"{{"theme":"dark","hooks":{{"Stop":[{{"hooks":[{{"type":"command","command":"keep"}}]}},{{"hooks":[{{"type":"http","url":"http://127.0.0.1:{port}/hook","headers":{{"X-Bellwether-Token":"legacyToken_0123456789abc"}}}}]}}]}}}}"#);
+    std::fs::write(&settings, &hooks).unwrap();
+    assert_eq!(run(&["token", "rotate"]), 0);
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), hooks, "a dry run writes nothing");
     let mut opts = bellwether_brain::Options::new("legacyToken_0123456789abc".into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
     opts.token_file = Some(bellwether_core::token::file(&home));
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -72,6 +79,12 @@ fn token_init_and_rotate() {
     assert_eq!(status_of(port, &new), 204);
     assert_eq!(status_of(port, "legacyToken_0123456789abc"), 204, "the old token, within the minute");
     assert_eq!(status_of(port, "anotherToken_0123456789"), 403);
+    let after = std::fs::read_to_string(&settings).unwrap();
+    assert!(after.contains(&format!("\"X-Bellwether-Token\": \"{new}\"")), "the entries carry the new token");
+    assert!(!after.contains("legacyToken_0123456789abc"), "no entry keeps the old token");
+    assert!(after.contains("\"command\": \"keep\""), "another tool's hook stays");
+    let backups: Vec<_> = std::fs::read_dir(home.join("backups")).unwrap().collect();
+    assert_eq!(backups.len(), 1, "one backup of the settings file");
     let _ = tx.send(());
     let _ = server.join();
     let _ = std::fs::remove_dir_all(&root);

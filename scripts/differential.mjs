@@ -19,7 +19,11 @@
  *              surrogates
  *   normalise  brain/normalise.mjs normalise; payloads and headers built from its allowlist
  *   json       brain/hooks.mjs parseLossless + serialise: settings files with odd layouts,
- *              exotic numbers, escapes, duplicate and integer-like keys, __proto__
+ *              exotic numbers, escapes, duplicate and integer-like keys, __proto__. A case
+ *              whose only difference is integer-like keys kept in file order (Rust) instead
+ *              of moved first (JSON.parse) is counted as explained (test/DIVERGENCES.md)
+ *              only when Rust's answer equals, byte for byte, Node's answer for the same
+ *              text with those keys renamed to plain ones and renamed back
  *   diff       brain/diff.mjs unifiedDiff and diffStats
  *   fixture    test/fixture-runner.mjs over the golden fixtures (not generated)
  *
@@ -154,33 +158,44 @@ function normaliseCase(r) {
 }
 
 function jsonCase(r) {
-  const nums = ['1.0', '1e2', '-0', '12345678901234567890', '1E+2', '0.1', '-1.5e-10', '42', '1180591620717411303424'];
-  const strs = ['"plain"', '"tab\\there"', '"\\u00e9"', '"\\ud83d\\ude00"', '"\\/slash"', '"q\\"q"', '"é"', '"\\u0001"'];
-  const keys = ['"a"', '"b"', '"1"', '"10"', '"2"', '"__proto__"', '"constructor"', '"hooks"', '"a"'];
-  const indent = r.pick(['  ', '    ', '\t', ' ']);
-  const eol = r.pick(['\n', '\r\n']);
+  const nums = ['1.0', '1e2', '-0', '12345678901234567890', '1E+2', '0.1', '-1.5e-10', '42', '1180591620717411303424', '-0.0', '1e-7', '0e0', '1E400', '5e-324', '0.30000000000000004', '100'];
+  const strs = ['"plain"', '"tab\\there"', '"\\u00e9"', '"\\ud83d\\ude00"', '"\\/slash"', '"q\\"q"', '"é"', '"\\u0001"', '"\\ud800 lone"', '"\\udc00"', '"\\u001F\\b\\f"', '"\\u007f\\u2028"', '"😀 literal"', '"\\\\back"', '""'];
+  const keys = ['"a"', '"b"', '"1"', '"10"', '"2"', '"0"', '"01"', '"4294967295"', '"__proto__"', '"constructor"', '"hooks"', '"a"', '"\\u0061"', '"é"', '"k\\"q"'];
+  const indent = r.pick(['  ', '    ', '\t', ' ', '\t\t', ' '.repeat(12), ' \t']);
+  const eol = r.pick(['\n', '\r\n', '\n', '\r\n']);
   const value = (depth) => {
     if (depth > 2 || r.chance(0.5)) return r.pick([...nums, ...strs, 'true', 'false', 'null']);
-    if (r.chance(0.5)) return `[${Array.from({ length: r.int(3) }, () => value(depth + 1)).join(', ')}]`;
+    if (r.chance(0.5)) {
+      const items = Array.from({ length: r.int(3) }, () => value(depth + 1));
+      // inline, or one per line
+      if (r.chance(0.5) || items.length === 0) return `[${items.join(r.pick([', ', ',']))}]`;
+      const pad = indent.repeat(depth + 2);
+      return `[${eol}${items.map((x) => pad + x).join(`,${eol}`)}${eol}${indent.repeat(depth + 1)}]`;
+    }
     return obj(depth + 1);
   };
   const obj = (depth) => {
     const n = r.int(4);
-    if (n === 0) return '{}';
+    if (n === 0) return r.pick(['{}', '{ }', `{${eol}}`]);
     const pad = indent.repeat(depth + 1);
     const members = Array.from({ length: n }, () => `${pad}${r.pick(keys)}${r.pick([': ', ':', ' : '])}${value(depth)}`);
-    return `{${eol}${members.join(`,${eol}`)}${eol}${indent.repeat(depth)}}`;
+    // Mostly one member per line; sometimes inline, or with a stray line ending mixed in.
+    if (r.chance(0.1)) return `{ ${members.map((m) => m.trim()).join(', ')} }`;
+    const sep = r.chance(0.05) ? `,${r.pick(['\n', '\r\n'])}` : `,${eol}`;
+    return `{${r.pick(['', '', ' '])}${eol}${members.join(sep)}${eol}${indent.repeat(depth)}}`;
   };
-  return { text: obj(0) + (r.chance(0.7) ? eol : '') };
+  const top = r.chance(0.05) ? `[${eol}${indent}${obj(1)}${eol}]` : obj(0);
+  return { text: r.pick(['', '', '', '\n', '\r\n\n']) + top + (r.chance(0.7) ? eol : '') };
 }
 
 function diffCase(r) {
-  const alphabet = ['a', 'b', 'c', '', '  x', '}', '{'];
+  // Lone CRs too: inside a line, as a line, and at the very end (M4 review D5b).
+  const alphabet = ['a', 'b', 'c', '', '  x', '}', '{', 'a\r', '\r', 'b\rc'];
   const lines = () => Array.from({ length: r.int(30) }, () => r.pick(alphabet));
   const old = lines();
   const neu = old.filter(() => r.chance(0.85)).flatMap((l) => (r.chance(0.1) ? [l, r.pick(alphabet)] : [l]));
   const eol = r.pick(['\n', '\r\n']);
-  const text = (ls) => (ls.length ? ls.join(eol) + (r.chance(0.8) ? eol : '') : '');
+  const text = (ls) => (ls.length ? ls.join(eol) + r.pick([eol, eol, eol, '', '\r']) : '');
   return { old: text(old), new: text(neu), options: r.chance(0.3) ? { context: r.int(5) } : {} };
 }
 
@@ -274,6 +289,86 @@ function same(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+const isIntegerKey = (k) => /^(0|[1-9]\d*)$/.test(k) && Number(k) < 2 ** 32 - 1;
+
+/** Whether any object in a JSON text has an integer-like key ("1", "10"; JS lists those first). */
+function hasIntegerLikeKey(text) {
+  let found = false;
+  try {
+    JSON.parse(text, function (k, v) {
+      if (!Array.isArray(this) && isIntegerKey(k)) found = true;
+      return v;
+    });
+  } catch {}
+  return found;
+}
+
+/**
+ * Every object key of a JSON text through `f` (a string token followed by `:` is a key; it
+ * is read with JSON.parse and written back with JSON.stringify), everything else as it is.
+ */
+function renameKeys(text, f) {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== '"') {
+      out += text[i++];
+      continue;
+    }
+    let j = i + 1;
+    while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+    const tok = text.slice(i, j + 1);
+    let k = j + 1;
+    while (k < text.length && ' \t\r\n'.includes(text[k])) k++;
+    let key = null;
+    if (text[k] === ':') {
+      try {
+        key = JSON.parse(tok);
+      } catch {}
+    }
+    out += key === null ? tok : JSON.stringify(f(key));
+    i = j + 1;
+  }
+  return out;
+}
+
+// The prefix integer-like keys get in the model; no generated key starts with it.
+const MODEL_PREFIX = 'zzIntKey';
+
+/**
+ * The file-order model of a settings file (BR-3K's, M4 review D3): rename each integer-like
+ * key to a plain one (so JSON.parse keeps it where it is), run Node's parseLossless and
+ * serialise, rename the keys back. What Rust answers must be these bytes exactly: escapes,
+ * numbers, layout and the integer-like keys' order all included.
+ */
+function fileOrderModel(text) {
+  const renamed = renameKeys(text, (k) => (isIntegerKey(k) ? MODEL_PREFIX + k : k));
+  const out = serialise(parseLossless(renamed), renamed);
+  return renameKeys(out, (k) => (k.startsWith(MODEL_PREFIX) && isIntegerKey(k.slice(MODEL_PREFIX.length)) ? k.slice(MODEL_PREFIX.length) : k));
+}
+
+/**
+ * Differences that test/DIVERGENCES.md explains, per area: the case, Node's answer and
+ * Rust's. Returns the explanation, or null for a real difference.
+ */
+const EXPLAINED = {
+  json: (c, node, rust) => {
+    if (!node || !rust) return null; // a missing answer is a difference
+    // Both refuse the text; V8 and the port word the reason differently.
+    if (node.error && rust.error) return 'parse errors worded differently';
+    // The port keeps integer-like keys in file order, where JSON.parse moves them first.
+    // Only Rust's answer equal, byte for byte, to the file-order model counts.
+    if (typeof rust.value !== 'string' || typeof node.value !== 'string' || !hasIntegerLikeKey(c.text)) return null;
+    let model;
+    try {
+      model = fileOrderModel(c.text);
+    } catch {
+      return null;
+    }
+    return rust.value === model ? 'integer-like keys kept in file order (Rust equals the file-order model byte for byte)' : null;
+  },
+};
+
 // ------------------------------------------------------------------ main
 
 async function main() {
@@ -310,9 +405,16 @@ async function main() {
       continue;
     }
     const diffs = [];
-    for (let i = 0; i < cases.length; i++) if (!same(node[i], rust[i])) diffs.push(i);
+    const explained = {};
+    for (let i = 0; i < cases.length; i++) {
+      if (same(node[i], rust[i])) continue;
+      const why = EXPLAINED[area]?.(cases[i], node[i], rust[i]);
+      if (why) explained[why] = (explained[why] ?? 0) + 1;
+      else diffs.push(i);
+    }
     if (rust.length !== cases.length) diffs.push(`(${rust.length} answers for ${cases.length} cases)`);
-    report.push(`${area.padEnd(9)} ${String(cases.length).padStart(7)} cases, ${diffs.length} differences (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+    const known = Object.entries(explained).map(([k, n]) => `${n} ${k}`).join(', ');
+    report.push(`${area.padEnd(9)} ${String(cases.length).padStart(7)} cases, ${diffs.length} ${known ? 'unexplained ' : ''}differences${known ? `; explained (DIVERGENCES.md): ${known}` : ''} (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
     for (const i of diffs.slice(0, o.show)) {
       if (typeof i === 'string') report.push(`          ${i}`);
       else report.push(`          case ${i}: ${JSON.stringify(cases[i]).slice(0, 300)}\n            node: ${JSON.stringify(node[i]).slice(0, 300)}\n            rust: ${JSON.stringify(rust[i]).slice(0, 300)}`);

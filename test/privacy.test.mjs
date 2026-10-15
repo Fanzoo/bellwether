@@ -2,11 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { runDoctor } from '../brain/doctor.mjs';
-import { AGENT_DIR, TOKEN, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, spawnBrainSync, tempDir } from './helpers.mjs';
 // brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs): the sharing
 // rules are the strip's Rust copy there.
-import { readShellState, sharingProcessWarnings, writeShellState } from './impl.mjs';
+import { readShellState, runDoctor, sharingProcessWarnings, writeShellState } from './impl.mjs';
 
 /** Milestone 7 fixes (verification D1, D2): the way back for a hidden strip, and sharing names that can't match. */
 
@@ -30,7 +29,7 @@ describe('privacy.sharingProcesses entries that can never match (D2)', () => {
     const example = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
     for (const platform of ['darwin', 'win32', 'linux']) assert.deepEqual(sharingProcessWarnings(example, platform), []);
   });
-  test('doctor warns about them, and says when the strip is hidden and how to bring it back', notUnderRust('doctor is ported in milestone 4'), async () => {
+  test('doctor warns about them, and says when the strip is hidden and how to bring it back', async () => {
     const dataDir = tempDir();
     writeShellState(dataDir, { hidden: true, showLabels: false });
     const config = { port: 1, ...cfg(['CptHost', 'y'.repeat(40)]) };

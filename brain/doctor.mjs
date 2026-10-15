@@ -244,6 +244,10 @@ export function checkSettings(settings, { port, token, file = 'settings' }) {
     } else {
       add('hook timeout', 'PASS', `every entry has timeout ≤ ${MAX_TIMEOUT_SEC} s`);
     }
+    // bellwether never writes onFailure (plan D3): "block" would stop every tool call on
+    // that event whenever the brain is down.
+    const blocking = handlers.filter(({ h }) => h.onFailure === 'block');
+    if (blocking.length) add('hook onFailure', 'FAIL', `bellwether entries on ${blocking.map(({ event }) => event).join(', ')} set "onFailure": "block": with the brain down, Claude Code would block every tool call there. bellwether never writes onFailure; \`bellwether hooks install --write\` replaces them`);
     const matchers = handlers.filter(({ matcher }) => matcher !== undefined && matcher !== '' && matcher !== '*');
     if (matchers.length) add('hook matcher', 'WARN', `matcher set on ${matchers.map(({ event }) => event).join(', ')}; bellwether expects every event unfiltered`);
     if (token) {
@@ -399,6 +403,12 @@ export function checkOtherLevels({ projectDir, managedFile, port, userSettings =
     found.push(`${label} (${file})`);
     if (s.disableAllHooks === true) add(`${label} settings`, 'FAIL', `${file} sets "disableAllHooks": true, so no hook runs in that ${label === 'managed' ? 'machine' : 'project'}, bellwether's included`);
     if (label === 'managed' && s.allowManagedHooksOnly === true) add('managed settings', 'FAIL', `${file} sets "allowManagedHooksOnly": true, so hooks from ~/.claude/settings.json (bellwether's) never run`);
+    // A bellwether entry with onFailure "block" here blocks tool calls just the same (plan D3).
+    const blocking = [];
+    if (s.hooks && typeof s.hooks === 'object' && !Array.isArray(s.hooks)) {
+      for (const [event, groups] of Object.entries(s.hooks)) for (const g of Array.isArray(groups) ? groups : []) for (const h of Array.isArray(g?.hooks) ? g.hooks : []) if (isBellwetherHandler(h, port) && h.onFailure === 'block') blocking.push(event);
+    }
+    if (blocking.length) add('hook onFailure', 'FAIL', `bellwether entries on ${blocking.join(', ')} in ${file} (${label} settings) set "onFailure": "block": with the brain down, Claude Code would block every tool call there. bellwether never writes onFailure; remove the entries there (\`bellwether hooks install\` only edits ~/.claude/settings.json)`);
     if (Array.isArray(s.allowedHttpHookUrls)) {
       allowDefined = true;
       allow.push(...s.allowedHttpHookUrls);

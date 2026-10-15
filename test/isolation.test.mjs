@@ -7,9 +7,9 @@ import path from 'node:path';
 import { describe, test } from 'node:test';
 import { loadConfig } from '../brain/config.mjs';
 import { DATA_DIR } from '../brain/util.mjs';
-import { runDoctor } from '../brain/doctor.mjs';
-import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
-import { ISOLATED, takeViolations } from './setup.mjs';
+import { AGENT_DIR, IMPL, REAL_HOME, TOKEN, brainCommand, isRealHome, rustEnv, spawnBrainSync, tempDir } from './helpers.mjs';
+import { runDoctor } from './impl.mjs';
+import { ISOLATED, isProtected, protectForTest, resolveReal, takeViolations } from './setup.mjs';
 
 /**
  * The suite never touches this checkout's live install (test/setup.mjs): its .env, its
@@ -62,6 +62,86 @@ describe('the test run is isolated from the live install', () => {
     const r = spawnBrainSync(['hooks', 'print'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home } });
     assert.equal(r.status, 3, r.stderr);
     assert.match(r.stderr, /BELLWETHER_HOOK_TOKEN is not set/);
+  });
+
+  test('no test process can reach the real ~/.claude/settings.json: a read is stopped here and in a child, and the Rust binary always gets a temp HOME', { skip: !guarded && 'guard off' }, () => {
+    // Only reads are tried against the real file: a write must never be attempted, guard or not.
+    takeViolations();
+    const real = path.join(REAL_HOME, '.claude', 'settings.json');
+    assert.throws(() => fs.readFileSync(real, 'utf8'), /test isolation: readFileSync .*the real Claude Code settings/);
+    assert.throws(() => fs.readFileSync(path.join(REAL_HOME, '.claude', 'settings.local.json')), /test isolation/);
+    assert.throws(() => fs.createReadStream(real), /test isolation/);
+    assert.ok(takeViolations().length >= 3, 'every probe was recorded');
+    const child = spawnSync(process.execPath, ['-e', `require('node:fs').readFileSync(${JSON.stringify(real)})`], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+    assert.notEqual(child.status, 0);
+    assert.match(child.stderr, /test isolation: readFileSync .*the real Claude Code settings/);
+    // The Rust binary can't be guarded from in here: the helper replaces a missing or real
+    // HOME with a temp one, so its default settings file is never the real one.
+    for (const given of [{ PATH: process.env.PATH }, { PATH: process.env.PATH, HOME: REAL_HOME }, { PATH: process.env.PATH, HOME: `${REAL_HOME}/` }]) {
+      const env = rustEnv(['hooks', 'install'], given);
+      assert.ok(env.HOME && !isRealHome(env.HOME), JSON.stringify(given));
+      assert.notEqual(path.join(env.HOME, '.claude', 'settings.json'), real);
+    }
+    const mine = tempDir('iso-own-home-');
+    assert.equal(rustEnv(['hooks', 'install'], { HOME: mine }).HOME, mine, "a test's own temp HOME is kept");
+    // And end to end: `hooks install` with no HOME and no --settings. The Node CLI resolves
+    // the real file from the password database and the guard stops it there; the Rust CLI
+    // gets the temp HOME and previews a file under it.
+    const r = spawnBrainSync(['hooks', 'install'], { encoding: 'utf8', env: { PATH: process.env.PATH, BELLWETHER_HOOK_TOKEN: TOKEN } });
+    if (IMPL === 'rust') {
+      assert.equal(r.status, 0, r.stderr);
+      assert.ok(!(r.stdout + r.stderr).includes(real), 'the Rust CLI named the real settings file');
+      assert.match(r.stdout, /bw-rust-HOME-.*\/\.claude\/settings\.json \(current\)/);
+    } else {
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, /test isolation: readFileSync .*the real Claude Code settings/);
+    }
+  });
+
+  test('the guard sees the real settings under other names, and stops the APIs that bypass fs wrappers (BR-3K M4 D2); nothing here reads the real file', { skip: !guarded && 'guard off' }, () => {
+    takeViolations();
+    const claude = path.join(REAL_HOME, '.claude');
+    // Other spellings of the real files: identity (stat only) or the normalised name.
+    const spellings = [path.join(claude, 'settings.json'), path.join(claude.toUpperCase(), 'SETTINGS.JSON'), path.join(claude, 'settings.local.json'), path.join(claude, 'Settings.Local.Json'), path.join(claude, '..', '.claude', 'settings.json')];
+    if (fs.existsSync('/System/Volumes/Data' + REAL_HOME)) spellings.push(path.join('/System/Volumes/Data' + REAL_HOME, '.claude', 'settings.json'), path.join('/System/Volumes/Data' + REAL_HOME, '.claude', 'settings.local.json'));
+    for (const p of spellings) assert.ok(isProtected(resolveReal(p)), p);
+    assert.ok(!isProtected(resolveReal(path.join(tempDir('iso-not-'), '.claude', 'settings.json'))), 'a temp settings file is not protected');
+    // The wrappers, on a temp file protected the same way.
+    const f = path.join(tempDir('iso-protected-'), 'decoy.json');
+    fs.writeFileSync(f, '{}');
+    protectForTest(f);
+    for (const [what, attempt] of [
+      ['readFileSync', () => fs.readFileSync(f)],
+      ['openAsBlob', () => fs.openAsBlob(f)],
+      ['new fs.ReadStream', () => new fs.ReadStream(f)],
+      ['new fs.WriteStream', () => new fs.WriteStream(f)],
+      ["process.binding('fs')", () => process.binding('fs').open(f, 0, 0o666)],
+      ['firmlink spelling', () => fs.existsSync('/System/Volumes/Data') && fs.readFileSync('/System/Volumes/Data' + resolveReal(f))],
+    ]) {
+      if (what === 'firmlink spelling' && !fs.existsSync('/System/Volumes/Data' + resolveReal(f))) continue;
+      assert.throws(attempt, /test isolation: .*protected like them/, what);
+    }
+    assert.ok(takeViolations().length >= 5, 'every attempt was recorded');
+  });
+
+  test('the harness refuses a real HOME in any spelling, and arguments that name the real settings (BR-3K M4 D2)', () => {
+    const homes = [REAL_HOME, `${REAL_HOME}/`, REAL_HOME.toUpperCase(), path.join(REAL_HOME, '..', path.basename(REAL_HOME))];
+    if (fs.existsSync('/System/Volumes/Data' + REAL_HOME)) homes.push('/System/Volumes/Data' + REAL_HOME);
+    for (const h of homes) {
+      assert.ok(isRealHome(h), h);
+      assert.ok(!isRealHome(rustEnv(['doctor'], { PATH: process.env.PATH, HOME: h }).HOME), `rustEnv kept ${h}`);
+    }
+    const real = path.join(REAL_HOME, '.claude', 'settings.json');
+    const other = [real, real.toUpperCase(), path.join(REAL_HOME, '.claude', 'settings.local.json')];
+    if (fs.existsSync('/System/Volumes/Data' + REAL_HOME)) other.push('/System/Volumes/Data' + real);
+    for (const p of other) {
+      for (const args of [['hooks', 'uninstall', '--write', '--settings', p], ['hooks', 'install', `--settings=${p}`], ['hooks', 'print', '--out', p], ['migrate', '--settings', p], ['doctor', '--settings', p]]) {
+        assert.throws(() => brainCommand(args), /names the real Claude Code settings/, args.join(' '));
+      }
+    }
+    assert.throws(() => brainCommand(['hooks', 'install', '--settings', path.join('.claude', 'settings.json')], { cwd: REAL_HOME }), /names the real Claude Code settings/, 'a relative path, against its cwd');
+    // Any spelling of the live port, for every command.
+    if (IMPL === 'rust') for (const p of ['47417', '047417', '+47417', ' 47417', '47417.0']) assert.throws(() => brainCommand(['doctor', '--port', p]), /live brain's port/, p);
   });
 
   test('the strip build never goes to target/: plain cargo builds, from the root, shell/ or src-tauri, use target-dev', () => {

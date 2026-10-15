@@ -7,7 +7,12 @@ import { LABEL, SHELL_LABEL, findOldAgents, plistPath } from '../brain/autostart
 import { hookBlock } from '../brain/hooks.mjs';
 import { migrate } from '../brain/migrate.mjs';
 import { startServer } from '../brain/server.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+
+// The repository-to-repository migration in process, launchd injected. The app's
+// `migrate` (its own files, LaunchAgents named and left alone) runs in the CLI test of D1
+// and in migrate.test.mjs, against both brains.
+const REPO_MIGRATE = notUnderRust("brain/migrate.mjs and autostart.mjs in process (LaunchAgents swapped, launchctl injected); the app never writes or boots out a LaunchAgent (plan D5; its swap is milestone 8)");
 
 /**
  * Re-check of `migrate` after the fixes, laid out like the maintainer's real install:
@@ -76,14 +81,30 @@ const ok = (text) => !text.includes(OLD);
 
 describe('D1: the old agents are found by what they run', () => {
   for (const binary of [false, true]) {
-    test(`the maintainer's layout (hub-prefixed labels, ${binary ? 'binary' : 'XML'} plists) is recognised as brain and strip, with and without --from`, () => {
+    test(`the CLI preview names the maintainer's layout (hub-prefixed labels, ${binary ? 'binary' : 'XML'} plists) and no one else's agent, and changes nothing`, () => {
+      const w = world({ binaryPlists: binary });
+      fs.writeFileSync(path.join(w.la, 'com.acme.pasture.brain.plist'), plist('com.acme.pasture.brain', ['/usr/bin/python3', '-m', 'http.server', '8080']));
+      fs.writeFileSync(path.join(w.la, 'com.other.brain.plist'), plist('com.other.brain', ['/usr/local/bin/node', '/opt/other/brain/cli.mjs', 'serve']));
+      fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(w.repo, 'brain'), { recursive: true });
+      const files = () => fs.readdirSync(w.la).sort().map((f) => [f, read(path.join(w.la, f))]);
+      const before = { agents: files(), settings: read(w.settingsFile) };
+      const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'cli-data'), BELLWETHER_ENV: path.join(w.root, 'cli.env') };
+      const r = spawnBrainSync(['migrate', '--from', w.old, '--settings', w.settingsFile], { root: w.repo, cwd: w.repo, encoding: 'utf8', env, timeout: 30000 });
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, new RegExp(OLD_BRAIN.replace(/\./g, '\\.')));
+      assert.match(r.stdout, new RegExp(OLD_STRIP.replace(/\./g, '\\.')));
+      assert.doesNotMatch(r.stdout, /com\.acme\.pasture\.brain|com\.other\.brain/, 'another program\'s agent was named');
+      assert.ok(ok(r.stdout + r.stderr), 'the token is never shown');
+      assert.deepEqual({ agents: files(), settings: read(w.settingsFile) }, before, 'a preview changed something');
+    });
+    test(`the maintainer's layout (hub-prefixed labels, ${binary ? 'binary' : 'XML'} plists) is recognised as brain and strip, with and without --from`, REPO_MIGRATE, () => {
       const w = world({ binaryPlists: binary });
       const found = findOldAgents(w.home, { from: w.old });
       assert.deepEqual(found.map((a) => [a.label, a.kind]).sort(), [[OLD_BRAIN, 'brain'], [OLD_STRIP, 'shell']]);
       assert.deepEqual(findOldAgents(w.home).map((a) => a.kind).sort(), ['brain', 'shell'], 'without --from, the pattern and content still find them');
     });
   }
-  test('a .pasture.brain label that runs something else, other tools\' agents, and bellwether\'s own agents are left alone', () => {
+  test('a .pasture.brain label that runs something else, other tools\' agents, and bellwether\'s own agents are left alone', REPO_MIGRATE, () => {
     const w = world();
     const mk = (label, args) => fs.writeFileSync(path.join(w.la, `${label}.plist`), plist(label, args));
     mk('com.acme.pasture.brain', ['/usr/bin/python3', '-m', 'http.server', '8080']);
@@ -95,7 +116,7 @@ describe('D1: the old agents are found by what they run', () => {
     const labels = findOldAgents(w.home, { from: w.old }).map((a) => a.label).sort();
     assert.deepEqual(labels, [OLD_BRAIN, OLD_STRIP]);
   });
-  test('an unreadable plist is matched by label only for a .pasture.* name; garbage in other names is ignored; nothing throws', () => {
+  test('an unreadable plist is matched by label only for a .pasture.* name; garbage in other names is ignored; nothing throws', REPO_MIGRATE, () => {
     const w = world();
     fs.writeFileSync(path.join(w.la, 'garbage.plist'), '\u0000\u0001not a plist');
     fs.writeFileSync(path.join(w.la, 'bplist-broken.plist'), 'bplist00broken');
@@ -104,7 +125,7 @@ describe('D1: the old agents are found by what they run', () => {
   });
 });
 
-describe('D2: order, health wait and rollback (hub-shaped install)', () => {
+describe('D2: order, health wait and rollback (hub-shaped install)', REPO_MIGRATE, () => {
   test('success: agents swapped (brain first, old booted out before the new loads), the new brain is probed, and only then are the hooks rewritten; a re-run changes nothing', () => {
     const w = world();
     const r = migrate({ ...w.opts, write: true });
@@ -190,7 +211,7 @@ describe('D2: order, health wait and rollback (hub-shaped install)', () => {
   });
 });
 
-describe('D3: the strip is not built', () => {
+describe('D3: the strip is not built', REPO_MIGRATE, () => {
   test('the old strip agent is left alone (no bootout, plist kept), only the brain moves, and the old strip keeps working against the new brain', () => {
     const w = world({ built: false });
     const r = migrate({ ...w.opts, write: true });
@@ -201,7 +222,7 @@ describe('D3: the strip is not built', () => {
   });
 });
 
-describe('D5: who holds the port', () => {
+describe('D5: who holds the port', REPO_MIGRATE, () => {
   const attempt = (holder, launchdPid = 1234) => {
     const w = world();
     const run = (c, a) => {
@@ -241,7 +262,7 @@ describe('D5: who holds the port', () => {
   });
 });
 
-describe('probe.mjs', () => {
+describe('probe.mjs', notUnderRust("brain/probe.mjs, the repository migration's health probe; the app's migrate pings a brain itself (crates/brain migrate.rs `brain_takes`), only when HOME is the real one"), () => {
   // async: the servers under test live in this process, so a synchronous spawn would block them
   const probe = (args) =>
     new Promise((resolve) => {

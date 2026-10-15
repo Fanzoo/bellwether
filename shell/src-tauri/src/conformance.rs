@@ -16,8 +16,11 @@
 //!                 order, over two FIFOs (`--in <path> --out <path>`) so a Node test can
 //!                 call the Rust brain's pure parts synchronously: the cleaner, the
 //!                 normaliser, the config, a Flock or a publisher by handle, and so on
-//!   __json        milestone 4: settings bytes -> the lossless round trip
-//!   __diff        milestone 4: {"old", "new"} -> the unified diff
+//!   __json        milestone 4: {"text"} -> {"value"}: a settings file through the lossless
+//!                 JSON and back in its own layout (`serialise(parseLossless(text), text)`),
+//!                 or {"error": true, "message"} when it isn't JSON
+//!   __diff        milestone 4: {"old", "new", "options"} -> {"value", "added", "removed"}:
+//!                 the unified diff and its counts
 //!
 //! An area that isn't ported yet exits 1 with "not ported yet" on stderr, which the
 //! harness reports as such; a release build says "unknown command" instead.
@@ -30,7 +33,7 @@ use bellwether_core::json::{self, Js, Obj};
 use bellwether_core::redact::Cleaner;
 
 /// Every area, and the milestone that ports it (None: ported).
-pub(crate) const AREAS: [(&str, Option<&str>); 6] = [("env", None), ("redact", None), ("normalise", None), ("fixture", None), ("json", Some("4")), ("diff", Some("4"))];
+pub(crate) const AREAS: [(&str, Option<&str>); 6] = [("env", None), ("redact", None), ("normalise", None), ("fixture", None), ("json", None), ("diff", None)];
 
 /// `command` is the whole word (`__env`). Returns the exit code.
 pub fn run(command: &str, args: &[String]) -> i32 {
@@ -54,6 +57,8 @@ pub fn run(command: &str, args: &[String]) -> i32 {
         "__redact" => each_js_line(redact_case),
         "__normalise" => each_js_line(normalise_case),
         "__fixture" => each_js_line(fixture_case),
+        "__json" => each_js_line(json_case),
+        "__diff" => each_js_line(diff_case),
         _ => match AREAS.iter().find(|(name, _)| command.strip_prefix("__") == Some(*name)) {
             Some((_, Some(m))) => {
                 eprintln!("bellwether: {command} is not ported yet (milestone {m}); this build has the conformance feature");
@@ -188,6 +193,36 @@ pub fn fixture_case(case: &Js) -> Js {
         out.set("snapshots", Js::Arr(run.snapshots));
     }
     Js::Obj(out)
+}
+
+/// `{"text"}` -> `{"value"}`: `serialise(parseLossless(text), text)`, the round trip every
+/// installer write makes; `{"error": true, "message"}` when the text isn't JSON.
+pub fn json_case(case: &Js) -> Js {
+    use bellwether_core::{jsstr, lossless};
+    let Js::Str(text) = case.get("text") else { return Js::Obj(Obj::new().with("error", "no \"text\"")) };
+    // The case's text is a unit string; a settings file is real text (read as UTF-8).
+    let text = jsstr::to_string_lossy(text);
+    match lossless::parse(&text) {
+        Ok(v) => Js::Obj(Obj::new().with("value", jsstr::from_str(&lossless::serialise(&v, &text)))),
+        Err(e) => Js::Obj(Obj::new().with("error", true).with("message", e)),
+    }
+}
+
+/// `{"old", "new", "options"}` -> `{"value", "added", "removed"}`: unifiedDiff and diffStats.
+pub fn diff_case(case: &Js) -> Js {
+    use bellwether_core::{diff, jsstr};
+    let s = |k: &str| jsstr::to_string_lossy(case.get(k).as_str().unwrap_or(""));
+    let (old, new) = (s("old"), s("new"));
+    let o = case.get("options");
+    let name = |k: &str, d: &str| o.get(k).as_str().map(jsstr::to_string_lossy).unwrap_or_else(|| d.to_string());
+    let context = o.get("context").as_num().map(|n| n.max(0.0) as usize).unwrap_or(3);
+    let stats = diff::diff_stats(&old, &new);
+    Js::Obj(
+        Obj::new()
+            .with("value", jsstr::from_str(&diff::unified_diff(&old, &new, &name("oldName", "a"), &name("newName", "b"), context)))
+            .with("added", stats.added as f64)
+            .with("removed", stats.removed as f64),
+    )
 }
 
 fn error(message: impl std::fmt::Display) -> serde_json::Value {

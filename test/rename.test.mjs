@@ -6,13 +6,17 @@ import { describe, test } from 'node:test';
 import { OLD_LABELS, LABEL, SHELL_LABEL, autostart, plistPath } from '../brain/autostart.mjs';
 import { startBrain } from '../brain/brain.mjs';
 import { withDefaults } from '../brain/defaults.mjs';
-import { checkSettings, runDoctor } from '../brain/doctor.mjs';
 import { adoptLegacyEnv } from '../brain/envpath.mjs';
-import { countGroups, hookBlock, install, isLegacyHandler, uninstall } from '../brain/hooks.mjs';
 import { adoptLegacyHeaders } from '../brain/normalise.mjs';
 import { tokenInit } from '../brain/token.mjs';
-import { maskToken } from '../brain/util.mjs';
-import { AGENT_DIR, TOKEN, request, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, IMPL, TOKEN, notUnderRust, request, spawnBrainSync, tempDir } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { checkSettings, countGroups, hookBlock, install, isLegacyHandler, maskToken, runDoctor, uninstall } from './impl.mjs';
+
+// What the app doesn't carry over from the rename (plan, Configuration; test/DIVERGENCES.md).
+const PASTURE_NAMES = notUnderRust('the app reads no PASTURE_* names and no .env (test/DIVERGENCES.md 6 and 15); `migrate` imports a legacy token');
+const PASTURE_HEADERS = notUnderRust('the Rust brain refuses X-Pasture-* headers (test/DIVERGENCES.md 4; crates/brain hook.rs `the_guards_in_order`)');
+const REPO_AGENTS = notUnderRust("the repository's LaunchAgent autostart; the app's `autostart` drives SMAppService (milestone 6), and the harness never runs it on this Mac (plan deviation 22)");
 
 /**
  * The rename from pasture to bellwether: for one release the old names (PASTURE_*
@@ -34,7 +38,7 @@ const freePort = async () => {
 };
 
 describe('old PASTURE_* variables', () => {
-  test('fill the BELLWETHER_* of the same name; a set new one (even "") wins; the old names used are remembered', () => {
+  test('fill the BELLWETHER_* of the same name; a set new one (even "") wins; the old names used are remembered', PASTURE_NAMES, () => {
     const env = { PASTURE_HOOK_TOKEN: 'old', PASTURE_DATA_DIR: '/d', BELLWETHER_ENV: '', PASTURE_ENV: '/x.env', OTHER: '1' };
     const used = adoptLegacyEnv(env, new Set());
     assert.equal(env.BELLWETHER_HOOK_TOKEN, 'old');
@@ -42,7 +46,7 @@ describe('old PASTURE_* variables', () => {
     assert.equal(env.BELLWETHER_ENV, '', 'the new name was set, so the old one is ignored');
     assert.deepEqual([...used].sort(), ['PASTURE_DATA_DIR', 'PASTURE_HOOK_TOKEN']);
   });
-  test('the CLI takes an exported PASTURE_HOOK_TOKEN, and one in a .env that only has the old name', () => {
+  test('the CLI takes an exported PASTURE_HOOK_TOKEN, and one in a .env that only has the old name', PASTURE_NAMES, () => {
     const dir = tempDir('rn-env-');
     const run = (env) => {
       const out = path.join(dir, `h-${Math.random().toString(36).slice(2)}.json`);
@@ -58,7 +62,7 @@ describe('old PASTURE_* variables', () => {
     assert.ok(run({ BELLWETHER_ENV: f }).includes('fileOldName_0123456789abcd'));
     assert.ok(run({ BELLWETHER_ENV: undefined, PASTURE_ENV: f }).includes('fileOldName_0123456789abcd'), 'PASTURE_ENV is read too');
   });
-  test('doctor says which old names it read, as INFO', async () => {
+  test('doctor says which old names it read, as INFO', PASTURE_NAMES, async () => {
     const port = await freePort();
     const settings = path.join(tempDir('rn-doc-'), 'settings.json');
     fs.writeFileSync(settings, '{}');
@@ -70,7 +74,7 @@ describe('old PASTURE_* variables', () => {
     const fresh = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: settings, configLoader: () => ({ config: { port }, usingExample: false }), home: tempDir('rn-home-'), dataDir: tempDir('rn-data-') });
     assert.ok(!fresh.checks.some((x) => x.name === 'old names'));
   });
-  test('token init on a .env with only PASTURE_HOOK_TOKEN adds the same value under the new name and keeps the old line', () => {
+  test('token init on a .env with only PASTURE_HOOK_TOKEN adds the same value under the new name and keeps the old line', PASTURE_NAMES, () => {
     const f = path.join(tempDir('rn-tok-'), '.env');
     fs.writeFileSync(f, 'OTHER=1\nPASTURE_HOOK_TOKEN=keepThisValue_0123456789\n');
     const r = tokenInit(f, { generate: () => assert.fail('must reuse the old value') });
@@ -79,17 +83,28 @@ describe('old PASTURE_* variables', () => {
     assert.doesNotMatch(r.message, /keepThisValue/);
     assert.equal(fs.readFileSync(f, 'utf8'), 'OTHER=1\nPASTURE_HOOK_TOKEN=keepThisValue_0123456789\nBELLWETHER_HOOK_TOKEN=keepThisValue_0123456789\n');
   });
+  test('an exported PASTURE_HOOK_TOKEN alone: the repository CLI adopts it for one release; the app ignores it (no token, exit 3)', () => {
+    const dir = tempDir('rn-only-old-');
+    const r = spawnBrainSync(['hooks', 'print'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: dir, BELLWETHER_DATA_DIR: path.join(dir, 'd'), BELLWETHER_ENV: path.join(dir, 'none.env'), PASTURE_HOOK_TOKEN: 'exportedOldName_0123456789ab' } });
+    if (IMPL === 'rust') {
+      assert.equal(r.status, 3, r.stderr);
+      assert.match(r.stderr, /BELLWETHER_HOOK_TOKEN is not set/);
+    } else {
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /"X-Bellwether-Token": "expo…"/);
+    }
+  });
   test('the token mask also hides values under the old header name', () => {
     assert.equal(maskToken('"X-Pasture-Token": "someOldToken_123456"', 'other-token-value', new Set()), '"X-Pasture-Token": "some…"');
   });
 });
 
 describe('old X-Pasture-* headers', () => {
-  test('are read as the X-Bellwether-* of the same name, which wins when both are there', () => {
+  test('are read as the X-Bellwether-* of the same name, which wins when both are there', PASTURE_HEADERS, () => {
     const h = adoptLegacyHeaders({ 'x-pasture-token': 'a', 'x-pasture-herdr-pane': 'w1:p1', 'x-bellwether-herdr-pane': 'w2:p2', host: 'h' });
     assert.deepEqual(h, { 'x-bellwether-token': 'a', 'x-bellwether-herdr-pane': 'w2:p2', host: 'h' });
   });
-  test('a running brain accepts a hook sent by an entry pasture wrote, and still refuses a wrong old token', async () => {
+  test('a running brain accepts a hook sent by an entry pasture wrote, and still refuses a wrong old token', PASTURE_HEADERS, async () => {
     const brain = await startBrain({ config: withDefaults({ port: 0 }), token: TOKEN, dataDir: tempDir('rn-brain-') });
     try {
       const body = JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'aaaaaaaa-1111-4222-8333-000000000001', cwd: '/Users/example/projects/meadow' });
@@ -151,12 +166,12 @@ describe('pasture\'s LaunchAgents', () => {
     fs.writeFileSync(f, '');
     return f;
   };
-  test('the labels are local.bellwether.*', () => {
+  test('the labels are local.bellwether.*', REPO_AGENTS, () => {
     assert.equal(LABEL, 'local.bellwether.brain');
     assert.equal(SHELL_LABEL, 'local.bellwether.shell');
     assert.deepEqual(OLD_LABELS, ['local.pasture.brain', 'local.pasture.shell']);
   });
-  test('`autostart install` previews removing them and changes nothing', () => {
+  test('`autostart install` previews removing them and changes nothing', REPO_AGENTS, () => {
     const home = withOld();
     const r = autostart('install', { home, run: never, uid: 501, realHome: () => false, shell: true, shellBin: bin(), platform: 'darwin' });
     assert.equal(r.wrote, false);
@@ -166,38 +181,42 @@ describe('pasture\'s LaunchAgents', () => {
     for (const l of OLD_LABELS) assert.ok(fs.existsSync(plistPath(home, l)));
     assert.ok(!fs.existsSync(plistPath(home, LABEL)));
   });
-  test('with --write it removes them and writes bellwether\'s; launchctl is not called under a temp HOME', () => {
+  test('with --write it removes them and writes bellwether\'s; launchctl is not called under a temp HOME', REPO_AGENTS, () => {
     const home = withOld();
     const r = autostart('install', { home, write: true, run: never, uid: 501, realHome: () => false, shell: true, shellBin: bin(), platform: 'darwin' });
     assert.equal(r.wrote, true);
     for (const l of OLD_LABELS) assert.ok(!fs.existsSync(plistPath(home, l)), l);
     assert.ok(fs.existsSync(plistPath(home, LABEL)) && fs.existsSync(plistPath(home, SHELL_LABEL)));
   });
-  test('with the real HOME it boots the old ones out before loading the new ones (checked by injection)', () => {
+  test('with the real HOME it boots the old ones out before loading the new ones (checked by injection)', REPO_AGENTS, () => {
     const home = withOld(['local.pasture.brain']);
     const calls = [];
     autostart('install', { home, write: true, uid: 501, realHome: () => true, run: (c, a) => (calls.push(a.join(' ')), { ok: true, out: '' }), platform: 'darwin' });
     assert.deepEqual(calls, ['bootout gui/501/local.pasture.brain', 'bootout gui/501/local.bellwether.brain', `bootstrap gui/501 ${plistPath(home, LABEL)}`]);
   });
-  test('an unbuilt strip is refused before anything old is removed', () => {
+  test('an unbuilt strip is refused before anything old is removed', REPO_AGENTS, () => {
     const home = withOld();
     assert.throws(() => autostart('install', { home, write: true, run: never, uid: 501, realHome: () => false, shell: true, shellBin: '/nonexistent/bellwether-shell', platform: 'darwin' }), /isn't built yet/);
     for (const l of OLD_LABELS) assert.ok(fs.existsSync(plistPath(home, l)), `${l} must still be there`);
   });
   test('status and doctor point them out', async () => {
     const home = withOld(['local.pasture.brain']);
-    assert.match(autostart('status', { home, run: never, uid: 501, realHome: () => false, platform: 'darwin' }).lines.join('\n'), /pasture's old LaunchAgent is still installed/);
+    if (IMPL === 'node') assert.match(autostart('status', { home, run: never, uid: 501, realHome: () => false, platform: 'darwin' }).lines.join('\n'), /pasture's old LaunchAgent is still installed/);
     if (process.platform !== 'darwin') return;
     const port = await freePort();
     const settings = path.join(home, 'settings.json');
     fs.writeFileSync(settings, '{}');
     const r = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: settings, configLoader: () => ({ config: { port }, usingExample: false }), home, dataDir: tempDir('rn-data-'), isStripRunning: () => false });
-    assert.match(r.checks.find((c) => c.name === 'old LaunchAgents')?.detail ?? '', /local\.pasture\.brain[\s\S]*bellwether migrate/);
+    // The repository's doctor calls them "old LaunchAgents"; the app's, "legacy agents" (the
+    // four labels of plan D5, its own repository's local.bellwether.* included).
+    const name = IMPL === 'rust' ? 'legacy agents' : 'old LaunchAgents';
+    assert.equal(r.checks.find((c) => c.name === name)?.status, 'WARN');
+    assert.match(r.checks.find((c) => c.name === name)?.detail ?? '', /local\.pasture\.brain[\s\S]*bellwether migrate/);
   });
 });
 
 describe('the `pasture` command', () => {
-  test('prints a deprecation note on stderr and forwards arguments and the exit code to `bellwether`', { skip: process.platform === 'win32' }, () => {
+  test('prints a deprecation note on stderr and forwards arguments and the exit code to `bellwether`', { skip: process.platform === 'win32', ...notUnderRust('the /bin/sh shim and pasture.cmd run the Node CLI; the app has neither (test/DIVERGENCES.md 6)') }, () => {
     const env = { PATH: process.env.PATH, HOME: tempDir('rn-shim-'), BELLWETHER_HOOK_TOKEN: TOKEN };
     const ok = spawnBrainSync(['help'], { shim: path.join(AGENT_DIR, 'pasture'),  encoding: 'utf8', env });
     assert.equal(ok.status, 0);

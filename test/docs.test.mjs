@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { crateLicence, lockedCrates, registryAvailable } from '../scripts/third-party.mjs';
-import { AGENT_DIR } from './helpers.mjs';
+import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /** NOTICE, THIRD-PARTY.md, the repository's own setup files and the first-run README. */
 
@@ -61,5 +61,15 @@ describe('repository setup', () => {
     const at = (s) => first.indexOf(s);
     for (const s of ['pets fetch', 'shell --dev --release', '**Quit it**', 'autostart install --write', 'hooks install --write', 'all set']) assert.ok(at(s) > 0, s);
     assert.ok(at('pets fetch') < at('shell --dev --release') && at('**Quit it**') < at('autostart install --write') && at('autostart install --write') < at('hooks install --write'));
+  });
+});
+
+describe('the hook commands the README shows', () => {
+  test('`help` lists hooks print, install and uninstall with --out, --write, --settings and the old-port --port; the README names the same commands', () => {
+    const r = spawnBrainSync(['help'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: tempDir() } });
+    assert.equal(r.status, 0, r.stderr);
+    for (const s of ['hooks print [--out <file>', 'hooks install   [--write] [--settings <path>]', 'hooks uninstall [--write] [--settings <path>] [--port <old port>]', 'doctor [--json] [--e2e] [--settings <path>]']) assert.ok(r.stdout.includes(s), s);
+    const readme = read('README.md');
+    for (const s of ['hooks install', 'hooks install --write', 'hooks uninstall --write', 'hooks print']) assert.ok(readme.includes(s), s);
   });
 });

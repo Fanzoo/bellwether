@@ -8,18 +8,28 @@
  *                                   over two FIFOs), `startBrain` as a `serve` process
  *
  * So a test written against brain/*.mjs checks the Rust port when the parity table runs it
- * (`npm run test:rust`), call for call. What only the Node CLI has (`.env` writing, doctor
- * before milestone 4) is not here: those tests say so with `notUnderRust` (helpers.mjs).
+ * (`npm run test:rust`), call for call. What only the Node CLI has (`.env` writing, the
+ * repository's LaunchAgents and `shell` control) is not here: those tests say so with
+ * `notUnderRust` (helpers.mjs).
+ *
+ * Milestone 4 adds the installer (brain/hooks.mjs), the diff (diff.mjs) and doctor
+ * (doctor.mjs): the pure parts through `__session`, and `runDoctor` as a real `doctor
+ * --json` run of the binary (its `runClaude` answers a fake `claude` on PATH).
  *
  * Under rust, JS `undefined` crosses as `{"$undefined": true}`, so `{colourIndex:
  * undefined}` stays a property, as in Node.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import { startBrain as nodeStartBrain } from '../brain/brain.mjs';
 import { call } from '../brain/client.mjs';
 import { validateConfig as nodeValidateConfig } from '../brain/config.mjs';
+import * as nodeDiff from '../brain/diff.mjs';
+import * as nodeDoctor from '../brain/doctor.mjs';
+import * as nodeHooks from '../brain/hooks.mjs';
 import * as nodeDefaults from '../brain/defaults.mjs';
 import { envValue as nodeEnvValue } from '../brain/envfile.mjs';
 import { Flock as NodeFlock, LIMITS as NODE_LIMITS } from '../brain/flock.mjs';
@@ -194,10 +204,9 @@ export const createRecorder = RUST
   : nodeCreateRecorder;
 
 export const guardOutFile = RUST
-  ? (target, kind, options) => {
-      if (kind !== 'record') throw new Error(`under rust, guardOutFile covers 'record' only until milestone 4 (asked for ${kind})`);
-      void options;
-      rust('guardRecord', target);
+  ? (target, kind, { force = false } = {}) => {
+      if (kind === 'print') rust('guardPrint', target, force);
+      else rust('guardRecord', target);
     }
   : nodeGuardOutFile;
 export const isBellwetherRecording = RUST ? (text) => rust('isBellwetherRecording', text) : nodeIsRecording;
@@ -332,6 +341,128 @@ async function rustStartBrain({ config, token, dataDir, log = () => {}, hang = f
 }
 
 export const startBrain = RUST ? rustStartBrain : nodeStartBrain;
+
+// ------------------------------------------------------------------ the installer and the diff (M4)
+
+export const EVENTS = RUST ? rust('hooks.EVENTS') : nodeHooks.EVENTS;
+export const HTTP_UNSUPPORTED_EVENTS = RUST ? rust('hooks.HTTP_UNSUPPORTED_EVENTS') : nodeHooks.HTTP_UNSUPPORTED_EVENTS;
+export const ENV_HEADERS = nodeHooks.ENV_HEADERS;
+export const hookBlock = RUST ? (port, token) => rust('hooks.hookBlock', port, token) : nodeHooks.hookBlock;
+export const install = RUST ? (settings, port, token) => rust('hooks.install', settings, port, token) : nodeHooks.install;
+export const uninstall = RUST ? (settings, port, created = null) => rust('hooks.uninstall', settings, port, created) : nodeHooks.uninstall;
+export const countGroups = RUST ? (settings, port) => rust('hooks.countGroups', settings ?? null, port) : nodeHooks.countGroups;
+export const deepEqual = RUST ? (a, b) => rust('hooks.deepEqual', a ?? null, b ?? null) : nodeHooks.deepEqual;
+export const isBellwetherHandler = RUST ? (h, port) => rust('hooks.isBellwetherHandler', h ?? null, port) : nodeHooks.isBellwetherHandler;
+export const isLegacyHandler = RUST ? (h, port) => rust('hooks.isLegacyHandler', h ?? null, port) : nodeHooks.isLegacyHandler;
+export const shapeProblems = RUST ? (settings) => rust('hooks.shapeProblems', settings ?? null) : nodeHooks.shapeProblems;
+/** planEdit's answer; under rust without `originalBytes` (the tests read the file). */
+export const planEdit = RUST ? (file, action, { port, token = null, dataDir = null }) => rust('hooks.planEdit', file, action, { port, token, dataDir }) : nodeHooks.planEdit;
+export const unifiedDiff = RUST ? (oldText, newText, options = {}) => rust('diff.unifiedDiff', oldText, newText, options) : nodeDiff.unifiedDiff;
+export const diffStats = RUST ? (oldText, newText) => rust('diff.diffStats', oldText, newText) : nodeDiff.diffStats;
+
+// ------------------------------------------------------------------ doctor (M4)
+
+export const checkSettings = RUST ? (settings, { port, token = null, file = 'settings' }) => rust('doctor.checkSettings', settings ?? null, { port, token, file }) : nodeDoctor.checkSettings;
+export const checkOtherLevels = RUST ? ({ projectDir = null, managedFile = null, port, userSettings = null }) => rust('doctor.checkOtherLevels', { projectDir, managedFile, port, userSettings }) : nodeDoctor.checkOtherLevels;
+export const globMatch = RUST ? (pattern, value) => rust('doctor.globMatch', String(pattern), value) : nodeDoctor.globMatch;
+export const checkLocatorLog = RUST ? (dataDir) => rust('doctor.checkLocatorLog', dataDir) : nodeDoctor.checkLocatorLog;
+/** doctor's `next` line. Under rust the app's order (no pet art, strip build or LaunchAgent steps). */
+export const nextStep = RUST ? ({ checks, installed }) => rust('doctor.nextStep', checks, !!installed) : nodeDoctor.nextStep;
+
+/** A port nothing listens on: bound by the OS, then released. */
+const closedPort = () =>
+  new Promise((resolve) => {
+    const s = net.createServer().listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
+
+/**
+ * `runDoctor` under rust: one `bellwether doctor --json` run of the binary, with the
+ * options as its environment (the config the loader returns, the token in `env`, `home`
+ * as HOME, `dataDir` as the app's home) and `projectDir` as its directory. A `runClaude`
+ * is answered through a fake `claude` on PATH that asks this process over loopback, so
+ * the `--e2e` tests drive the Rust doctor's real `claude -p` run. A config port below
+ * 1024 (the tests' "nothing listens on port 1") becomes a released free port: the Rust
+ * config refuses ports below 1024.
+ */
+async function rustRunDoctor({ settingsFile, env = process.env, configLoader = null, projectDir = null, e2e = false, runClaude = null, dataDir = null, home = null } = {}) {
+  const dir = tempDir('bw-doctor-');
+  const childEnv = { PATH: process.env.PATH, HOME: home ?? tempDir('bw-doctor-HOME-'), BELLWETHER_HOME: dataDir ?? tempDir('bw-doctor-home-') };
+  if (env.BELLWETHER_HOOK_TOKEN !== undefined) childEnv.BELLWETHER_HOOK_TOKEN = env.BELLWETHER_HOOK_TOKEN;
+  if (configLoader) {
+    let loaded;
+    try {
+      loaded = configLoader();
+    } catch (e) {
+      loaded = { error: e };
+    }
+    const cfg = path.join(dir, 'config.json');
+    if (loaded.error) fs.writeFileSync(cfg, '{ not json');
+    else {
+      const config = { ...(loaded.config ?? {}) };
+      if (!Number.isInteger(config.port) || config.port < 1024) config.port = await closedPort();
+      // A config withDefaults() upgraded: the file had the old default palette, so the
+      // Rust brain gets that file and finds the upgrade itself.
+      if (loaded.config?.[PALETTE_UPGRADED]) config.pets = { ...config.pets, palette: [...nodeDefaults.OLD_DEFAULT_PALETTE] };
+      fs.writeFileSync(cfg, JSON.stringify(config));
+    }
+    childEnv.BELLWETHER_CONFIG = cfg;
+  }
+  let server = null;
+  if (e2e && runClaude) {
+    server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (d) => (body += d));
+      req.on('end', async () => {
+        let answer;
+        try {
+          answer = await runClaude(JSON.parse(body));
+        } catch (e) {
+          answer = { code: 1, stderr: String(e?.message ?? e) };
+        }
+        res.end(JSON.stringify(answer ?? {}));
+      });
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    const script = `#!${process.execPath}
+const http = require('node:http');
+const a = process.argv.slice(2);
+const hooksFile = a[a.indexOf('--settings') + 1];
+const q = http.request({ host: '127.0.0.1', port: ${server.address().port}, method: 'POST', path: '/' }, (r) => {
+  let b = ''; r.on('data', (d) => (b += d)); r.on('end', () => {
+    const x = JSON.parse(b || '{}');
+    if (x.error) { process.stderr.write(x.error + '\\n'); process.exit(127); }
+    if (x.stderr) process.stderr.write(x.stderr);
+    process.exit(x.code ?? 0);
+  });
+});
+q.end(JSON.stringify({ cwd: process.cwd(), hooksFile }));
+`;
+    fs.writeFileSync(path.join(bin, 'claude'), script, { mode: 0o755 });
+    childEnv.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  }
+  const args = ['doctor', '--json', ...(settingsFile ? ['--settings', settingsFile] : []), ...(e2e ? ['--e2e'] : [])];
+  const child = spawnBrain(args, { env: childEnv, cwd: projectDir ?? dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  let err = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (err += d));
+  const code = await new Promise((r) => child.on('close', r));
+  server?.close();
+  let result;
+  try {
+    result = JSON.parse(out);
+  } catch {
+    throw new Error(`bellwether doctor --json (exit ${code}) printed no JSON: ${err || out}`);
+  }
+  return result;
+}
+
+export const runDoctor = RUST ? rustRunDoctor : nodeDoctor.runDoctor;
 
 // What tests use as tools, the same under both: the HTTP client, and the JS replay that
 // drives whichever brain is listening (`bellwether replay` itself is tested through the CLI).

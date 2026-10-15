@@ -75,6 +75,54 @@
       }
     },
     {
+      "group": "lone CR",
+      "name": "a final lone CR is part of the last line",
+      "old": "a\r",
+      "new": "a",
+      "options": {},
+      "expected": "--- a\n+++ b\n@@ -1,1 +1,1 @@\n-a\r\n+a\n",
+      "stats": {
+        "added": 1,
+        "removed": 1
+      }
+    },
+    {
+      "group": "lone CR",
+      "name": "a lone CR inside a line",
+      "old": "a\rb\nc\n",
+      "new": "a\rb\nd\n",
+      "options": {},
+      "expected": "--- a\n+++ b\n@@ -1,2 +1,2 @@\n a\rb\n-c\n+d\n",
+      "stats": {
+        "added": 1,
+        "removed": 1
+      }
+    },
+    {
+      "group": "lone CR",
+      "name": "a line that is only a CR",
+      "old": "a\n\r\nb\n\r",
+      "new": "a\n\r\nb\n",
+      "options": {},
+      "expected": "--- a\n+++ b\n@@ -1,4 +1,3 @@\n a\n \n b\n-\r\n",
+      "stats": {
+        "added": 0,
+        "removed": 1
+      }
+    },
+    {
+      "group": "lone CR",
+      "name": "CR CR LF",
+      "old": "x\r\r\ny\n",
+      "new": "x\r\ny\n",
+      "options": {},
+      "expected": "--- a\n+++ b\n@@ -1,2 +1,2 @@\n-x\r\n+x\n y\n",
+      "stats": {
+        "added": 1,
+        "removed": 1
+      }
+    },
+    {
       "group": "hunks",
       "name": "two changes 6 lines apart share a hunk",
       "old": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\n",

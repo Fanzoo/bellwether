@@ -65,7 +65,7 @@ pub fn token(home: &Path) -> Result<String, BrainError> {
     let file = token_file(home);
     match bellwether_core::token::read_file(home) {
         Ok(Some(t)) => Ok(t),
-        Ok(None) => Err(BrainError::new(format!("no hook token: {} doesn't exist or is empty. Make one with `bellwether token init` (or set BELLWETHER_HOOK_TOKEN)", file.display()), exit::BAD_CONFIG)),
+        Ok(None) => Err(BrainError::new(format!("no hook token: BELLWETHER_HOOK_TOKEN is not set, and {} doesn't exist or is empty. Make one with `bellwether token init`", file.display()), exit::BAD_CONFIG)),
         Err(e) => Err(BrainError::new(e.message, exit::BAD_CONFIG)),
     }
 }

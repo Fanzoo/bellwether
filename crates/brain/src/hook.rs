@@ -36,25 +36,8 @@ pub const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 /// The event name `bellwether doctor` posts to check the token: counted, never shown.
 pub const DOCTOR_PING: &str = "BellwetherDoctorPing";
 
-/// The 16 events `hooks install` subscribes to (brain/hooks.mjs EVENTS).
-pub const EVENTS: [&str; 16] = [
-    "SessionEnd",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PostToolUse",
-    "PostToolUseFailure",
-    "PermissionRequest",
-    "PermissionDenied",
-    "Notification",
-    "SubagentStart",
-    "SubagentStop",
-    "Stop",
-    "StopFailure",
-    "PreCompact",
-    "PostCompact",
-    "Elicitation",
-    "ElicitationResult",
-];
+/// The 16 events `hooks install` subscribes to (crates/core hooks.rs, brain/hooks.mjs EVENTS).
+pub use bellwether_core::hooks::EVENTS;
 
 /// Everything /hook can answer. Nothing else.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

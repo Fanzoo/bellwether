@@ -1,8 +1,10 @@
 {
-  "comment": "The parity table's rows and when each must be green against the Rust brain (distribution plan D2 and the milestones' Done when). test/conformance.mjs adds every other test file that starts the brain through test/helpers.mjs. A row whose milestone is at or before `current` must pass under both implementations, or the run fails.",
-  "current": "M3",
+  "comment": "The parity table's rows and when each must be green against the Rust brain (distribution plan D2 and the milestones' Done when). test/conformance.mjs adds every other test file that starts the brain through test/helpers.mjs. A row whose milestone is at or before `current` must pass under both implementations, or the run fails. M4 also requires isolation, envload, rename and pets (the harness's guards, the token sources and the rename leftovers): they run the Rust binary too, each Node-only test saying why it is skipped under rust.",
+  "current": "M4",
   "milestones": {
-    "M1": ["hook-route-blackbox.test.mjs"],
+    "M1": [
+      "hook-route-blackbox.test.mjs"
+    ],
     "M3": [
       "brain-server.test.mjs",
       "brain.test.mjs",
@@ -29,7 +31,11 @@
       "tester-regression.test.mjs",
       "migrate.test.mjs",
       "tester-migrate.test.mjs",
-      "tester-migrate-recheck.test.mjs"
+      "tester-migrate-recheck.test.mjs",
+      "isolation.test.mjs",
+      "envload.test.mjs",
+      "rename.test.mjs",
+      "pets.test.mjs"
     ]
   }
 }

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, FIXTURES, request, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, notUnderRust, request, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+
+const ENV_WRITER = notUnderRust('the .env writer is retired with the Node CLI; the app writes a token file (test/DIVERGENCES.md 6; token.test.mjs runs `token init` against both)');
 
 /**
  * Tester full regression (2026-10-09). A copy of the brain on its own port, throwaway
@@ -42,9 +43,16 @@ const sheep = async () => {
 };
 const control = (msg) => request(PORT, { method: 'POST', path: '/control', headers: hdr(), body: JSON.stringify(msg) });
 
+// The real settings file is checked by its metadata only: the isolation preload refuses
+// any read of it (test/setup.mjs). A write, a chmod or an atomic replace changes mtime,
+// ctime, size or inode.
 const real = path.join(process.env.HOME ?? '', '.claude', 'settings.json');
-const realSha = () => (fs.existsSync(real) ? crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex') : 'absent');
-const realBefore = { sha: realSha(), mtime: fs.existsSync(real) ? fs.statSync(real).mtimeMs : 0 };
+const realStat = () => {
+  if (!fs.existsSync(real)) return 'absent';
+  const st = fs.statSync(real);
+  return { size: st.size, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, ino: st.ino };
+};
+const realBefore = realStat();
 
 async function up() {
   for (let i = 0; i < 60; i++) {
@@ -355,7 +363,7 @@ describe('hooks install against a temp settings file, and the real one stays unt
 });
 
 describe('first run, on a fresh clone (M10)', () => {
-  test('token init fills a missing .env in the repository root once, never prints the token, and is a no-op the second time', () => {
+  test('token init fills a missing .env in the repository root once, never prints the token, and is a no-op the second time', ENV_WRITER, () => {
     const top = tempDir('bellwether-fr-');
     const repo = path.join(top, 'bellwether');
     fs.cpSync(AGENT, repo, { recursive: true });
@@ -378,7 +386,7 @@ describe('first run, on a fresh clone (M10)', () => {
     assert.ok(fs.readFileSync(out, 'utf8').includes(tok), 'hooks print uses the token from the repository .env');
     fs.rmSync(top, { recursive: true, force: true });
   });
-  test('inside a hub (agents/<name>) with a hub .env and none of its own, the hub .env is used and kept', () => {
+  test('inside a hub (agents/<name>) with a hub .env and none of its own, the hub .env is used and kept', ENV_WRITER, () => {
     const hub = tempDir('bellwether-frhub-');
     const repo = path.join(hub, 'agents', 'bellwether');
     fs.mkdirSync(path.dirname(repo), { recursive: true });
@@ -393,7 +401,7 @@ describe('first run, on a fresh clone (M10)', () => {
     assert.equal(fs.existsSync(path.join(repo, '.env')), false, 'no second .env');
     fs.rmSync(hub, { recursive: true, force: true });
   });
-  test('autostart install without --write previews and writes nothing under HOME', () => {
+  test('autostart install without --write previews and writes nothing under HOME', notUnderRust("the repository's LaunchAgent autostart; the app's `autostart` drives SMAppService (milestone 6), and the harness never runs it on this Mac (plan deviation 22)"), () => {
     const r = cli(['autostart', 'install']);
     // the copy has no built shell, so this is also the "strip not built" failure: exit 2 with a cause
     assert.equal(r.status, 2, r.stdout + r.stderr);
@@ -409,8 +417,7 @@ describe('first run, on a fresh clone (M10)', () => {
 });
 
 describe('the real settings file is untouched by this whole pass', () => {
-  test('sha256 and mtime equal what they were when the suite started', () => {
-    assert.equal(realSha(), realBefore.sha);
-    if (fs.existsSync(real)) assert.equal(fs.statSync(real).mtimeMs, realBefore.mtime);
+  test('size, mtime, ctime and inode equal what they were when the suite started', () => {
+    assert.deepEqual(realStat(), realBefore);
   });
 });

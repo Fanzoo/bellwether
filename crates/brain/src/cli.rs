@@ -1,5 +1,6 @@
-//! The brain's commands (distribution plan, milestone 3): `serve`, `record`, `status`,
-//! `mute`/`unmute`, `show`/`hide`, `replay` and `token init|rotate`. The same names,
+//! The brain's commands (distribution plan, milestones 3 and 4): `serve`, `record`,
+//! `status`, `mute`/`unmute`, `show`/`hide`, `replay`, `token init|rotate`, `hooks
+//! print|install|uninstall`, `pets import` and `migrate`. The same names,
 //! flags, output and exit codes as the Node CLI (brain/cli.mjs), except where the app's
 //! layout differs: the token is a file, not a `.env` entry (D3), and the app's files live
 //! in its home (`BELLWETHER_HOME`). The token is masked in everything printed.
@@ -48,6 +49,9 @@ pub fn run(command: &str, args: &[String]) -> i32 {
         "show" | "hide" => show(command, args),
         "replay" => replay(args),
         "token" => token(args),
+        "hooks" => hooks(args),
+        "pets" => pets(args),
+        "migrate" => crate::migrate::command(args),
         _ => Err(BrainError::new(format!("unknown command {command:?}"), exit::UNEXPECTED)),
     };
     match r {
@@ -63,7 +67,7 @@ fn bad(m: impl Into<String>) -> BrainError {
     BrainError::new(m, exit::BAD_CONFIG)
 }
 
-fn config(home: &Path) -> Result<Config, BrainError> {
+pub(crate) fn config(home: &Path) -> Result<Config, BrainError> {
     Ok(bellwether_core::config::load(home, std::env::var("BELLWETHER_CONFIG").ok().as_deref())?)
 }
 
@@ -78,13 +82,16 @@ fn read_token(home: &Path) -> Result<(String, tok::Source), BrainError> {
     Ok((t, source))
 }
 
-/// A path the user typed: relative to the directory they ran the command from.
-fn user_path(p: &str) -> PathBuf {
-    let p = PathBuf::from(p);
-    if p.is_absolute() {
-        p
-    } else {
-        std::env::current_dir().map(|d| d.join(&p)).unwrap_or(p)
+/// A path the user typed: relative to the directory they ran the command from, with `.`
+/// and `..` folded (`path.resolve`).
+pub(crate) fn user_path(p: &str) -> PathBuf {
+    bellwether_core::hooks::resolve(Path::new(p))
+}
+
+/// The token for masking only, when the command doesn't need one: never an error.
+pub fn remember_token(home: &Path) {
+    if let Ok((t, _)) = tok::read(home, env_token()) {
+        let _ = TOKEN.set(t);
     }
 }
 
@@ -109,12 +116,17 @@ pub fn file_stamp(ms: u64) -> String {
 
 /// The `--port` a test gives serve: 1024 to 65535, or 0 for any free port.
 fn port_arg(v: &str) -> Result<u16, BrainError> {
-    let p = js_number(v);
-    if p.fract() == 0.0 && (p == 0.0 || (1024.0..=65535.0).contains(&p)) {
-        Ok(p as u16)
-    } else {
-        Err(bad("--port takes an integer from 1024 to 65535"))
+    match canonical_port(v) {
+        Some(p) if p == 0 || p >= 1024 => Ok(p),
+        _ => Err(bad("--port takes an integer from 1024 to 65535")),
     }
+}
+
+/// A port as a plain decimal: `47417`, never `047417`, `+47417`, ` 47417` or `4.7417e4`
+/// (the same rule as `hooks --port` in both CLIs), so one spelling means one port.
+pub fn canonical_port(v: &str) -> Option<u16> {
+    let p = js_number(v);
+    (p.fract() == 0.0 && (0.0..=65535.0).contains(&p) && json::number_to_string(p) == v).then_some(p as u16)
 }
 
 /// Test knobs for the conformance suite: shorter timings and a lower connection cap,
@@ -330,7 +342,10 @@ fn replay(args: &[String]) -> CmdResult {
     let config = config(&home)?;
     let (token, _) = read_token(&home)?;
     let port = match a.value("port") {
-        Some(v) => num("port", v, 1.0, 65535.0)? as u16,
+        Some(v) => match canonical_port(v) {
+            Some(p) if p >= 1 => p,
+            _ => return Err(bad("--port must be a number from 1 to 65535")),
+        },
         None => config.port(),
     };
     let speed = match a.value("speed") {
@@ -508,11 +523,14 @@ fn token(args: &[String]) -> CmdResult {
     }
 }
 
-/// `token rotate [--write]` (plan D3, rotation): a new token file, then the brain told to
-/// reload it (the old token still works for a minute). Rewriting the hook entries with the
-/// new token is the installer's job, which milestone 4 ports: until then a settings file
-/// that carries the current token is refused rather than left with hooks that would fail.
+/// `token rotate [--write]` (plan D3, rotation): a new token file, the running brain told
+/// to switch (it accepts the old token for one more minute), then bellwether's hook entries
+/// in the settings file rewritten with the new token (`hooks install`, the same exact-URL
+/// ownership, backup and hash check). The brain is told first, so the entries carry a
+/// token it accepts at every moment. A dry run shows the settings diff with the new token
+/// as `<new token>`.
 fn rotate(home: &Path, args: &[String]) -> CmdResult {
+    use bellwether_core::hooks::{self as installer, Action};
     let a = cliargs::parse(args, &["write"], &["settings"], 0)?;
     let config = config(home)?;
     let port = config.port();
@@ -525,25 +543,254 @@ fn rotate(home: &Path, args: &[String]) -> CmdResult {
     };
     let _ = TOKEN.set(old.clone());
     let settings = a.value("settings").map(user_path).unwrap_or_else(outfile::user_settings);
-    if std::fs::read_to_string(&settings).is_ok_and(|t| t.contains(&old)) {
-        return Err(bad(format!(
-            "{} has hook entries that carry the current token; a new token would make every hook call fail. Rewriting them comes with the hook installer (distribution plan, milestone 4); until then nothing was changed",
-            settings.display()
-        )));
-    }
+    // The settings file is read and planned before anything is written: one that can't be
+    // rewritten stops the rotation with nothing changed.
+    let ours = |plan: &installer::Plan| installer::sum_groups(&installer::count_groups(&plan.before, port)) > 0;
+    let preview = installer::plan_edit(&settings, Action::Install, port, "<new token>", Some(home))?;
+    let rewrite = ours(&preview);
     if !a.has("write") {
-        out(&format!("would write a new hook token to {} and ask the brain on {BIND_HOST}:{port} to switch to it (the old one keeps working for a minute). Nothing was written; re-run with --write to do it.\n", file.display()));
+        let mut text = format!("would write a new hook token to {} and ask the brain on {BIND_HOST}:{port} to switch to it (the old one keeps working for a minute).\n", file.display());
+        if rewrite {
+            text.push_str(&format!("would rewrite bellwether's hook entries in {} with it:\n", settings.display()));
+            text.push_str(&bellwether_core::diff::unified_diff(&preview.old_text, &preview.new_text, &format!("{} (current)", settings.display()), &format!("{} (after token rotate)", settings.display()), 3));
+        } else {
+            text.push_str(&format!("{} has no bellwether hook entries on port {port}; nothing to rewrite there.\n", settings.display()));
+        }
+        text.push_str("Nothing was written; re-run with --write to do it.\n");
+        out(&text);
         return Ok(exit::OK);
     }
     let new = tok::generate()?;
+    let mut plan = if rewrite { Some(installer::plan_edit(&settings, Action::Install, port, &new, Some(home))?) } else { None };
     tok::write(home, &new)?;
-    let reload = Js::Obj(Obj::new().with("action", "reload-token"));
-    let brain = match post_control(port, &old, &reload) {
-        Ok(_) => format!("the brain on {BIND_HOST}:{port} switched to it and accepts the old one for another minute"),
-        Err(e) if e.code == exit::NOT_RUNNING => format!("no brain answered on {BIND_HOST}:{port}; it reads the new token when it starts"),
-        Err(e) => format!("the brain on {BIND_HOST}:{port} didn't switch ({}); restart it", e.message),
+    // The entries change only once the brain on the port has switched, or when no brain
+    // runs at all (it reads the token file when it starts). A brain that answers but
+    // doesn't switch (the repository's Node brain has no `reload-token`) would refuse
+    // every rewritten entry: put the old token back and stop.
+    let (switched, brain) = match tell_brain(port, &old) {
+        Switch::Switched => (true, format!("the brain on {BIND_HOST}:{port} switched to it and accepts the old one for another minute")),
+        Switch::NoBrain => (false, format!("no brain answered on {BIND_HOST}:{port}; it reads the new token when it starts")),
+        Switch::Refused(why) => {
+            let back = match tok::write(home, &old) {
+                Ok(_) => format!("The token file is back to the old token and {} was not touched, so nothing changed", settings.display()),
+                Err(e) => format!("Putting the old token back into {} failed too ({}): run `bellwether token rotate --write` again once the brain is stopped", file.display(), e.message),
+            };
+            return Err(BrainError::new(
+                format!("the brain on {BIND_HOST}:{port} didn't switch to the new token ({why}). {back}. A brain without `reload-token` (the repository's Node brain) can't follow a rotation: stop it first, or rotate the token it reads"),
+                exit::UNEXPECTED,
+            ));
+        }
     };
-    out(&format!("wrote a new hook token to {} (mode 0600; the value isn't shown); {brain}\n", file.display()));
+    let mut text = format!("wrote a new hook token to {} (mode 0600; the value isn't shown); {brain}\n", file.display());
+    if let Some(plan) = plan.as_mut() {
+        match installer::apply_plan(plan, &home.join("backups"), Some(home), &file_stamp(crate::now_ms())) {
+            Ok(backup) => {
+                text.push_str(&format!("rewrote bellwether's hook entries in {} with the new token", settings.display()));
+                if let Some(b) = backup {
+                    text.push_str(&format!("; backup of the previous file: {}", b.display()));
+                }
+                text.push('\n');
+                for w in &plan.warnings {
+                    err_line(&format!("warning: {w}"));
+                }
+            }
+            Err(e) => {
+                // The entries still carry the old token: the token file and the brain go back
+                // to it, so all three agree again.
+                out(&text);
+                let file_back = tok::write(home, &old);
+                let brain_back = if !switched {
+                    Switch::NoBrain
+                } else {
+                    tell_brain(port, &new)
+                };
+                let state = match (&file_back, &brain_back) {
+                    (Ok(_), Switch::Switched) => "The token file and the brain are back on the old token; nothing else changed".to_string(),
+                    (Ok(_), Switch::NoBrain) if !switched => "The token file is back on the old token; nothing else changed".to_string(),
+                    (Ok(_), Switch::NoBrain) => format!("The token file is back on the old token, but the brain on {BIND_HOST}:{port} stopped answering: it reads the old token when it starts again"),
+                    (Ok(_), Switch::Refused(why)) => format!("The token file is back on the old token, but the brain on {BIND_HOST}:{port} didn't switch back ({why}): restart it within a minute, or the hooks get 403"),
+                    (Err(fe), _) => format!("Putting the old token back into {} failed ({}): the hook entries carry the old token and the brain the new one. Run `bellwether hooks install --write` now", file.display(), fe.message),
+                };
+                return Err(BrainError::new(format!("{} {state}.", e.message), e.code));
+            }
+        }
+    } else {
+        text.push_str(&format!("{} has no bellwether hook entries on port {port}; nothing to rewrite there.\n", settings.display()));
+    }
+    out(&text);
+    Ok(exit::OK)
+}
+
+/// What the brain on the port did with `reload-token`.
+enum Switch {
+    Switched,
+    /// Nothing listens on the port.
+    NoBrain,
+    /// Something answered, and didn't switch; why.
+    Refused(String),
+}
+
+/// Posts `reload-token` with `token`, and says what came of it.
+fn tell_brain(port: u16, token: &str) -> Switch {
+    let body = json::stringify(&Js::Obj(Obj::new().with("action", "reload-token")));
+    match client::request(port, "POST", "/control", &[("X-Bellwether-Token", token), ("Content-Type", "application/json")], Some(body.as_bytes()), Duration::from_secs(5)) {
+        Err(Failure::Refused) => Switch::NoBrain,
+        Err(f) => Switch::Refused(format!("it didn't answer: {}", f.code())),
+        Ok(r) => {
+            let v = json::parse(&r.text()).unwrap_or(Js::Null);
+            if r.status == 200 && v.get("ok").truthy() {
+                Switch::Switched
+            } else {
+                let why = v.get("error").as_str().map(jsstr::to_string_lossy).unwrap_or_default();
+                Switch::Refused(format!("it answered {}{}", r.status, if why.is_empty() { String::new() } else { format!(": {why}") }))
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ hooks
+
+/// The CLI's own wording of a settings path: as given, else the default file.
+fn settings_arg(a: &cliargs::Args) -> PathBuf {
+    a.value("settings").map(user_path).unwrap_or_else(outfile::user_settings)
+}
+
+/// `bellwether hooks print [--out <file> [--force]] | install | uninstall [--write]
+/// [--settings <path>] [--port <old port>]` (brain/cli.mjs `hooks`).
+fn hooks(args: &[String]) -> CmdResult {
+    use bellwether_core::hooks::{self as installer, Action, EVENTS};
+    let a = cliargs::parse(args, &["write", "force"], &["settings", "out", "port"], 1)?;
+    let sub = a.positional.first().map(String::as_str).unwrap_or("");
+    let home = home::dir();
+    let config = config(&home)?;
+    // --port manages entries on another port (after a port change). Ownership is the exact
+    // URL http://127.0.0.1:<port>/hook, so entries on the old port are untouched until
+    // named this way.
+    let mut port = config.port();
+    if let Some(v) = a.value("port") {
+        let n = js_number(v);
+        if n.fract() != 0.0 || !(1024.0..=65535.0).contains(&n) || json::number_to_string(n) != v {
+            return Err(bad("--port takes an integer from 1024 to 65535"));
+        }
+        port = n as u16;
+        if sub != "uninstall" {
+            return Err(bad("--port is only for `hooks uninstall` (to remove entries left on an old port); change \"port\" in config.json to move the install"));
+        }
+    }
+    if sub == "print" {
+        if a.has("write") || a.value("settings").is_some() {
+            return Err(bad("`hooks print` takes only --out <file> [--force]"));
+        }
+        if a.has("force") && a.value("out").is_none() {
+            return Err(bad("--force only applies to `hooks print --out <file>`"));
+        }
+        let (token, _) = read_token(&home)?;
+        let text = bellwether_core::lossless::stringify(&installer::hook_block(port, &token), "  ") + "\n";
+        let Some(o) = a.value("out") else {
+            out(&text);
+            return Ok(exit::OK);
+        };
+        // The block holds the token, so the file is private to its owner (0600).
+        let target = user_path(o);
+        outfile::guard_print(&target, a.has("force"))?;
+        let fail = |e: std::io::Error| BrainError::new(format!("cannot write {}: {}", target.display(), bellwether_core::config::io_code(&e)), exit::UNEXPECTED);
+        if let Some(dir) = target.parent() {
+            std::fs::create_dir_all(dir).map_err(fail)?;
+        }
+        installer::write_replace(&target, text.as_bytes(), 0o600).map_err(fail)?;
+        installer::set_mode(&target, 0o600).map_err(fail)?;
+        err_line(&format!("wrote {} (mode 0600). Try it with: claude --settings {}", target.display(), target.display()));
+        return Ok(exit::OK);
+    }
+    let action = match sub {
+        "install" => Action::Install,
+        "uninstall" => Action::Uninstall,
+        _ => return Err(BrainError::new("usage: bellwether hooks print [--out <file>] | install | uninstall [--write] [--settings <path>]", exit::UNEXPECTED)),
+    };
+    if a.value("out").is_some() || a.has("force") {
+        return Err(bad(format!("`hooks {sub}` takes --settings and --write, not --out or --force")));
+    }
+    let file = settings_arg(&a);
+    let token = match action {
+        Action::Install => read_token(&home)?.0,
+        Action::Uninstall => {
+            remember_token(&home);
+            String::new()
+        }
+    };
+    // The install record belongs to the configured port's install; an uninstall of
+    // old-port leftovers neither reads nor rewrites it.
+    let record_dir = (port == config.port()).then_some(home.as_path());
+    let mut plan = installer::plan_edit(&file, action, port, &token, record_dir)?;
+    for w in &plan.warnings {
+        err_line(&format!("warning: {w}"));
+    }
+    let shown = plan.warnings.len();
+    let before = installer::sum_groups(&installer::count_groups(&plan.before, port));
+    let after = installer::sum_groups(&installer::count_groups(&plan.after, port));
+    if !plan.changed {
+        err_line(&match action {
+            Action::Install => format!("already installed, no changes ({after} bellwether matcher groups in {})", file.display()),
+            Action::Uninstall => format!("nothing to remove: no bellwether entries in {}", file.display()),
+        });
+        return Ok(exit::OK);
+    }
+    out(&bellwether_core::diff::unified_diff(&plan.old_text, &plan.new_text, &format!("{} (current)", file.display()), &format!("{} (after {sub})", file.display()), 3));
+    let backups = home.join("backups");
+    let summary = format!(
+        "bellwether matcher groups {before} -> {after} ({} events subscribed); {}",
+        EVENTS.len(),
+        if plan.layout_kept {
+            "every other line of the file is unchanged.".to_string()
+        } else {
+            format!("every other entry keeps its value, BUT this file is not laid out the way bellwether writes JSON (spacing, inline arrays or mixed line endings), so the write also reformats existing lines, as the diff shows. An uninstall afterwards will not restore the original bytes; the backup in {}/ keeps them.", backups.display())
+        }
+    );
+    if !a.has("write") {
+        err_line(&format!("\ndry run: {summary}\nNothing was written. Re-run with --write to apply."));
+        return Ok(exit::OK);
+    }
+    let backup = installer::apply_plan(&mut plan, &backups, record_dir, &file_stamp(crate::now_ms()))?;
+    err_line(&format!("\nwritten: {summary}{}", backup.map(|b| format!("\nbackup of the previous file: {}", b.display())).unwrap_or_default()));
+    for w in &plan.warnings[shown..] {
+        err_line(&format!("warning: {w}"));
+    }
+    Ok(exit::OK)
+}
+
+// ------------------------------------------------------------------ pets
+
+const PETS_USAGE: &str = "usage: bellwether pets import <animations.xml> [--name <name>] [--force]";
+
+/// `bellwether pets import <file> [--name <name>] [--force]` (plan D8).
+fn pets(args: &[String]) -> CmdResult {
+    let Some(sub) = args.first().filter(|s| !s.starts_with("--")) else { return Err(bad(PETS_USAGE)) };
+    if sub == "fetch" {
+        return Err(bad("`pets fetch` isn't in the app: it downloads the eSheep art, which the app doesn't redistribute. Import a pet file you have with `bellwether pets import <animations.xml>`"));
+    }
+    if sub != "import" {
+        return Err(bad(PETS_USAGE));
+    }
+    let a = cliargs::parse(&args[1..], &["force"], &["name"], 1)?;
+    let Some(file) = a.positional.first() else { return Err(bad(PETS_USAGE)) };
+    let home = home::dir();
+    let r = crate::pets::import(&home, &user_path(file), a.value("name"), a.has("force"))?;
+    // Names come from the file: printed with control characters replaced.
+    let map = crate::pets::printable(&json::stringify_pretty(&Js::Obj(r.map.clone()), "  "));
+    out(&format!(
+        "{} {} ({}, {}×{} tiles, {} animations) to {}, pinned in {} (sha256 {}…).\nThe strip draws it with \"pets\": {{ \"default\": \"{}\" }} in config.json; a proposed \"animationMap\" entry for it, by name matching:\n\"{}\": {map}\n",
+        if r.replaced { "replaced" } else { "imported" },
+        r.name,
+        if r.pet.title.is_empty() { "untitled".to_string() } else { crate::pets::printable(&r.pet.title) },
+        r.pet.tilesx,
+        r.pet.tilesy,
+        r.pet.animations.len(),
+        r.file.display(),
+        crate::pets::lock_file(&home).display(),
+        &r.sha256[..12],
+        r.name,
+        r.name
+    ));
     Ok(exit::OK)
 }
 
@@ -562,7 +809,7 @@ mod tests {
     fn ports() {
         assert_eq!(port_arg("47418").unwrap(), 47418);
         assert_eq!(port_arg("0").unwrap(), 0);
-        for bad in ["80", "x", "70000", "1.5", "-1"] {
+        for bad in ["80", "x", "70000", "1.5", "-1", "047418", "+47418", " 47418", "4.7418e4"] {
             assert!(port_arg(bad).is_err(), "{bad}");
         }
     }

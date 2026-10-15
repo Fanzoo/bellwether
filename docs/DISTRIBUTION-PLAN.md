@@ -1732,6 +1732,210 @@ Builds:
 - a doctor run against a settings file with a Bellwether entry carrying
   `onFailure: "block"` FAILs.
 
+#### M4 status (developer, 2026-10-14): done locally; CI not yet run
+
+Built:
+- **`crates/core`**:
+  - `lossless.rs`: the lossless JSON of R2 (number literals verbatim, file key order, a
+    duplicate key's first place with its last value, `__proto__` an ordinary key,
+    `JSON.stringify` escaping over unit strings, `serialise()`'s indent and EOL detection,
+    the 10-character gap cut, `deepEqual`);
+  - `diff.rs`: the LCS diff, line for line from brain/diff.mjs;
+  - `hooks.rs`: the hook block, install, uninstall, `shapeProblems`,
+    `assertOthersPreserved`, `countGroups`, the install record, `planEdit` and `applyPlan`
+    (backup 0600 with `wx`, the hash check, the temp file and rename, the advisory record);
+    `EVENTS` now lives here (deviation 44);
+  - `settings_checks.rs`: doctor's checks of settings files and the other settings levels,
+    `globMatch`, and the new `onFailure: "block"` FAIL;
+  - `outfile.rs`: the `hooks print --out` guard joins `record --out`'s;
+  - tests: `tests/installer.rs` (every installer vector and every diff vector) and unit
+    tests (round trips, shapes, ownership, layouts, the changed-while-editing check).
+- **`crates/brain`**: `doctor.rs` (the brain-side checks, `next`, `--e2e`, the report and
+  `--json`; deviation 33), `pets.rs` (`pets import`), `migrate.rs` (deviation 35), and in
+  `cli.rs` the commands `hooks print|install|uninstall`, `pets import`, `migrate`, and
+  `token rotate`'s step 2 (deviation 36).
+- **The shell's `cli.rs`**: `doctor [--json] [--e2e] [--settings] [--port]` around the brain's
+  checks, with identity, signature, app data, login items, Accessibility, F9's wording and
+  review D3's agent port kept; `shell` (deviation 38); the help.
+- **The `__` commands**: `__json` and `__diff` are real; `__session` has the installer,
+  the diff and doctor's pure checks; `runDoctor` runs the binary (deviation 40).
+- **The Node brain**: doctor FAILs `onFailure: "block"` too (one change, deviation 33).
+- **The harness**: a temp HOME for the Rust binary and the real-settings guard (deviation
+  39); `test/impl.mjs` has the installer, diff and doctor; every M4 file is wired; Node-only
+  tests skip with their reason (deviation 41); test/DIVERGENCES.md 14–21.
+
+Progress against **Done when** (this Mac, 2026-10-14):
+- [x] Under rust, every file M4 names passes, and so do isolation, envload, rename and pets
+  (added to M4, deviation 42). The parity table (`npm run test:rust`, current M4, the final
+  run; exit 0; `*`: the file also tests brain/*.mjs in process; every skip says why):
+
+  | file | node | rust |
+  |---|---|---|
+  | hook-route-blackbox (M1) | pass 23/23 | pass 23/23 |
+  | brain-server | pass 22/22 | pass 22/22 |
+  | brain | pass 32/32 | pass 32/32 |
+  | flock | pass 78/78 | pass 78/78 |
+  | palette-labels | pass 9/9 | pass 9/9 |
+  | privacy | pass 7/7 | pass 7/7 |
+  | tester-m1-reverify | pass 70/70 | pass 62/62, 8 skipped |
+  | tester-m1 | pass 40/40 | pass 36/36, 4 skipped |
+  | tester-m2-recheck | pass 67/67, 1 skipped | pass 67/67, 1 skipped |
+  | tester-m2 | pass 104/104 | pass 104/104 |
+  | tester-m5 | pass 14/14 | pass 14/14 |
+  | token | pass 13/13 | pass 6/6, 7 skipped * |
+  | docs | pass 8/8 | pass 8/8 |
+  | doctor | pass 33/33 | pass 32/32, 1 skipped * |
+  | envload | pass 7/7 | pass 1/1, 6 skipped * |
+  | hooks | pass 73/73 | pass 72/72, 1 skipped * |
+  | isolation | pass 6/6 | pass 6/6 * |
+  | migrate | pass 22/22 | pass 3/3, 19 skipped * |
+  | pets | pass 5/5 | pass 1/1, 4 skipped * |
+  | rename | pass 21/21 | pass 9/9, 12 skipped * |
+  | shellctl | pass 9/9 | pass 1/1, 8 skipped * |
+  | tester-m10 | pass 27/27 | pass 5/5, 22 skipped * |
+  | tester-m3 | pass 17/17 | pass 8/8, 9 skipped * |
+  | tester-m6 | pass 20/20 | pass 20/20 |
+  | tester-m8 | pass 12/12 | pass 12/12 |
+  | tester-migrate-recheck | pass 17/17 | pass 2/2, 15 skipped * |
+  | tester-migrate | pass 25/25 | pass 5/5, 20 skipped * |
+  | tester-regression | pass 27/27 | pass 24/24, 3 skipped |
+  | tester-shellctl | pass 26/26 | pass 12/12, 14 skipped * |
+
+  node 29 of 29 files green, rust 29 of 29; every M3 skip with an M4 reason is gone (palette-
+  labels, privacy, token, tester-m1, tester-m1-reverify, tester-m2 run their doctor and
+  installer tests against the Rust binary). The skips left are the repository's own
+  (deviation 41) and the private recordings.
+- [x] The JSON differential: 0 unexplained differences in 10⁵ generated settings files
+  (seed 1); the only explained ones are integer-like keys in file order (DIVERGENCES 16).
+  Injected fault: writing the literal `-0` as `0` gave 933 unexplained differences in 20 000
+  cases; reverted, 0. The diff area: 0 differences in 10⁵.
+- [x] Installer vectors: install then uninstall gives back the original bytes for all nine
+  vectors Node round-trips (deviation 34, for the other two); `hooks install` previews are
+  byte-identical to Node's for ten of eleven, through the CLI (hooks.test.mjs, "every
+  installer vector through the CLI") and in `crates/core/tests/installer.rs`; the eleventh
+  differs only in its integer-like keys' order.
+- [x] Doctor FAILs a bellwether entry with `onFailure: "block"`, exit 3, under both brains
+  (doctor.test.mjs, "onFailure (plan D3)"); by hand on the Rust CLI:
+  `FAIL  hook onFailure  bellwether entries on PreToolUse set "onFailure": "block": with the
+  brain down, Claude Code would block every tool call there. …`, then `2 check(s) failed
+  (exit 3).`
+- [x] Counts: `npm test` 984 tests, 983 pass and 1 skipped (the private recordings), from 963:
+  21 new tests (the eleven installer vectors through the CLI, `onFailure`, the real-settings
+  guard, `pets import`, two migrate CLI tests, three migrate previews, `PASTURE_HOOK_TOKEN`
+  alone, the hook commands in `help`); no assertion was weakened (tester-regression's
+  check of the real settings file now uses its metadata, deviation 39). `npm run
+  test:cargo` runs 134 tests, 136 with `--features bellwether-shell/conformance` (115 and 117
+  at M3). `npm run test:vectors`: all 60 files match. `third-party.mjs --check`: up to date
+  (no new crate).
+- [x] Differential (seed 1, 10⁵ each): env 0, redact 0, normalise 0, json 0 unexplained
+  (22 336 explained), diff 0, fixture 0 (21); `node --env-file` sample 0 unexplained. Seed 7:
+  json 0 unexplained, diff 0.
+- [x] Cross-target: `cargo check -p bellwether-core -p bellwether-brain --all-targets` is
+  green for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`, no warnings.
+- [x] Release check: `cargo build --release --target-dir shell/src-tauri/target-dev/release-check`;
+  `__json`, `__diff`, `__session` and `__fixture` answer `unknown command`, exit 1.
+  `shell/src-tauri/target/release/bellwether-shell` kept sha256 `35ceb697…ae22`.
+- [ ] Only CI can prove: the workflow on GitHub's runners with M4 required in the parity
+  job, the Windows and Linux checks there, and the timing tests on a shared runner.
+- Not run: a real `doctor --e2e` (one `claude -p` API call; the fake `claude` covers the
+  path), `migrate --write` against a real repository install or real LaunchAgents (never on
+  this Mac), and `pets import` of a real eSheep file (data/pets is not read here).
+
+#### M4 findings
+
+- **The guard found a real read.** tester-regression hashed `~/.claude/settings.json` to
+  prove it untouched; the new guard refuses reads, so it now compares the file's metadata
+  (deviation 39). No test reads or writes the real file any more.
+- **Load-sensitive timing, again.** Two earlier full runs each had one red brain-server
+  cell, at load averages of 8–20 from programs outside this work (a game and another
+  session's test runs): once under rust ("/hook p99 under 5 ms"), once under node (its own
+  sender managed only 137 of 200 events in a second). Alone, and in the final run at a
+  load of about 5, both passed 22 of 22. The M3 finding's fix (a calibrated budget for the
+  snapshot test too) still stands.
+- **The 8000-line settings file** (tester-m1-reverify) takes a 272 MB LCS table in both
+  brains, as brain/diff.mjs does; it stays well inside the test's 15 s.
+- **`hooks install` across a token change moves bellwether's group to the end** of each
+  event's list (it removes the stale group and appends a fresh one), in both brains. That is
+  today's behaviour; `token rotate` uses it as it is.
+
+#### M4 review fixes (BR-3K: "fix first, short list", 2026-10-14)
+
+- **D1, `token rotate`.** The hook entries change only when the brain on the port confirmed
+  the switch, or when no brain answers at all. A brain that answers and refuses (the Node
+  brain answers `reload-token` with 400 "unknown action") gets the old token back in the
+  file, the entries untouched, exit 1, and a message saying why. After a failed settings
+  write the second `reload-token` is checked; the message says whether the brain, the file
+  and the entries agree again or which one is off. New `crates/brain/tests/rotate_cli.rs`: a
+  refusing brain, no brain, a failed write, and a failed switch back (fake brains on free
+  ports). **Recommendation: the Node brain should not learn `reload-token`.** It reads the
+  repository's `.env`, not the app's token file the Rust CLI rotates, so a switch would be
+  meaningless; refusing is the correct answer, and the Node brain goes in M11.
+- **D2, the real-settings guard.** The preload compares the device and inode of every read
+  or write target with the real `settings.json` (it never reads it), and a normalised name
+  (the `/System/Volumes/Data` firmlink dropped, lower case) for a file that doesn't exist
+  yet, such as `settings.local.json`. It now also wraps `fs.openAsBlob`, `new fs.ReadStream`,
+  `new fs.WriteStream` and `process.binding('fs')` (any path argument naming a protected file
+  stops the call). `rustEnv` recognises the real HOME by inode, so a firmlink or upper-case
+  spelling is replaced too, and `brainCommand` refuses any argument (`--settings`, `--out`,
+  `--settings=…`, a relative path against its cwd) that names the real files. Two new tests
+  in isolation.test.mjs try each of BR-3K's bypasses on a decoy file the test protects the
+  same way (`protectForTest`); none touches the real file.
+- **The live-port guard and port spellings.** The helper reads every `--port` as a number
+  (leading zeros, `+`, spaces) for every command, `hooks` included, and refuses 47417 in any
+  spelling. Both CLIs now take a port only as a plain decimal: `serve`, `record`, `replay`
+  and `doctor --port` refuse `047417`, `+47417`, ` 47417` and `4.7417e4` (exit 3), as `hooks
+  --port` already did. Node's `replay --port` changed the same way. Tested in hooks.test.mjs
+  ("a port is one spelling") and the Rust `ports` unit test; tester-m2's list gained
+  `047500`, `+47500` and ` 47500`.
+- **D3, the differential.** The json area's "explained" now uses BR-3K's model: the
+  integer-like keys are renamed to plain ones, Node answers, the keys are renamed back, and
+  Rust must equal that byte for byte (escapes, numbers, layout and the keys' order). Seed 1:
+  0 unexplained, 22 336 equal to the model. BR-3K's three faults injected through a proxy:
+  `é` written as `\u00e9` 13 323 unexplained, upper-case `\u001F` 3 351, DEL as `\u007f`
+  3 433 (all three were 0 before).
+- **D4, `pets import`.** Elements nest at most 64 levels (a million nested is refused at
+  once, "nested more than 64 deep", where it overflowed the stack); duplicate attributes are
+  found with a set (100 000 attributes check in milliseconds, 16.7 s before); the title and
+  the proposed map are printed with control characters and bidi overrides as `?`. The Node
+  CLI prints nothing from an imported file (it has no `pets import`), so there is nothing to
+  match there. Tests: `pets.rs` `hostile_files_are_refused_quickly_and_nothing_prints_raw`,
+  and pets.test.mjs through the CLI.
+- **D5.** (a) Depth: listed as DIVERGENCES 22, with a test under both brains (Node installs
+  into a file 1100 levels deep, Rust refuses it with exit 3 and writes nothing). (b) Lone CR:
+  `diff.rs` keeps a CR that no LF follows, as `split(/\r?\n/)` does; diff-vectors.json gained
+  four lone-CR cases, and the differential's diff generator makes lone CRs inside lines, as
+  lines and at the end (0 differences in 10⁵).
+- **D6.** DIVERGENCES 21 has a pinning test (each brain's wording); deviation 35 and
+  DIVERGENCES 17 now say the ping runs only when HOME is the real home, and that otherwise
+  the entries are rewritten directly. The ping-then-rewrite path is tested without the real
+  HOME: `migrate::Options` has `check_brain` (the CLI sets it from the real-home check), and
+  `crates/brain/tests/migrate_cli.rs` runs it against a Rust brain that takes the token,
+  one that holds another, and none. The exotic vector's CLI test under rust now asserts the
+  installed bytes, the preview (Node's diff of exactly those bytes) and the uninstalled bytes.
+  Four more migrate tests run through the CLI under both brains (the preview's steps, `--from`
+  a data directory with `--force`, `--env` with a corrupt state.json and a `--from` that isn't
+  an install, and no token in any `.env`, where the app takes the entries' token): Rust
+  migrate now has 12 tests through the CLI plus 3 cargo tests (against Node's 26).
+- **D7, `onFailure` at the other levels.** A bellwether entry with `"onFailure": "block"`
+  in a project, local or managed settings file FAILs (`hook onFailure`, exit 3, naming the
+  file and the level), in both doctors. Tested in doctor.test.mjs, both the check and a whole
+  run.
+- **D8, the timing tests.** The throttle tests' lower bounds (more than 300 events, at least
+  7 snapshots) and the throughput test's (at least 2 snapshots) scale with
+  `machineSlowdown()`, which a starved attempt measures again; a starved attempt is retried,
+  and three in a row make the test skip as inconclusive, not fail. The upper bound (at most 4
+  snapshots in any second) is checked on every attempt, unscaled.
+
+After the fixes (this Mac, load about 4–6):
+- `npm test`: 994 tests, 993 pass, 1 skipped (the private recordings). Ten new tests.
+- `npm run test:cargo`: 137; with the conformance feature, 139.
+- `npm run test:rust`: exit 0, node 29 of 29, rust 29 of 29 (hooks 75/75 + 1 skipped,
+  doctor 33/33 + 1, isolation 8/8, migrate 7/7 + 19).
+- `npm run differential`: env 0, redact 0, normalise 0, json 0 unexplained (22 336 equal to
+  the model), diff 0, fixture 0, `node --env-file` 0 unexplained.
+- `npm run test:vectors`: all 60 files match. `third-party.mjs --check`: up to date. The
+  cross-target check of core and brain: green for Linux and Windows, no warnings.
+
 ### M5. Shell on the Rust brain, app-data layout
 
 Builds:
@@ -2260,3 +2464,125 @@ Recorded by the developer while building M3 (2026-10-13).
     connections first, or a short idle timeout. Done: both, plus raising the descriptor
     limit: 5 s idle timeout; a cap of 1024 (fd limit minus 64 when lower); eviction of the
     connection idle longest, else the oldest `/state` long poll (DIVERGENCES 11).
+
+Recorded by the developer while building M4 (2026-10-14).
+
+33. **Where doctor lives.**
+    - Plan: doctor with the new checks; M1's doctor was in the shell crate's `cli.rs`.
+    - Done: the checks that need no app bundle are in the brain crate, `crates/brain/src/
+      doctor.rs` (config, token and its file's mode, `claude`, the brain and its token, the
+      settings file, the other settings levels, palette, sharing names, the hidden strip, the
+      strip's log: locator, Dock and the WebKit switch, pets, legacy LaunchAgents, `next`,
+      `--e2e`), with the settings checks themselves in `crates/core/src/settings_checks.rs`.
+      The shell's `cli.rs` adds what needs the bundle (identity, signature, app data, login
+      items, Accessibility, the agent-port hint of review D3, the stale-session wording of
+      F9) around them, and prints the Node doctor's format, `--json` included. The sharing
+      rules stay the strip's (`privacy.rs`); the shell passes their answer in.
+    - The `onFailure: "block"` FAIL went into the Node doctor too, so one test runs against
+      both brains.
+34. **"Every installer vector round-trips": the nine that can.**
+    - Plan: for every installer vector, install then uninstall returns the original bytes,
+      and previews are byte-identical to Node's.
+    - True: two of the eleven vectors don't round-trip under Node either, by their nature.
+      "Not in bellwether's layout" is reformatted by any install (its preview says so). "Exotic
+      numbers, escapes and integer-like keys" has escapes such as `\/` and `é`, which
+      R2's rule (escape as `JSON.stringify` does) rewrites as `/` and `é`; it also has the
+      integer-like keys R2 keeps in file order, where Node moves them first.
+    - Done: the nine vectors Node round-trips round-trip under Rust; ten of eleven previews
+      and installed files are Node's bytes; the exotic one differs only in the order of its
+      three integer-like keys, and after install and uninstall only its escaped string's line
+      differs from the original (test/DIVERGENCES.md 16; `crates/core/tests/installer.rs`).
+      Keeping escapes verbatim would have made that vector round-trip, at the price of a
+      second difference from Node's preview; R2 asks for `JSON.stringify`'s escaping, so it
+      wasn't done.
+35. **`migrate`: the repository's steps into the app's files; no LaunchAgent swap.**
+    - Plan: port today's repository-to-repository behaviour.
+    - True: today's step 4 writes `local.bellwether.*` LaunchAgents that run Node from the
+      checkout and boots the old ones out. The app never writes or boots out a LaunchAgent
+      (D5), and its own swap (SMAppService, rollback) is milestone 8.
+    - Done: steps 1–3 and 5 in today's order and wording, into `BELLWETHER_HOME`; step 4
+      finds the old agents by what they run (pasture's and the repository's
+      `local.bellwether.*`) and lists them, untouched. When HOME is the real home, the hook
+      entries move only once a brain on the port takes the token under `X-Bellwether-Token`
+      (a doctor ping in place of brain/probe.mjs); under any other HOME there is no ping and
+      they move directly, as today's CLI does under a temp HOME. (Corrected after the M4
+      review: this said the reverse.) Also from D9: the token
+      may come from the old `.env`'s `BELLWETHER_HOOK_TOKEN` as well as `PASTURE_HOOK_TOKEN`,
+      else from the hook entries; without `--from`, the old install is the WorkingDirectory
+      of the old brain's plist; obsolete config keys are dropped from the copy, and the
+      preview says which (test/DIVERGENCES.md 17).
+36. **`token rotate` tells the brain before rewriting the entries.**
+    - Plan (D3): write the token file, rewrite the hook entries, signal the brain.
+    - True: in that order the entries carry the new token for a moment while the brain
+      still accepts only the old one, and those hooks get a 403.
+    - Done: the settings file is planned first (one that can't be rewritten stops the
+      rotation with nothing changed), then the token file, then `reload-token` (the brain
+      accepts both for a minute), then the entries. If the write fails, the old token goes
+      back into the file and the brain is told again. The `--write` refusal of deviation 31
+      is gone.
+    - After the M4 review (D1): the entries change only when the brain confirmed the switch
+      or no brain answers. A brain that answers and refuses (the Node brain answers
+      `reload-token` with 400) gets the old token back in the file and the entries
+      untouched, exit 1. The second `reload-token` after a failed write is checked, and the
+      message names whichever of brain, file and entries is off.
+37. **`pets import`: what "tiles at most 64×64" means, and where the pins are.**
+    - Plan (D8): at most 16 MiB, UTF-8, no DOCTYPE or ENTITY, it parses, tiles at most
+      64×64; copy to `pets/<name>/`, pin in `pets.user.lock.json`, propose an
+      `animationMap`.
+    - Done: `tilesx` and `tilesy` from 1 to 64 (the player's limits, `validatePet`); the PNG
+      is checked by its signature, not decoded. The pins are `<home>/pets.user.lock.json`.
+      The name is `--name`, else the file's folder for an `animations.xml`, else its stem.
+      The proposed map is printed for config.json (which isn't edited). XML is read by a
+      small well-formedness reader in `crates/brain/src/pets.rs` (no new crate). `pets fetch`
+      answers that the app doesn't redistribute the art (Q6 keeps it a repository opt-in).
+38. **`shell start|stop|restart`: the arguments only.** The plan keeps `shell …` in the
+    CLI. Starting and stopping the app's strip needs the strip on the Rust brain and the
+    app-data layout (M5), so in M4 the Rust CLI checks the arguments as Node does (exit 3
+    for a bad action, `--dev`, `--release`) and says the actions come with M5 (exit 1).
+39. **The test harness's HOME and the real settings file.**
+    - Asked: under rust, force a temp HOME, and a guard test that fails if a test process
+      could resolve the real `~/.claude/settings.json`.
+    - Done: `rustEnv` (test/helpers.mjs) replaces a missing or real HOME with a temp one per
+      test process; the preload (test/setup.mjs) refuses any read or write of the real
+      home's `.claude/settings.json` and `settings.local.json` (the home from the password
+      database, so a test's HOME can't hide it) in every Node test process. The guard test
+      is in isolation.test.mjs; it only ever tries reads.
+    - That guard tripped one existing test: tester-regression hashed the real settings file
+      to prove it unchanged. It now compares size, mtime, ctime and inode (a write, a chmod
+      or an atomic replace changes one of them) and never reads the file.
+    - The helper's live-port refusal no longer applies to `hooks … --port`, which only names
+      entries in a file (a test hands it `--port=047417` to check that it is refused).
+40. **`runDoctor` under rust is a CLI run.** Its options become the binary's environment;
+    a `runClaude` is answered through a fake `claude` on PATH that asks the test process
+    over loopback, so the `--e2e` tests drive the Rust doctor's real `claude -p` path. A
+    config port below 1024 (the tests' "nothing listens on port 1") becomes a released free
+    port, since the Rust config refuses such ports; a palette `withDefaults` upgraded is
+    written back as the old one, so the Rust doctor finds the upgrade itself.
+41. **What stays skipped under rust, and why.** Each with `notUnderRust(reason)`:
+    - the repository's LaunchAgent `autostart` (M6; the harness never runs the app's on this
+      Mac, deviation 22) and `shell start|stop|restart` (M5);
+    - the repository migration in process (brain/migrate.mjs with launchd injected,
+      brain/probe.mjs; the app's is run through the CLI, deviation 35);
+    - the `.env` writer and reader, `PASTURE_*` names, the shims, `pets fetch`, cargo and
+      the repository's first-run walk and README (retired with the Node CLI, or the
+      repository's own; test/DIVERGENCES.md 6, 15, 18);
+    - `X-Pasture-*` acceptance by the brain (DIVERGENCES 4), Node's `parseArgs` and
+      `nodeSupported` (their Rust counterparts are cargo-tested), and the plan-then-apply
+      race test (in process; `crates/core` hooks.rs tests the Rust check).
+    - New tests that run against both brains, each asserting its own brain's contract where
+      the two differ on purpose: every installer vector through the CLI (11), the
+      `onFailure` FAIL, `pets import`, the migrate CLI end to end and its error paths, the
+      migrate previews of hub-labelled agents (3), `PASTURE_HOOK_TOKEN` alone, the hook
+      commands in `help`, and the real-settings guard.
+42. **conformance.json.** `current` is M4. Besides the files M4 names, isolation, envload,
+    rename and pets are M4 rows: they were red or unwired under rust, now each runs the
+    Rust binary and says why its Node-only tests skip.
+43. **The differential's `json` area** generates more of R2's shapes than M2's generator:
+    lone surrogates and control escapes, key escapes, `"01"` and `"4294967295"` (not
+    array indexes), indents of 12 characters (cut to 10, as `JSON.stringify` cuts the gap)
+    and of tabs, inline and multi-line arrays, stray line endings, leading blank lines,
+    one-line objects and a top-level array. A difference counts as explained only when the
+    case has an integer-like key and Node's own reading of Rust's answer gives Node's
+    answer; two refusals count as the same answer (DIVERGENCES 21).
+44. **`EVENTS` moved to crates/core** (`hooks.rs`); the brain's hook route re-exports it,
+    so the installer and the brain can't disagree on the 16 events.

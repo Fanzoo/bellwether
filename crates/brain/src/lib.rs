@@ -16,8 +16,11 @@ mod actor;
 pub mod cli;
 pub mod client;
 pub mod conns;
+pub mod doctor;
 mod hook;
 pub mod home;
+pub mod migrate;
+pub mod pets;
 mod state;
 
 pub use actor::Timings;

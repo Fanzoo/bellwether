@@ -5,7 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, TOKEN, cleaningProblems, notUnderRust, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, IMPL, TOKEN, cleaningProblems, notUnderRust, portValue, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 // brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
 import { Flock, call, makeTextCleaner, normalise, rebuild, startBrain, withDefaults } from './impl.mjs';
 
@@ -644,7 +644,7 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   const cmd = (c) => ({ type: 'command', command: c });
   const http_ = (url, extra = {}) => ({ type: 'http', url, ...extra });
 
-  test('foreign URLs near ours are never claimed: install and uninstall leave them byte-identical', notUnderRust('hooks install and uninstall are ported in milestone 4'), () => {
+  test('foreign URLs near ours are never claimed: install and uninstall leave them byte-identical', () => {
     const u = `http://127.0.0.1:${port}`;
     const foreign = [
       http_(`${u}/hooks`), http_(`${u}/hook2`), http_(`${u}/hook/sub`), http_(`${u}/hook?x=1`), http_(`${u}/hook#f`), http_(`${u}/hook `),
@@ -659,7 +659,7 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
     assert.equal(read(f), text);
   });
 
-  test('--port removes only the exact old-port entries; the configured install is untouched; install/print refuse --port', notUnderRust('hooks install and uninstall are ported in milestone 4'), () => {
+  test('--port removes only the exact old-port entries; the configured install is untouched; install/print refuse --port', () => {
     const f = settings('portmove.json', { hooks: { Stop: [{ hooks: [cmd('keep')] }] } });
     assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
     const withOld = JSON.parse(read(f));
@@ -678,7 +678,13 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
     assert.ok(urls.every((u) => u !== `http://127.0.0.1:${oldPort}/hook`));
     assert.ok(urls.includes(`http://127.0.0.1:${oldPort}/hooks`), 'foreign /hooks on the old port was removed');
     assert.equal(urls.filter((u) => u === `http://127.0.0.1:${port}/hook`).length, 16, 'the configured install was disturbed');
-    for (const bad of ['--port', '--port=', '--port=abc', '--port=047417', '--port=1e4', '--port=80', '--port=70000', '--port=-1']) {
+    for (const bad of ['--port', '--port=', '--port=abc', '--port=047417', '--port=047500', '--port=+47500', '--port= 47500', '--port=1e4', '--port=80', '--port=70000', '--port=-1']) {
+      // Under rust the harness itself refuses any spelling of the live port before the
+      // binary runs (test/helpers.mjs); the CLI's own refusal is the other spellings.
+      if (IMPL === 'rust' && portValue(bad.split('=')[1]) === 47417) {
+        assert.throws(() => bellwether(['hooks', 'uninstall', '--write', '--settings', f, bad]), /live brain's port/);
+        continue;
+      }
       const r = bellwether(['hooks', 'uninstall', '--write', '--settings', f, bad]);
       assert.equal(r.code, 3, bad);
     }
@@ -686,7 +692,7 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
     assert.equal(JSON.parse(read(f)).hooks.Stop.length, after.hooks.Stop.length);
   });
 
-  test('--port naming the configured port behaves like a normal uninstall and a foreign tool on another port needs an explicit --port', notUnderRust('hooks install and uninstall are ported in milestone 4'), () => {
+  test('--port naming the configured port behaves like a normal uninstall and a foreign tool on another port needs an explicit --port', () => {
     const f = settings('portsame.json', { hooks: { Stop: [{ hooks: [http_('http://127.0.0.1:3000/hook')] }] } });
     assert.equal(bellwether(['hooks', 'install', '--write', '--settings', f]).code, 0);
     assert.equal(bellwether(['hooks', 'uninstall', '--write', '--settings', f]).code, 0);

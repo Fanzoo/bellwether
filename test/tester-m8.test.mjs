@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { checkLocatorLog } from '../brain/doctor.mjs';
 import { AGENT_DIR, tempDir } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { checkLocatorLog, identityOf, normalise } from './impl.mjs';
 
 /**
  * Tester probes for Milestone 8. Nothing here sends AppleScript, runs launchctl or
@@ -120,10 +121,7 @@ describe('--locate with hostile terminal values (real binary, AppleScript off, f
 
 describe('the normaliser drops bad herdr values before they reach state', () => {
   const sock = path.join('/tmp', `bk3n-${process.pid}.sock`);
-  const norm = async (headers) => {
-    const { normalise } = await import('../brain/normalise.mjs');
-    return normalise({ hook_event_name: 'Stop', session_id: 's' }, headers, 1).terminal;
-  };
+  const norm = async (headers) => normalise({ hook_event_name: 'Stop', session_id: 's' }, headers, 1).terminal;
   test('bad panes and sockets are dropped, not truncated; good ones are kept', async () => {
     for (const bad of ['--help', '-x', 'a b', ';id', 'x\ny', 'A'.repeat(65), 'w1:p1/../x', '$(id)']) assert.equal((await norm({ 'x-bellwether-herdr-pane': bad })).herdrPane, undefined, bad.slice(0, 20));
     for (const bad of ['relative.sock', '/tmp/../etc/x', `/tmp/${'a'.repeat(1100)}`, '/tmp/x\u0007y', '/tmp/a b/../c']) assert.equal((await norm({ 'x-bellwether-herdr-socket': bad })).herdrSocket, undefined, bad.slice(0, 30));
@@ -133,8 +131,6 @@ describe('the normaliser drops bad herdr values before they reach state', () => 
     void sock;
   });
   test('the identity key never contains a dropped value', async () => {
-    const { normalise } = await import('../brain/normalise.mjs');
-    const { identityOf } = await import('../brain/identity.mjs');
     const ev = normalise({ hook_event_name: 'Stop', session_id: 's' }, { 'x-bellwether-herdr-pane': '--help', 'x-bellwether-herdr-socket': '/tmp/../x' }, 1);
     assert.equal(identityOf(ev).key, 'session:s');
   });

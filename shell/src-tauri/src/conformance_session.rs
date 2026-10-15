@@ -7,7 +7,9 @@
 //! `{"ok": value}` or `{"error": {"message", "code"}}`. Objects and handles (a Flock, a
 //! publisher) live in this process between calls. JS's `undefined` travels as
 //! `{"$undefined": true}`, so a property that is there but undefined stays there.
-//! Only in builds with the `conformance` feature.
+//! Milestone 4 adds the installer (`hooks.*`), the diff (`diff.*`) and doctor's pure checks
+//! (`doctor.*`); settings cross as JS values and are read into the lossless JSON in their
+//! iteration order. Only in builds with the `conformance` feature.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -222,6 +224,10 @@ impl Session {
                 let palette: Vec<String> = arg(1).as_arr().map(|p| p.iter().map(status::js_string).collect()).unwrap_or_default();
                 Js::Str(status::render(&arg(0), &palette, arg(2).truthy()))
             }
+            "guardPrint" => {
+                outfile::guard_print(std::path::Path::new(&bellwether_core::jsstr::to_string_lossy(arg(0).as_str().unwrap_or(""))), arg(1).truthy()).map_err(config_err)?;
+                Js::Undefined
+            }
             "guardRecord" => {
                 outfile::guard_record(std::path::Path::new(&bellwether_core::jsstr::to_string_lossy(arg(0).as_str().unwrap_or("")))).map_err(config_err)?;
                 Js::Undefined
@@ -277,9 +283,133 @@ impl Session {
                 p.wake.notify_all();
                 v
             }
+            f if f.starts_with("hooks.") || f.starts_with("diff.") || f.starts_with("doctor.") => installer_call(f, a)?,
             _ => return Err(err(format!("unknown call {f}"), 1)),
         })
     }
+}
+
+fn path_arg(v: &Js) -> std::path::PathBuf {
+    std::path::PathBuf::from(bellwether_core::jsstr::to_string_lossy(v.as_str().unwrap_or("")))
+}
+
+fn port_arg(v: &Js) -> u16 {
+    v.as_num().filter(|n| *n >= 0.0 && *n <= 65535.0).unwrap_or(0.0) as u16
+}
+
+fn check_js(c: &bellwether_core::settings_checks::Check) -> Js {
+    use bellwether_core::jsstr::from_str;
+    let mut o = Obj::new().with("name", from_str(&c.name)).with("status", c.status).with("detail", from_str(&c.detail)).with("exitCode", c.exit_code as f64);
+    if let Some(n) = c.found {
+        o.set("found", n as f64);
+    }
+    Js::Obj(o)
+}
+
+fn counts_js(c: &[(String, usize)]) -> Js {
+    let mut o = Obj::new();
+    for (e, n) in c {
+        o.set(e.clone(), *n as f64);
+    }
+    Js::Obj(o)
+}
+
+/// The installer, the diff and doctor's checks of brain/hooks.mjs, diff.mjs and doctor.mjs.
+fn installer_call(f: &str, a: &[Js]) -> Result<Js, Js> {
+    use bellwether_core::hooks::{self as installer, Action, Created};
+    use bellwether_core::lossless::{deep_equal, Lj};
+    use bellwether_core::{diff, settings_checks};
+    let arg = |i: usize| a.get(i).cloned().unwrap_or(Js::Undefined);
+    let lj = |i: usize| Lj::from_js(&arg(i));
+    let real = |v: &Js| bellwether_core::jsstr::to_string_lossy(v.as_str().unwrap_or(""));
+    Ok(match f {
+        "hooks.EVENTS" => Js::Arr(installer::EVENTS.iter().map(|e| Js::str(e)).collect()),
+        "hooks.HTTP_UNSUPPORTED_EVENTS" => Js::Arr(installer::HTTP_UNSUPPORTED_EVENTS.iter().map(|e| Js::str(e)).collect()),
+        "hooks.hookBlock" => installer::hook_block(port_arg(&arg(0)), &real(&arg(1))).to_js(),
+        "hooks.install" => installer::install(&lj(0), port_arg(&arg(1)), &real(&arg(2))).map_err(config_err)?.to_js(),
+        "hooks.uninstall" => {
+            let created = match arg(2) {
+                Js::Obj(o) => Some(Created { events: o.get("events").and_then(Js::as_arr).map(|e| e.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default(), hooks: o.get("hooks").map(Js::truthy).unwrap_or(false) }),
+                _ => None,
+            };
+            installer::uninstall(&lj(0), port_arg(&arg(1)), created.as_ref()).map_err(config_err)?.to_js()
+        }
+        "hooks.countGroups" => counts_js(&installer::count_groups(&lj(0), port_arg(&arg(1)))),
+        "hooks.deepEqual" => Js::Bool(deep_equal(&lj(0), &lj(1))),
+        "hooks.isBellwetherHandler" => Js::Bool(installer::is_bellwether_handler(&lj(0), port_arg(&arg(1)))),
+        "hooks.isLegacyHandler" => Js::Bool(installer::is_legacy_handler(&lj(0), port_arg(&arg(1)))),
+        "hooks.shapeProblems" => Js::Arr(installer::shape_problems(&lj(0)).into_iter().map(|p| Js::Str(bellwether_core::jsstr::from_str(&p))).collect()),
+        "hooks.planEdit" => {
+            let action = if arg(1).as_str() == Some("uninstall") { Action::Uninstall } else { Action::Install };
+            let o = arg(2);
+            let data = match o.get("dataDir") {
+                Js::Str(_) => Some(path_arg(o.get("dataDir"))),
+                _ => None,
+            };
+            let token = o.get("token").as_str().map(|t| bellwether_core::jsstr::to_string_lossy(t)).unwrap_or_default();
+            let p = installer::plan_edit(&path_arg(&arg(0)), action, port_arg(o.get("port")), &token, data.as_deref()).map_err(config_err)?;
+            let record = p.record.as_ref().map(|r| Js::Obj(Obj::new().with("events", Js::Arr(r.events.iter().map(|e| Js::Str(e.clone())).collect())).with("hooks", r.hooks))).unwrap_or(Js::Null);
+            Js::Obj(
+                Obj::new()
+                    .with("file", bellwether_core::jsstr::from_str(&p.file.display().to_string()))
+                    .with("action", action.word())
+                    .with("exists", p.exists)
+                    .with("originalHash", p.original_hash.clone().map(Js::Str).unwrap_or(Js::Null))
+                    .with("before", p.before.to_js())
+                    .with("after", p.after.to_js())
+                    .with("changed", p.changed)
+                    .with("oldText", bellwether_core::jsstr::from_str(&p.old_text))
+                    .with("newText", bellwether_core::jsstr::from_str(&p.new_text))
+                    .with("layoutKept", p.layout_kept)
+                    .with("record", record)
+                    .with("warnings", Js::Arr(p.warnings.iter().map(|w| Js::Str(bellwether_core::jsstr::from_str(w))).collect())),
+            )
+        }
+        "diff.unifiedDiff" => {
+            let o = arg(2);
+            let name = |k: &str, d: &str| o.get(k).as_str().map(bellwether_core::jsstr::to_string_lossy).unwrap_or_else(|| d.to_string());
+            let context = o.get("context").as_num().map(|n| n.max(0.0) as usize).unwrap_or(3);
+            Js::Str(bellwether_core::jsstr::from_str(&diff::unified_diff(&real(&arg(0)), &real(&arg(1)), &name("oldName", "a"), &name("newName", "b"), context)))
+        }
+        "diff.diffStats" => {
+            let st = diff::diff_stats(&real(&arg(0)), &real(&arg(1)));
+            Js::Obj(Obj::new().with("added", st.added as f64).with("removed", st.removed as f64).with("removedLines", Js::Arr(st.removed_lines.into_iter().map(|l| Js::Str(bellwether_core::jsstr::from_str(&l))).collect())))
+        }
+        "doctor.checkSettings" => {
+            let o = arg(1);
+            let token = o.get("token").as_str().map(|t| bellwether_core::jsstr::to_string_lossy(t));
+            let file = o.get("file").as_str().map(|t| bellwether_core::jsstr::to_string_lossy(t)).unwrap_or_else(|| "settings".into());
+            Js::Arr(settings_checks::check_settings(&lj(0), port_arg(o.get("port")), token.as_deref(), &file).iter().map(check_js).collect())
+        }
+        "doctor.checkOtherLevels" => {
+            let o = arg(0);
+            let dir = |k: &str| match o.get(k) {
+                Js::Str(_) => Some(path_arg(o.get(k))),
+                _ => None,
+            };
+            let user = match o.get("userSettings") {
+                Js::Obj(_) => Some(Lj::from_js(o.get("userSettings"))),
+                _ => None,
+            };
+            Js::Arr(settings_checks::check_other_levels(dir("projectDir").as_deref(), dir("managedFile").as_deref(), port_arg(o.get("port")), user.as_ref()).iter().map(check_js).collect())
+        }
+        "doctor.globMatch" => Js::Bool(settings_checks::glob_match(&real(&arg(0)), &real(&arg(1)))),
+        "doctor.checkLocatorLog" => {
+            let log = std::fs::read(path_arg(&arg(0)).join("shell.log")).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+            Js::Arr(bellwether_brain::doctor::check_locator_log(log.as_deref()).iter().map(check_js).collect())
+        }
+        "doctor.nextStep" => {
+            let checks: Vec<settings_checks::Check> = arg(0)
+                .as_arr()
+                .map(|cs| cs.iter().map(|c| {
+                    let status = match c.get("status").as_str() { Some("PASS") => "PASS", Some("FAIL") => "FAIL", Some("WARN") => "WARN", _ => "INFO" };
+                    settings_checks::Check::new(real(c.get("name")), status, real(c.get("detail")), c.get("exitCode").as_num().unwrap_or(0.0) as i32)
+                }).collect())
+                .unwrap_or_default();
+            Js::Str(bellwether_core::jsstr::from_str(&bellwether_brain::doctor::next_step(&checks, arg(1).truthy())))
+        }
+        _ => return Err(err(format!("unknown call {f}"), 1)),
+    })
 }
 
 /// `__session --in <path> --out <path>` (FIFOs the caller made), or stdin and stdout.

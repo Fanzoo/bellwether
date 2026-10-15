@@ -1,5 +1,5 @@
 // The isolation preload (npm test loads it first; this also covers `node --test <file>`).
-import { ISOLATED } from './setup.mjs';
+import { ISOLATED, isProtected, resolveReal } from './setup.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -60,6 +60,56 @@ export function rustBin() {
   return RUST_BIN;
 }
 
+/** The real home directory of this user (from the password database, not HOME). */
+export const REAL_HOME = os.userInfo().homedir;
+
+/** Whether a path is the real home directory (symlinks resolved). */
+export function isRealHome(p) {
+  // By identity first: a firmlink spelling (/System/Volumes/Data/Users/…) or another letter
+  // case is the same directory under another name.
+  try {
+    const a = fs.statSync(p);
+    const b = fs.statSync(REAL_HOME);
+    if (a.dev === b.dev && a.ino === b.ino) return true;
+  } catch {}
+  const norm = (x) => {
+    let r;
+    try {
+      r = fs.realpathSync(x);
+    } catch {
+      r = path.resolve(x);
+    }
+    return (r.startsWith('/System/Volumes/Data/') ? r.slice('/System/Volumes/Data'.length) : r).toLowerCase();
+  };
+  return norm(p) === norm(REAL_HOME);
+}
+
+/** A `--port` value as a number, however it is spelled (`047417`, `+47417`, ` 47417`). */
+export function portValue(v) {
+  return Number(String(v ?? '').trim());
+}
+
+/**
+ * Arguments that would point the CLI at the real Claude Code settings files (`--settings`,
+ * `--out`, a positional path, by name or by inode): refused before anything runs. The
+ * preload guards Node processes; this guards what it can't see into.
+ */
+function refuseRealSettings(args, cwd) {
+  for (const a of args) {
+    if (typeof a !== 'string' || a === '') continue;
+    const value = a.startsWith('--') ? (a.includes('=') ? a.slice(a.indexOf('=') + 1) : null) : a;
+    if (!value) continue;
+    if (isProtected(resolveReal(path.resolve(cwd ?? process.cwd(), value)))) throw new Error(`refused: ${a} names the real Claude Code settings (a test must give a temp file)`);
+  }
+}
+
+let tempHome = null;
+/** The temp HOME the Rust binary gets in place of the real one: one per test process. */
+function rustTempHome() {
+  tempHome ??= tempDir('bw-rust-HOME-');
+  return tempHome;
+}
+
 // One Rust home per Node config, for calls that give no data dir: the calls of one test
 // share a home the way its Node calls share a data dir.
 const rustHomes = new Map();
@@ -99,11 +149,17 @@ function isJsonObject(file) {
  * an argument or a config that would make the binary use 47417 throws. A config that isn't
  * a JSON object is passed as it is: the binary refuses it (exit 3) before it binds.
  */
-function rustEnv(args, given, root) {
+export function rustEnv(args, given, root = AGENT_DIR) {
   const env = { ...given };
-  const at = args.findIndex((a) => a === '--port' || a.startsWith('--port='));
-  const argPort = at < 0 ? null : Number(args[at].includes('=') ? args[at].split('=')[1] : args[at + 1]);
-  if (argPort === LIVE_PORT) throw new Error(`refused under BELLWETHER_IMPL=rust: --port ${LIVE_PORT} is the live brain's port`);
+  // HOME is never the real one: the Rust binary's default settings file is
+  // $HOME/.claude/settings.json, its LaunchAgents $HOME/Library/LaunchAgents, and the
+  // preload's guard can't see inside it. A test that gives no HOME, or the real one, gets a
+  // temp HOME instead (the guard test in isolation.test.mjs proves it).
+  if (!env.HOME || isRealHome(env.HOME)) env.HOME = rustTempHome();
+  // Every `--port` (the last one wins in the CLIs), read as a number whatever its spelling.
+  const ports = args.flatMap((a, i) => (a === '--port' ? [args[i + 1]] : a.startsWith('--port=') ? [a.slice(7)] : [])).map(portValue);
+  const argPort = ports.length ? ports.at(-1) : null;
+  if (ports.includes(LIVE_PORT)) throw new Error(`refused under BELLWETHER_IMPL=rust: --port ${LIVE_PORT} (in any spelling) is the live brain's port`);
   let config = env.BELLWETHER_CONFIG;
   if (!config && root !== AGENT_DIR) config = ['config.json', 'config.example.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
   config = path.resolve(config ?? ISOLATED.BELLWETHER_CONFIG);
@@ -143,6 +199,7 @@ const RUST_REFUSED = {
  * Returns { file, args, options }.
  */
 export function brainCommand(args, { root = AGENT_DIR, shim = null, ...options } = {}) {
+  refuseRealSettings(args, options.cwd);
   if (IMPL === 'node') {
     if (shim) return { file: '/bin/sh', args: [shim, ...args], options };
     return { file: process.execPath, args: [path.join(root, 'brain', 'cli.mjs'), ...args], options };
@@ -269,8 +326,9 @@ let calibrationScale = null;
  * Never below 1: a dev machine keeps a budget exactly as written; a shared CI runner
  * gets it scaled by its own measured speed.
  */
-export function machineSlowdown() {
-  if (calibrationScale === null) {
+export function machineSlowdown({ fresh = false } = {}) {
+  // `fresh`: measure again (after a starved attempt, the load may have come since).
+  if (calibrationScale === null || fresh) {
     const text = 'k:'.repeat(1e6) + 'x=y '.repeat(5e5);
     const re = /(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]{1,80})(\s{0,20}[=:]\s{0,20})/g;
     const ms = bestOf(3, () => text.replace(re, (m, k, sep) => k + sep));
@@ -296,4 +354,22 @@ export function cleaningProblems(clean, inputs, budgetMs) {
     if (ms > budget) problems.push(`${name}: ${ms.toFixed(0)} ms, over the ${budget.toFixed(0)} ms budget (${budgetMs} ms × slowdown ${machineSlowdown().toFixed(2)})`);
   }
   return problems;
+}
+
+/**
+ * Timing tests' lower bounds (how much work the test's own sender and watcher got done)
+ * scaled by machineSlowdown(); upper bounds are never scaled. `attempt()` returns
+ * `{ starved, why }` after checking its strict bounds itself; a starved attempt is tried
+ * again with the slowdown measured afresh, and when every try starves the result is
+ * inconclusive (the test skips, saying so), not red. Returns the last attempt's result.
+ */
+export async function unlessStarved(t, attempt, { tries = 3 } = {}) {
+  const seen = [];
+  for (let i = 0; i < tries; i++) {
+    const r = await attempt(machineSlowdown({ fresh: i > 0 }));
+    if (!r.starved) return r;
+    seen.push(r.why);
+  }
+  t.skip(`inconclusive: this machine was too busy to drive the test in ${tries} tries (${seen.join('; ')}); the upper bounds held each time`);
+  return null;
 }

@@ -7,7 +7,12 @@ import { describe, test } from 'node:test';
 import { LABEL, OLD_LABELS, SHELL_LABEL, plistPath } from '../brain/autostart.mjs';
 import { countGroups, hookBlock } from '../brain/hooks.mjs';
 import { migrate, sourceOf } from '../brain/migrate.mjs';
-import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, IMPL, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+
+// The repository-to-repository migration, called in process with launchd injected: the
+// app's `migrate` moves the same things into its own files and never writes or boots out a
+// LaunchAgent (plan D5; the app's agent swap is milestone 8). The CLI tests run both.
+const REPO_MIGRATE = notUnderRust("brain/migrate.mjs in process (the new checkout's .env and LaunchAgent plists, launchctl injected); the app's `migrate` is tested through the CLI below, against both brains");
 
 /**
  * `bellwether migrate`: a pasture install laid out in temp directories (a hub with
@@ -71,7 +76,7 @@ function world({ shellAgent = true, config = true } = {}) {
 }
 
 describe('bellwether migrate', () => {
-  test('the preview names every step and changes nothing anywhere (old install, new checkout, HOME)', () => {
+  test('the preview names every step and changes nothing anywhere (old install, new checkout, HOME)', REPO_MIGRATE, () => {
     const w = world();
     const before = snapshot(w.root);
     const r = migrate(w.opts);
@@ -82,7 +87,7 @@ describe('bellwether migrate', () => {
     assert.ok(!text.includes(OLD_TOKEN), 'the token is never shown');
   });
 
-  test('--write moves everything over: token, config, colours and slots, tray settings, hooks, LaunchAgents', () => {
+  test('--write moves everything over: token, config, colours and slots, tray settings, hooks, LaunchAgents', REPO_MIGRATE, () => {
     const w = world();
     const hubEnv = fs.readFileSync(path.join(w.hub, '.env'), 'utf8');
     const r = migrate({ ...w.opts, write: true });
@@ -114,7 +119,7 @@ describe('bellwether migrate', () => {
     assert.ok(fs.existsSync(plistPath(w.home, LABEL)) && fs.existsSync(plistPath(w.home, SHELL_LABEL)));
   });
 
-  test('a second run has nothing left to do and changes nothing', () => {
+  test('a second run has nothing left to do and changes nothing', REPO_MIGRATE, () => {
     const w = world();
     migrate({ ...w.opts, write: true });
     const before = snapshot(w.root);
@@ -128,7 +133,7 @@ describe('bellwether migrate', () => {
     assert.deepEqual(after, before);
   });
 
-  test('--from can be the old data directory; existing files in the new checkout are kept unless --force', () => {
+  test('--from can be the old data directory; existing files in the new checkout are kept unless --force', REPO_MIGRATE, () => {
     const w = world({ config: false });
     fs.mkdirSync(path.join(w.repo, 'data'));
     fs.writeFileSync(path.join(w.repo, 'data', 'state.json'), JSON.stringify({ version: 1, muted: false, identities: {} }));
@@ -140,7 +145,7 @@ describe('bellwether migrate', () => {
     assert.equal(JSON.parse(fs.readFileSync(path.join(w.repo, 'data', 'state.json'), 'utf8')).muted, true);
   });
 
-  test('a strip that pasture started at login but bellwether hasn\'t built: only the brain moves, pasture\'s strip agent stays, and it says how to finish', () => {
+  test('a strip that pasture started at login but bellwether hasn\'t built: only the brain moves, pasture\'s strip agent stays, and it says how to finish', REPO_MIGRATE, () => {
     const w = world();
     const r = migrate({ ...w.opts, shellBin: path.join(w.root, 'not-built'), write: true });
     assert.match(r.lines.join('\n'), /stays as it is: bellwether's strip isn't built yet, so only the brain moves over now/);
@@ -150,7 +155,7 @@ describe('bellwether migrate', () => {
     assert.ok(fs.existsSync(plistPath(w.home, OLD_LABELS[1])), 'the old strip agent stays until there is a replacement');
   });
 
-  test('no old token anywhere: hooks are left alone and it says what to do', () => {
+  test('no old token anywhere: hooks are left alone and it says what to do', REPO_MIGRATE, () => {
     const w = world();
     fs.writeFileSync(path.join(w.hub, '.env'), 'OTHER_SECRET=keep-me\n');
     const before = fs.readFileSync(w.settingsFile, 'utf8');
@@ -161,7 +166,7 @@ describe('bellwether migrate', () => {
     assert.equal(fs.readFileSync(w.settingsFile, 'utf8'), before);
   });
 
-  test('--env names the old .env explicitly; a --from that isn\'t an install is refused', () => {
+  test('--env names the old .env explicitly; a --from that isn\'t an install is refused', REPO_MIGRATE, () => {
     const w = world();
     const f = path.join(w.root, 'elsewhere.env');
     fs.writeFileSync(f, 'PASTURE_HOOK_TOKEN=explicitTokenNotReal_012345678\n');
@@ -200,7 +205,7 @@ ${args.map((a) => `    <string>${a.replace(/&/g, '&amp;').replace(/</g, '&lt;')}
 </plist>
 `;
 
-describe('migrate with launchd (injected; the real HOME and launchctl are never used)', () => {
+describe('migrate with launchd (injected; the real HOME and launchctl are never used)', REPO_MIGRATE, () => {
   // realHome is forced true and every launchctl / probe call goes to `run`; the port
   // holder is injected, so nothing here opens a socket to a real brain.
   // The process table: by default the login item's strip (parent launchd, the agent's
@@ -346,7 +351,7 @@ describe('migrate with launchd (injected; the real HOME and launchctl are never 
   });
 });
 
-describe('which token wins', () => {
+describe('which token wins', notUnderRust('the Node CLI loads a .env and reads PASTURE_* names for one release; the app reads neither (its token file, or BELLWETHER_HOOK_TOKEN; test/DIVERGENCES.md 6 and 15)'), () => {
   test('an exported BELLWETHER_*, then BELLWETHER_* in the .env, then an exported PASTURE_*, then PASTURE_* in the .env', () => {
     const dir = tempDir('mig-prec-');
     const load = (envText, exported) => {
@@ -363,7 +368,7 @@ describe('which token wins', () => {
   });
 });
 
-describe('cargo, for building the strip', () => {
+describe('cargo, for building the strip', notUnderRust("building the strip (`shell --dev`, doctor's cargo line) is the repository's workflow; the app builds nothing (plan, Surface)"), () => {
   test('found on PATH, then in ~/.cargo/bin, then in $CARGO_HOME/bin; none: null', async () => {
     const { findCargo } = await import('../brain/cargo.mjs');
     const root = tempDir('cargo-');
@@ -397,5 +402,143 @@ describe('cargo, for building the strip', () => {
     const missing = (await runDoctor({ ...base, findCargoFor: () => null })).checks.find((c) => c.name === 'cargo');
     assert.equal(missing.status, 'INFO');
     assert.match(missing.detail, /not found; only needed to build the strip\. .*source ~\/\.cargo\/env/);
+  });
+});
+
+/** The CLI for a world: the Node CLI from a copy of the checkout in it, the Rust one with BELLWETHER_HOME = its data dir. */
+function cliFor(w) {
+  fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(w.repo, 'brain'), { recursive: true });
+  const data = path.join(w.root, 'cli-data');
+  const envFile = path.join(w.root, 'cli.env');
+  const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: data, BELLWETHER_ENV: envFile };
+  const cli = (...a) => spawnBrainSync(['migrate', ...a], { root: w.repo, cwd: w.repo, encoding: 'utf8', env, timeout: 30000 });
+  // Where each CLI keeps the token it migrated.
+  const token = () => (IMPL === 'rust' ? (fs.existsSync(path.join(data, 'hook-token')) ? fs.readFileSync(path.join(data, 'hook-token'), 'utf8').trim() : null) : (/^BELLWETHER_HOOK_TOKEN=(.*)$/m.exec(fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '')?.[1] ?? null));
+  return { cli, data, envFile, token };
+}
+
+describe('the CLI moves an install, step by step (both brains; ported from the in-process tests above)', () => {
+  test('the preview names every step and changes nothing anywhere', () => {
+    const w = world();
+    const { cli } = cliFor(w);
+    const before = snapshot(w.root);
+    const r = cli('--from', w.old, '--settings', w.settingsFile);
+    assert.equal(r.status, 0, r.stderr);
+    for (const s of ['1. the hook token', '2. config.json', '3. colours and slots', '4. start at login (LaunchAgents)', '5. hook entries in', 'would copy', '2 session colour(s) and slot(s), and mute', 'would replace 16 pasture entries', 'local.pasture.brain', 'Preview only; nothing was changed']) assert.ok(r.stdout.includes(s), s);
+    assert.ok(!(r.stdout + r.stderr).includes(OLD_TOKEN));
+    assert.deepEqual(snapshot(w.root), before);
+  });
+
+  test('--from can be the old data directory; existing files in the target are kept unless --force', () => {
+    const w = world({ config: false });
+    const { cli, data } = cliFor(w);
+    fs.mkdirSync(data, { recursive: true });
+    fs.writeFileSync(path.join(data, 'state.json'), JSON.stringify({ version: 1, muted: false, identities: {} }));
+    const r = cli('--from', path.join(w.old, 'data'), '--settings', w.settingsFile, '--write');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /state\.json: .* exists; kept \(--force replaces it\)/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')).muted, false);
+    assert.equal(cli('--from', path.join(w.old, 'data'), '--settings', w.settingsFile, '--write', '--force').status, 0);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')).muted, true);
+  });
+
+  test('--env names the old .env; a corrupt state.json is a warning, not a stop; a --from that isn\'t an install is exit 3', () => {
+    const w = world();
+    const { cli, token } = cliFor(w);
+    const f = path.join(w.root, 'elsewhere.env');
+    fs.writeFileSync(f, 'PASTURE_HOOK_TOKEN=explicitTokenNotReal_012345678\n');
+    fs.writeFileSync(path.join(w.old, 'data', 'state.json'), '{ not json');
+    const r = cli('--from', w.old, '--env', f, '--settings', w.settingsFile, '--write');
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(token(), 'explicitTokenNotReal_012345678');
+    assert.match(r.stdout, /warning: .*state\.json is not a valid state file/);
+    assert.ok(!(r.stdout + r.stderr).includes('explicitTokenNotReal_012345678'), 'the token is never shown');
+    assert.equal(cli('--from', w.home).status, 3, 'a HOME is not an install');
+  });
+
+  test('no token in any .env: the repository CLI leaves the hooks; the app takes the token the entries carry (plan D9)', () => {
+    const w = world();
+    const { cli, token } = cliFor(w);
+    fs.writeFileSync(path.join(w.hub, '.env'), 'OTHER_SECRET=keep-me\n');
+    const before = fs.readFileSync(w.settingsFile, 'utf8');
+    const r = cli('--from', w.old, '--settings', w.settingsFile, '--write');
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!(r.stdout + r.stderr).includes(OLD_TOKEN));
+    if (IMPL === 'rust') {
+      assert.match(r.stdout, /copied the token of the hook entries/);
+      assert.equal(token(), OLD_TOKEN);
+      const s = JSON.parse(fs.readFileSync(w.settingsFile, 'utf8'));
+      assert.equal(s.hooks.Stop.at(-1).hooks[0].headers['X-Bellwether-Token'], OLD_TOKEN, 'the same token, under the new header');
+    } else {
+      assert.match(r.stdout, /no PASTURE_HOOK_TOKEN found/);
+      assert.match(r.stdout, /no token to write into the new ones/);
+      assert.equal(fs.readFileSync(w.settingsFile, 'utf8'), before);
+    }
+  });
+});
+
+describe('the CLI moves an install, end to end (both brains; temp directories only)', () => {
+  test('--write: the token, config, colours and slots, tray settings and hook entries move over, the token is never printed, and a second run changes nothing', () => {
+    const w = world();
+    // The Node CLI runs from a copy of the checkout in the temp tree (its target is that
+    // checkout); the app's target is its own files, BELLWETHER_HOME (here the data dir).
+    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(w.repo, 'brain'), { recursive: true });
+    const data = path.join(w.root, 'cli-data');
+    const envFile = path.join(w.root, 'cli.env');
+    const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: data, BELLWETHER_ENV: envFile };
+    const cli = (...a) => spawnBrainSync(['migrate', '--from', w.old, '--settings', w.settingsFile, ...a], { root: w.repo, cwd: w.repo, encoding: 'utf8', env, timeout: 30000 });
+    const r = cli('--write');
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!(r.stdout + r.stderr).includes(OLD_TOKEN), 'the token is never shown');
+    // 1. the same token, where this CLI reads it
+    if (IMPL === 'rust') {
+      assert.equal(fs.readFileSync(path.join(data, 'hook-token'), 'utf8'), `${OLD_TOKEN}\n`);
+      assert.equal(fs.statSync(path.join(data, 'hook-token')).mode & 0o777, 0o600);
+    } else assert.equal(fs.readFileSync(envFile, 'utf8'), `BELLWETHER_HOOK_TOKEN=${OLD_TOKEN}\n`);
+    // 2. config.json
+    const config = IMPL === 'rust' ? path.join(data, 'config.json') : path.join(w.repo, 'config.json');
+    assert.deepEqual(JSON.parse(fs.readFileSync(config, 'utf8')).pets, { tint: 'whole' });
+    // 3. colours, slots, mute and the tray settings
+    const st = JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8'));
+    assert.equal(st.muted, true);
+    assert.equal(st.identities['herdr:w1:p1'].colourIndex, 2);
+    assert.deepEqual(st.identities['herdr:w1:p2'].slots, { main: 0 });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'shell-state.json'), 'utf8')), { hidden: false, labels: true });
+    // 4. hook entries: bellwether's, with the same token; the other tool's and statusLine kept; a backup
+    const s = JSON.parse(fs.readFileSync(w.settingsFile, 'utf8'));
+    assert.doesNotMatch(JSON.stringify(s), /X-Pasture-/);
+    assert.equal(sum(countGroups(s, 47417)), 16);
+    assert.equal(s.hooks.Stop[0].hooks[0].command, 'afplay /Users/example/.claude/sounds/ready.wav');
+    assert.deepEqual(s.statusLine, { type: 'command', command: 'echo hi' });
+    assert.equal(s.hooks.Stop.at(-1).hooks[0].headers['X-Bellwether-Token'], OLD_TOKEN);
+    assert.equal(fs.readdirSync(path.join(data, 'backups')).filter((f) => f.endsWith('.json')).length, 1);
+    // 5. LaunchAgents: the repository's CLI swaps them (not loaded under a temp HOME); the app
+    //    names them and leaves them (plan D5; the swap is milestone 8)
+    if (IMPL === 'rust') {
+      for (const l of OLD_LABELS) assert.ok(fs.existsSync(plistPath(w.home, l)), `${l} was touched`);
+      assert.match(r.stdout, /local\.pasture\.brain[\s\S]*left as it is[\s\S]*milestone 8/);
+    } else for (const l of OLD_LABELS) assert.ok(!fs.existsSync(plistPath(w.home, l)), l);
+    // A second run has nothing left to do.
+    const before = snapshot(w.root);
+    const again = cli('--write');
+    assert.equal(again.status, 0, again.stderr);
+    assert.match(again.stdout, /already set/);
+    assert.match(again.stdout, /no pasture entries/);
+    assert.deepEqual(snapshot(w.root), before);
+  });
+
+  test('a --from that is not an install stops it with exit 3; a settings file that is not JSON is left as it is; neither shows the token', () => {
+    const w = world();
+    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(w.repo, 'brain'), { recursive: true });
+    const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'cli-data'), BELLWETHER_ENV: path.join(w.root, 'cli.env') };
+    const cli = (...a) => spawnBrainSync(['migrate', ...a], { root: w.repo, cwd: w.repo, encoding: 'utf8', env, timeout: 30000 });
+    const nope = cli('--from', path.join(w.root, 'nope'), '--write');
+    assert.equal(nope.status, 3);
+    assert.match(nope.stderr, /no such directory/);
+    fs.writeFileSync(w.settingsFile, `{"hooks": {"Stop": [{"hooks": [{"type": "http", "url": "http://127.0.0.1:47417/hook", "headers": {"X-Pasture-Token": "${OLD_TOKEN}" "oops": 1}}]}]}}`);
+    const text = fs.readFileSync(w.settingsFile, 'utf8');
+    const bad = cli('--from', w.old, '--settings', w.settingsFile, '--write');
+    assert.ok(!(bad.stdout + bad.stderr).includes(OLD_TOKEN), 'the token is never shown');
+    assert.equal(fs.readFileSync(w.settingsFile, 'utf8'), text, 'a settings file that is not JSON is never rewritten');
   });
 });

@@ -3,11 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { SHELL_LABEL, plistPath } from '../brain/autostart.mjs';
-import { DEFAULT_PALETTE, OLD_DEFAULT_PALETTE, withDefaults } from '../brain/defaults.mjs';
 import { runDoctor } from '../brain/doctor.mjs';
 import { shellControl } from '../brain/shellctl.mjs';
 import { displayLabels, terminalTag, MAX_LABEL } from '../shell/src/player/labels.mjs';
-import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { AGENT_DIR, notUnderRust, tempDir } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { DEFAULT_PALETTE, OLD_DEFAULT_PALETTE, withDefaults } from './impl.mjs';
+
+// What the app replaces: the repository's strip control and its LaunchAgent lines in doctor.
+const REPO_SHELL = notUnderRust("the repository's `shell start|stop|restart` (its LaunchAgent, or a detached copy of target/release/bellwether-shell); the app's strip control arrives in milestone 5");
+const REPO_AGENTS = notUnderRust("doctor's lines for the repository's LaunchAgents (`autostart`, `strip running`); the app's doctor reports its login items (shell/src-tauri cli.rs `login_verdict`) and leftover LaunchAgents (`legacy agents`, rename.test.mjs)");
 
 /**
  * Tester probes for `bellwether shell start|stop|restart`, the palette and the labels.
@@ -47,7 +52,7 @@ const withBinary = (e) => {
   return e;
 };
 
-describe('shell stop signals only the exact release binary (no LaunchAgent, fakes)', () => {
+describe('shell stop signals only the exact release binary (no LaunchAgent, fakes)', REPO_SHELL, () => {
   test('a stale pid file (no such process) and a pid file pointing at an unrelated process signal nothing', async () => {
     const e = withBinary(mkEnv());
     e.live.set(555, '/usr/bin/vim');
@@ -92,7 +97,7 @@ describe('shell stop signals only the exact release binary (no LaunchAgent, fake
   });
 });
 
-describe('start and restart', () => {
+describe('start and restart', REPO_SHELL, () => {
   test('start passes --no-spawn-brain only when a brain answers; otherwise the strip may start its own', async () => {
     for (const [up, args] of [[true, ['--no-spawn-brain']], [false, []]]) {
       const e = mkEnv();
@@ -138,7 +143,7 @@ describe('start and restart', () => {
   });
 });
 
-describe('the launchctl guard', () => {
+describe('the launchctl guard', REPO_SHELL, () => {
   test('with the strip agent installed, a temp HOME, a symlinked temp HOME and a missing HOME only print what would run; launchctl is never called', async () => {
     for (const action of ['start', 'stop', 'restart']) {
       const e = mkEnv();
@@ -178,7 +183,7 @@ describe('the launchctl guard', () => {
   });
 });
 
-describe('doctor: strip running', () => {
+describe('doctor: strip running', REPO_AGENTS, () => {
   const run = (o) => {
     const home = tempDir('sc-doc-');
     fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
@@ -313,7 +318,7 @@ describe('same-project labels grouped on the capped form (D3)', () => {
   });
 });
 
-describe('doctor autostart lines: the branch structure (D1), every combination', () => {
+describe('doctor autostart lines: the branch structure (D1), every combination', REPO_AGENTS, () => {
   const run = async ({ brainPlist, stripPlist, running, hooks }) => {
     const home = tempDir('sc-matrix-');
     fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });

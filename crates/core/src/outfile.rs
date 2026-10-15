@@ -1,8 +1,8 @@
-//! The guard for `record --out` (a port of brain/outfile.mjs; `hooks print --out` joins
-//! it with the installer in milestone 4). A typo must not destroy data: a Claude Code
-//! settings file is always refused; a directory or anything that isn't a regular file is
-//! refused with a message; an existing file is appended to only if it is already a
-//! bellwether recording (or empty).
+//! The guards for `record --out` and `hooks print --out` (a port of brain/outfile.mjs). A
+//! typo must not destroy data: a Claude Code settings file is always refused, `--force` or
+//! not; a directory or anything that isn't a regular file is refused with a message; an
+//! existing file is appended to only if it is already a bellwether recording (or empty),
+//! and replaced only if it is already a bellwether hooks file (or with `--force`).
 
 use std::path::{Path, PathBuf};
 
@@ -55,8 +55,57 @@ pub fn is_bellwether_recording(text: &str) -> bool {
         })
 }
 
-/// `guardOutFile(target, 'record')`.
-pub fn guard_record(target: &Path) -> Result<(), ConfigError> {
+/// Exactly what `hooks print` writes: only a `hooks` key, and only bellwether http
+/// handlers in it.
+pub fn is_bellwether_hooks_file(text: &str) -> bool {
+    let Ok(Js::Obj(v)) = json::parse(text) else { return false };
+    if v.keys() != ["hooks"] {
+        return false;
+    }
+    let groups: Vec<&Js> = match v.get("hooks") {
+        Some(Js::Obj(h)) => h.iter().map(|(_, g)| g).collect(),
+        _ => Vec::new(),
+    };
+    let mut handlers: Vec<Option<&Js>> = Vec::new();
+    for g in groups {
+        let list: Vec<Option<&Js>> = match g {
+            Js::Arr(a) => a.iter().map(Some).collect(),
+            _ => vec![None],
+        };
+        for g in list {
+            match g.map(|g| g.get("hooks")) {
+                Some(Js::Arr(hs)) => handlers.extend(hs.iter().map(Some)),
+                _ => handlers.push(None),
+            }
+        }
+    }
+    let url_ok = |u: &str| u.strip_prefix("http://127.0.0.1:").and_then(|r| {
+        let digits = r.bytes().take_while(u8::is_ascii_digit).count();
+        (digits > 0).then(|| r[digits..].starts_with("/hook"))
+    }) == Some(true);
+    !handlers.is_empty()
+        && handlers.iter().all(|h| {
+            let Some(h) = h else { return false };
+            let headers = h.get("headers");
+            let token = match headers.get("X-Bellwether-Token") {
+                Js::Undefined | Js::Null => headers.get("X-Pasture-Token"),
+                t => t,
+            };
+            h.get("type").as_str() == Some("http") && h.get("url").as_str().is_some_and(url_ok) && token.as_str().is_some()
+        })
+}
+
+/// `guardOutFile(target, 'print', { force })`.
+pub fn guard_print(target: &Path, force: bool) -> Result<(), ConfigError> {
+    let Some(text) = guard_common(target, "hooks-only.json")? else { return Ok(()) };
+    if force || is_bellwether_hooks_file(&text) {
+        return Ok(());
+    }
+    Err(ConfigError::new(format!("{} already exists and is not a bellwether hooks file, so it was left alone. Choose another path, or pass --force to replace it.", target.display())))
+}
+
+/// What both guards check first. Returns the existing file's text, or None for no file.
+fn guard_common(target: &Path, example: &str) -> Result<Option<String>, ConfigError> {
     let (stat, real) = match std::fs::metadata(target) {
         Ok(m) => (Some(m), std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, target.to_path_buf()),
@@ -68,14 +117,19 @@ pub fn guard_record(target: &Path) -> Result<(), ConfigError> {
             target.display()
         )));
     }
-    let Some(stat) = stat else { return Ok(()) };
+    let Some(stat) = stat else { return Ok(None) };
     if stat.is_dir() {
-        return Err(ConfigError::new(format!("{} is a directory; give a file path, e.g. {}", target.display(), target.join("recording.jsonl").display())));
+        return Err(ConfigError::new(format!("{} is a directory; give a file path, e.g. {}", target.display(), target.join(example).display())));
     }
     if !stat.is_file() {
         return Err(ConfigError::new(format!("{} is not a regular file; refusing to write it", target.display())));
     }
-    let text = std::fs::read(target).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+    Ok(Some(std::fs::read(target).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()))
+}
+
+/// `guardOutFile(target, 'record')`.
+pub fn guard_record(target: &Path) -> Result<(), ConfigError> {
+    let Some(text) = guard_common(target, "recording.jsonl")? else { return Ok(()) };
     if text.is_empty() || is_bellwether_recording(&text) {
         return Ok(());
     }

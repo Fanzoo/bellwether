@@ -556,19 +556,20 @@ The token is never shown, and nothing changes without `--write`.
 ## The signed app (in development)
 
 The distribution plan in `docs/` turns Bellwether into one signed, notarized
-`Bellwether.app`. Milestones 1 (a skeleton) and 3 (the brain's state) are in the
-repository. Nothing in it replaces the setup above yet: its brain now keeps the flock and
-answers `/state` and `/control`, but its strip still reads the Node brain, and the hook
-installer and doctor are milestone 4. Building it never touches the repository strip or
-its LaunchAgents.
+`Bellwether.app`. Milestones 1 (a skeleton), 3 (the brain's state) and 4 (the hook
+installer, doctor, `pets import` and `migrate`) are in the repository. Nothing in it
+replaces the setup above yet: its brain keeps the flock and answers `/state` and
+`/control`, but its strip still reads the Node brain (milestone 5). Building it never
+touches the repository strip or its LaunchAgents.
 
 **One executable, three modes.** `Bellwether.app/Contents/MacOS/Bellwether`:
 - launched from Finder, it is the strip;
 - `Bellwether serve` is the Rust brain. It never starts Tauri, windows or WebKit;
 - called as `bellwether` (a lower-case symlink on PATH), or with a subcommand, it is
   the CLI: `serve`, `record`, `status [--watch] [--json]`, `mute`/`unmute`, `show`/`hide`,
-  `replay`, `token init|rotate`, `doctor`, `autostart status|install|uninstall`,
-  `version`, `help`. The first seven take the Node CLI's flags and print its output.
+  `replay`, `token init|rotate`, `hooks print|install|uninstall`, `doctor`, `pets import`,
+  `migrate`, `autostart status|install|uninstall`, `version`, `help`. Those the Node CLI
+  has take its flags and print its output (`test/DIVERGENCES.md` lists the exceptions).
 
 Its files live in `~/Library/Application Support/Bellwether/`: `hook-token`, `config.json`
 (optional; every key has a default), `state.json`, `shell-state.json` and `recordings/`.
@@ -583,8 +584,23 @@ bellwether token init --force              # replace a token file that is there 
 bellwether token rotate --write            # a new token; a running brain switches and accepts the old one for a minute
 ```
 
-`token rotate --write` refuses while hook entries in `~/.claude/settings.json` carry the
-current token: rewriting them is the installer's job, which comes with milestone 4.
+`token rotate --write` writes the new token file, tells a running brain to switch (it
+accepts the old token for one more minute), then rewrites bellwether's hook entries in
+`~/.claude/settings.json` (or `--settings <path>`) with the new token, with a backup in
+`backups/`. Without `--write` it shows that diff, with the token as `<new token>`.
+
+The installer and doctor work as the Node CLI's do (`hooks install` previews are the same
+bytes), with the app's files in place of `data/`: the install record is `installs.json`
+and backups go to `backups/` in the app's folder. Doctor also checks the token file's mode,
+the app's identity and signature, its login items and Accessibility, LaunchAgents left by a
+repository install, whether the strip could switch WebKit's occlusion detection off, and
+fails a bellwether hook entry that sets `"onFailure": "block"`.
+
+```
+bellwether pets import ~/Downloads/mypet/animations.xml   # check, copy and pin a desktopPet file (16 MiB, UTF-8, no DOCTYPE, tiles up to 64)
+bellwether migrate --from <repository>                    # preview: what a repository install's token, config, colours and hooks would become
+bellwether migrate --from <repository> --write            # do it; its LaunchAgents are listed and left alone (the app's swap is milestone 8)
+```
 
 **What you need once:**
 1. The **Developer ID Application** certificate, with its private key, in your login
@@ -667,7 +683,7 @@ with `node scripts/third-party.mjs` after changing a dependency (offline;
 | `bellwether status [--watch] [--json]` | The flock as a table: label, colour, state, alert, lambs. `--watch` redraws on every change (long-polls `/state`); this is also the terminal fallback when there's no overlay |
 | `bellwether replay <file.jsonl> [--speed N] [--port P]` | Posts a recording or fixture to a running brain with its original timing, scaled by `--speed`, and prints `/hook` latency (p50, p99, max) and the snapshot rate. Payloads are rebuilt with the real Claude Code field names |
 | `bellwether replay --burst <events/s> [--seconds S]` | A synthetic load of tool events, for the rate and latency checks |
-| `bellwether doctor [--json] [--e2e] [--settings <path>]` | Node, config, token, brain running and accepting the token, hooks installed in the settings file (timeout, token, `disableAllHooks`, `allowedHttpHookUrls`), and the project, local and managed settings levels that can switch hooks off. `--e2e` also runs one `claude -p` with haiku and bellwether's hooks from a throwaway file (one small API call; your user settings and MCP servers are left out) and checks the events arrive |
+| `bellwether doctor [--json] [--e2e] [--settings <path>]` | Node, config, token, brain running and accepting the token, hooks installed in the settings file (timeout, token, no `"onFailure": "block"`, `disableAllHooks`, `allowedHttpHookUrls`), and the project, local and managed settings levels that can switch hooks off. `--e2e` also runs one `claude -p` with haiku and bellwether's hooks from a throwaway file (one small API call; your user settings and MCP servers are left out) and checks the events arrive |
 | `bellwether shell [--dev] [--release]` | Runs the overlay in this terminal; `--dev` builds it with cargo first |
 | `bellwether shell build [--release]` | Builds the strip. Without `--release`: the debug build, into `target-dev/`. With it: the binary the login item runs, in `target/release/`; it warns first, because the Accessibility permission has to be given again afterwards |
 | `bellwether shell dock-permission` | Asks macOS for Accessibility for the strip's release binary (shows the system prompt), so sheep can stand on the Dock. Only when you run it |
@@ -745,9 +761,12 @@ oracle until the Rust brain replaces it:
 - Tests that check the brain's parts in process take them from `test/impl.mjs`: brain/*.mjs
   under node, and under rust the Rust brain, called synchronously through its hidden
   `__session` command (one call per line, over two FIFOs); `startBrain` is then a Rust
-  `serve` process. A test with nothing to check in the Rust brain yet (doctor and the hook
-  installer before milestone 4, the Node shim, the `.env` writer) is marked
-  `notUnderRust(reason)` and counts as skipped under rust, never as passed.
+  `serve` process; `runDoctor` is a `doctor --json` run of the binary. A test of something
+  only the repository has (the Node shim, the `.env` writer, LaunchAgent `autostart` and
+  `shell start|stop`, `pets fetch`) is marked `notUnderRust(reason)` and counts as skipped
+  under rust, never as passed. Under rust the helper also gives the binary a temp HOME
+  whenever a test gives none or the real one, and the preload refuses any read or write of
+  the real `~/.claude/settings.json` in every Node test process.
 - `npm run test:rust` (`test/conformance.mjs`) runs those test files against both brains
   and prints the parity table: test file, node, rust. `test/conformance.json` says which
   milestone turns each row green; the run fails only when a node cell is red or a row the
@@ -759,8 +778,8 @@ oracle until the Rust brain replaces it:
   ```
 
 - The `conformance` feature adds hidden `__` commands that take cases as JSON lines:
-  `__env`, `__redact`, `__normalise` and `__fixture` (ported), `__json` and `__diff`
-  (milestone 4), and `__session` (the bridge above). It also lets `serve` read test timings
+  `__env`, `__redact`, `__normalise`, `__fixture`, `__json` (a settings file through the
+  lossless JSON and back) and `__diff`, and `__session` (the bridge above). It also lets `serve` read test timings
   from the environment. No release build has it: `Bellwether __fixture` answers "unknown
   command" with exit 1.
 - The shared vectors in `test/fixtures/` (`redact-`, `normalise-`, `config-` and

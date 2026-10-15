@@ -261,7 +261,8 @@ async function replayCommand(args) {
     if (!Number.isFinite(n) || n < min || n > max) throw new CliError(`--${name} must be a number from ${min} to ${max}`, EXIT.BAD_CONFIG);
     return n;
   };
-  const port = args.port !== undefined ? num('port', args.port, 1, 65535) : config.port;
+  // A port is a plain decimal (`47417`, never `047417` or `+47417`), as for `hooks --port`.
+  const port = args.port !== undefined ? num('port', String(Number(args.port)) === args.port ? args.port : NaN, 1, 65535) : config.port;
   const speed = args.speed !== undefined ? num('speed', args.speed, 0.01, 1000) : 1;
   let lines;
   let what;

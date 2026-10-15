@@ -5,7 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { SHELL_LABEL, LABEL, autostart, plistPath, shellPlistText, plistText } from '../brain/autostart.mjs';
-import { AGENT_DIR, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, notUnderRust, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Tester probes for Milestone 10. Autostart runs only under temp HOMEs with a `run` that
@@ -22,7 +22,7 @@ const lint = (text) => {
   return spawnSync('plutil', ['-lint', f], { encoding: 'utf8' });
 };
 
-describe('autostart: both LaunchAgents, temp HOME only', () => {
+describe('autostart: both LaunchAgents, temp HOME only', notUnderRust("the repository's LaunchAgent autostart; the app's `autostart` drives SMAppService (milestone 6), and the harness never runs it on this Mac (plan deviation 22)"), () => {
   const mkHome = () => {
     const h = tempDir('m10-home-');
     fs.mkdirSync(path.join(h, 'Library', 'LaunchAgents'), { recursive: true });
@@ -128,7 +128,7 @@ describe('autostart: both LaunchAgents, temp HOME only', () => {
   });
 });
 
-describe('doctor `next`: a walk from nothing to "all set"', () => {
+describe('doctor `next`: a walk from nothing to "all set"', notUnderRust("the repository's first-run walk (pet art, a strip build, LaunchAgents); the app's `next` order (token, a brain, then hooks; never \"all set\" beside a FAIL) is pinned by token.test.mjs through the Rust next_step, and its walk is the onboarding window (milestone 7)"), () => {
   let root, agent, home, dataDir, port, env, settings, brain;
   const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => r(p)); }); });
   const cli = (args, extra = {}) => spawnBrainSync([...args], { root: agent, encoding: 'utf8', env: { ...env, ...extra }, cwd: agent, timeout: 30000 });
@@ -224,7 +224,7 @@ describe('doctor `next`: a walk from nothing to "all set"', () => {
   });
 });
 
-describe('README "First run": every command exists, with the flags shown', () => {
+describe('README "First run": every command exists, with the flags shown', notUnderRust("the README's First run is the repository's `./bellwether` (pets fetch, shell --dev, LaunchAgents); the app's first run is its onboarding window (milestone 7)"), () => {
   const readme = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');
   const section = readme.slice(readme.indexOf('## First run'), readme.indexOf('\n## Setup'));
   const commands = [...section.matchAll(/\.\/bellwether ([a-z]+(?: [a-z]+)?(?: --[a-z-]+)*)/g)].map((m) => m[1]);
@@ -284,7 +284,7 @@ describe('licensing documents', () => {
   });
 });
 
-describe('bellwether token init (temp files only; the real .env is never touched)', () => {
+describe('bellwether token init (temp files only; the real .env is never touched)', notUnderRust('the .env writer is retired with the Node CLI; the app writes a token file (test/DIVERGENCES.md 6; token.test.mjs runs `token init` against both)'), () => {
   const tokenInit = async (...a) => (await import('../brain/token.mjs')).tokenInit(...a);
   const mk = (text, mode) => {
     const d = tempDir('m10-tok-');

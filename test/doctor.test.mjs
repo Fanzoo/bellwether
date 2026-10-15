@@ -3,13 +3,18 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { checkSettings, globMatch, nodeSupported, runDoctor } from '../brain/doctor.mjs';
-import { hookBlock, install } from '../brain/hooks.mjs';
+import { nodeSupported } from '../brain/doctor.mjs';
 import { startServer } from '../brain/server.mjs';
 import { EXIT } from '../brain/util.mjs';
-import { TOKEN, tempDir } from './helpers.mjs';
+import { TOKEN, notUnderRust, tempDir } from './helpers.mjs';
+import { checkOtherLevels, checkSettings, globMatch, hookBlock, install, runDoctor } from './impl.mjs';
 
-/** Each failure cause the plan names gets a FAIL line with a cause, and the right exit code. */
+/**
+ * Each failure cause the plan names gets a FAIL line with a cause, and the right exit code.
+ * Under BELLWETHER_IMPL=rust, doctor is the Rust binary's (`runDoctor` runs `doctor
+ * --json`; test/impl.mjs) and its pure checks come from the Rust brain. The brains doctor
+ * probes here are Node test servers either way: what is under test is doctor.
+ */
 
 const PORT = 47417;
 const byName = (checks, name) => checks.find((c) => c.name === name);
@@ -87,7 +92,7 @@ describe('checkSettings', () => {
     }
   });
 
-  test('Node 22.9 is the floor (--env-file-if-exists)', () => {
+  test('Node 22.9 is the floor (--env-file-if-exists)', notUnderRust('the app has no Node runtime, so it has no `node` check (test/DIVERGENCES.md 14)'), () => {
     assert.ok(!nodeSupported('22.8.0'));
     assert.ok(!nodeSupported('20.19.0'));
     assert.ok(nodeSupported('22.9.0'));
@@ -200,7 +205,6 @@ describe('runDoctor', () => {
 });
 
 describe('other settings levels (project, local, managed)', async () => {
-  const { checkOtherLevels } = await import('../brain/doctor.mjs');
   const project = (files) => {
     const dir = tempDir();
     fs.mkdirSync(path.join(dir, '.claude'));
@@ -240,6 +244,69 @@ describe('other settings levels (project, local, managed)', async () => {
   });
   test('a project settings file that is not JSON: WARN, not a crash', () => {
     assert.equal(by(checkOtherLevels({ projectDir: project({ 'settings.json': '{nope' }), port: PORT }), 'project settings').status, 'WARN');
+  });
+});
+
+describe('onFailure (plan D3)', () => {
+  test('a bellwether entry carrying onFailure "block" FAILs, exit 3: with the brain down it would block every tool call', async () => {
+    const s = hookBlock(PORT, TOKEN);
+    s.hooks.PreToolUse[0].hooks[0].onFailure = 'block';
+    const c = byName(checkSettings(s, { port: PORT, token: TOKEN }), 'hook onFailure');
+    assert.equal(c.status, 'FAIL');
+    assert.equal(c.exitCode, EXIT.BAD_CONFIG);
+    assert.match(c.detail, /PreToolUse .*"onFailure": "block".*block every tool call/);
+    const other = hookBlock(PORT, TOKEN);
+    other.hooks.Stop[0].hooks[0].onFailure = 'continue';
+    assert.equal(byName(checkSettings(other, { port: PORT, token: TOKEN }), 'hook onFailure'), undefined, 'only "block" is a failure');
+    // The whole run, on a port nothing listens on: a FAIL line and exit 3.
+    const probe = http.createServer();
+    await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+    const port = probe.address().port;
+    await new Promise((r) => probe.close(r));
+    const blocking = hookBlock(port, TOKEN);
+    blocking.hooks.PreToolUse[0].hooks[0].onFailure = 'block';
+    const file = path.join(tempDir(), 'settings.json');
+    fs.writeFileSync(file, JSON.stringify(blocking, null, 2));
+    const r = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: file, configLoader: () => ({ config: { port }, usingExample: false }), home: tempDir(), dataDir: tempDir() });
+    assert.equal(byName(r.checks, 'hook onFailure').status, 'FAIL');
+    assert.equal(r.exitCode, EXIT.BAD_CONFIG);
+  });
+});
+
+describe('onFailure at the other settings levels (BR-3K M4 D7)', () => {
+  test('a bellwether entry with onFailure "block" in a project settings.local.json, or a managed file, FAILs (exit 3), naming the file', async () => {
+    const block = hookBlock(PORT, TOKEN);
+    block.hooks.Stop[0].hooks[0].onFailure = 'block';
+    const dir = tempDir();
+    fs.mkdirSync(path.join(dir, '.claude'));
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify(block));
+    const c = byName(checkOtherLevels({ projectDir: dir, port: PORT }), 'hook onFailure');
+    assert.equal(c?.status, 'FAIL');
+    assert.equal(c.exitCode, EXIT.BAD_CONFIG);
+    assert.match(c.detail, /Stop in .*settings\.local\.json \(local settings\)/);
+    const managed = path.join(tempDir(), 'managed-settings.json');
+    fs.writeFileSync(managed, JSON.stringify(block));
+    assert.equal(byName(checkOtherLevels({ managedFile: managed, port: PORT }), 'hook onFailure')?.status, 'FAIL');
+    // Not another tool's entry, not "continue", not another port.
+    const fine = hookBlock(PORT, TOKEN);
+    fine.hooks.Stop[0].hooks[0].onFailure = 'continue';
+    fine.hooks.Stop.push({ hooks: [{ type: 'http', url: 'http://127.0.0.1:3000/hook', onFailure: 'block' }] });
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify(fine));
+    assert.equal(byName(checkOtherLevels({ projectDir: dir, port: PORT }), 'hook onFailure'), undefined);
+    // The whole run, from that project: exit 3.
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify(block));
+    const probe = http.createServer();
+    await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+    const port = probe.address().port;
+    await new Promise((r) => probe.close(r));
+    const proj = hookBlock(port, TOKEN);
+    proj.hooks.Stop[0].hooks[0].onFailure = 'block';
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify(proj));
+    const user = path.join(tempDir(), 'settings.json');
+    fs.writeFileSync(user, JSON.stringify(hookBlock(port, TOKEN)));
+    const r = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: user, projectDir: dir, configLoader: () => ({ config: { port }, usingExample: false }), home: tempDir(), dataDir: tempDir() });
+    assert.equal(byName(r.checks, 'hook onFailure')?.status, 'FAIL');
+    assert.equal(r.exitCode, EXIT.BAD_CONFIG);
   });
 });
 

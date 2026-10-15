@@ -9,7 +9,7 @@ import { describe, test } from 'node:test';
 import { autostart, plistText, shellBinary } from '../brain/autostart.mjs';
 import { fetchPets } from '../brain/pets.mjs';
 import { compile, evaluate, KEYWORDS } from '../shell/src/player/expr.mjs';
-import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Tester probes for Milestone 3. No window is opened here and nothing touches
@@ -210,7 +210,7 @@ describe('the pet expression evaluator cannot run code', () => {
   });
 });
 
-describe('autostart (temp HOME only; launchctl is never run)', () => {
+describe('autostart (temp HOME only; launchctl is never run)', notUnderRust("the repository's LaunchAgent autostart; the app's `autostart` drives SMAppService (milestone 6), and the harness never runs it on this Mac (plan deviation 22)"), () => {
   const never = () => {
     throw new Error('launchctl was called');
   };
@@ -291,7 +291,7 @@ describe('autostart (temp HOME only; launchctl is never run)', () => {
   });
 });
 
-describe('pets fetch', () => {
+describe('pets fetch', notUnderRust("`pets fetch` downloads the eSheep art into the repository's data/pets; the app imports a pet file instead (`pets import`, plan D8), tested in pets.test.mjs and crates/brain pets.rs"), () => {
   const GOOD = Buffer.from('<animations>good</animations>');
   const hash = (b) => createHash('sha256').update(b).digest('hex');
   const pinned = { esheep64: { path: 'Pets/esheep64/animations.xml', sha256: hash(GOOD) } };

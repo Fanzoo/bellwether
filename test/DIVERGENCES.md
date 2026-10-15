@@ -87,7 +87,10 @@ does, what Rust does and why, and names the test.
 - **Tests retired with the Node CLI** (skipped under rust with this reason):
   `test/token.test.mjs`, the three "bellwether token init (D4)" tests that write a `.env` and
   four of the "M10-8" tests; `test/tester-m1-reverify.test.mjs`, "an already-exported token wins
-  over the .env".
+  over the .env"; since milestone 4 also `test/tester-m10.test.mjs`, "bellwether token init";
+  `test/tester-regression.test.mjs`, the two first-run `.env` tests; `test/envload.test.mjs`,
+  "which .env" and the two `BELLWETHER_ENV` tests (its "an exported token wins" runs against
+  both); and the `/bin/sh` shims (`bellwether`, `pasture`).
 - **Pinned by:** `crates/core/src/token.rs`, `init_writes_once_and_imports`;
   `crates/brain/tests/token_cli.rs`, `token_init_and_rotate`.
 
@@ -157,12 +160,150 @@ does, what Rust does and why, and names the test.
 - **Rust:** `serve` and `record` take `--port <n>` (1024–65535, or 0 for any free port), so
   a test brain or a login item can run on another port without a config file;
   `bellwether version` prints `bellwether <version> (rust)`; `help` is the app's own text,
-  listing what the app has (no `shell`, `hooks`, `pets` or `migrate` yet; those come with
-  milestones 4–6).
+  listing what the app has: since milestone 4 `hooks`, `doctor` (with `--port`), `pets
+  import`, `migrate` and `shell start|stop|restart` too, with the Node CLI's flags for the
+  hook commands.
 - **Pinned by:** `crates/brain/src/cli.rs`, `ports`; `shell/src-tauri/src/cli.rs`,
   `help_lists_the_brain_commands` and `unknown_commands_exit_1_and_bad_flags_exit_3`
   (`version`); `test/hook-route-blackbox.test.mjs` starts every Rust brain with
   `serve --port`.
+
+### 14. doctor: the app's lines
+
+- **Node:** checks Node's version (`node`), cargo (`cargo`), the `PASTURE_*` names it read
+  (`old names`), the repository's LaunchAgents (`autostart`, `old LaunchAgents`, `strip
+  running`), the fetched pet art, and points `next` at the repository's first run (pet art,
+  a strip build, LaunchAgents). Entries pasture wrote are a WARN (`hooks from pasture`): the
+  Node brain still reads `X-Pasture-*` for one release.
+- **Rust:** none of those. Instead: the token file's mode (`token`, a FAIL when others can
+  read it), keys the app no longer reads (`config keys`, WARN: `brain.nodePath`,
+  `autostart`), LaunchAgents a repository install left behind (`legacy agents`, WARN: the
+  four labels of plan D5), the strip's WebKit occlusion switch from its log (`webkit`), an
+  imported pet against `pets.user.lock.json` (`pets`), and the shell's own lines: `identity`,
+  `signature`, `app data`, `login: brain`, `login: app`, `accessibility` (with milestone 1's
+  stale-session wording, F9, and the agent's own port, review D3). `hooks from pasture` is a
+  FAIL, exit 3, because this brain refuses `X-Pasture-*` (entry 4). `next` follows the app's
+  order: config, token, a brain, anything failing, hooks. Messages that named the `.env` name
+  the token in use instead (entry 12).
+- **Both:** a bellwether entry with `"onFailure": "block"` FAILs (`hook onFailure`, exit 3)
+  in the user settings file and at every other level doctor reads (project, local,
+  managed), new in milestone 4 for the Node doctor too.
+- **Pinned by:** `test/doctor.test.mjs` (the Node-only `node` floor is skipped under rust),
+  `test/rename.test.mjs` ("status and doctor point them out", by each brain's name for the
+  line), `test/token.test.mjs` (the `next` order through the Rust `next_step`), and
+  `crates/core/src/settings_checks.rs`, `a_full_install_passes_and_on_failure_block_fails`.
+
+### 15. `PASTURE_*` environment names are not read
+
+- **Node:** for one release after the rename, an exported `PASTURE_HOOK_TOKEN` (and every
+  other `PASTURE_*` name, and a `.env` that only has the old name) fills the `BELLWETHER_*`
+  of the same name, and doctor says so.
+- **Rust:** reads neither (plan, Configuration). `bellwether migrate` reads an old `.env`'s
+  `PASTURE_HOOK_TOKEN` (or `BELLWETHER_HOOK_TOKEN`) to import a legacy token.
+- **Pinned by:** `test/rename.test.mjs`, "an exported PASTURE_HOOK_TOKEN alone" (each brain
+  its own answer).
+
+### 16. Integer-like keys in settings files keep file order
+
+- **Node:** `JSON.parse` lists integer-like keys (`"1"`, `"10"`) first, so an install
+  rewrites `{"b": 1, "2": …, "1": …}` as `{"1": …, "2": …, "b": 1}`, in the preview and the
+  file, and an uninstall doesn't give back the bytes.
+- **Rust:** the lossless JSON keeps file order (plan D2, R2), so those keys stay where they
+  were. Everything else is Node's: number literals verbatim, a duplicate key's first place
+  with its last value, `__proto__` an ordinary key, and strings written as `JSON.stringify`
+  writes them, so an escape such as `\/` or `\u00e9` in a settings file is rewritten as
+  `/` or `é` by both brains (decided in milestone 4: the preview stays Node's, and only the
+  key order differs).
+- **Pinned by:** `crates/core/tests/installer.rs` (the exotic vector: the keys stay `b`,
+  `2`, `1`, and after install and uninstall only the escaped string's line differs from the
+  original); `test/hooks.test.mjs`, "every installer vector through the CLI"; the
+  differential's `json` area counts such cases as explained only when reading Rust's
+  answer the way Node reads a file gives Node's answer exactly.
+
+### 17. `migrate` moves an install into the app's files; LaunchAgents are listed, not swapped
+
+- **Node:** moves a pasture install into this repository: the token into its `.env`,
+  `config.json`, `data/state.json` and `data/shell-state.json`, then replaces the
+  LaunchAgents (back up, `launchctl bootout`, write and load `local.bellwether.*`, wait for
+  the new brain through `brain/probe.mjs`, roll back on failure), then the hook entries.
+- **Rust:** the same steps and order into the app's folder (`BELLWETHER_HOME`): the token
+  into `hook-token` (from the old `.env`'s `BELLWETHER_HOOK_TOKEN` or `PASTURE_HOOK_TOKEN`,
+  else from the hook entries, plan D9), `config.json` without the keys the app no longer
+  reads, `state.json` through the brain's load checks, `shell-state.json`. The repository's
+  LaunchAgents (`local.bellwether.*` as well as pasture's, found by what they run) are named
+  and left alone: the app never writes or boots out a LaunchAgent (plan D5), and moving them
+  to its login items is milestone 8. When HOME is the real home, the hook entries are
+  rewritten only after a brain on the port accepts the token under `X-Bellwether-Token` (a
+  doctor ping); under any other HOME (a test's) there is no ping and they are rewritten
+  directly, as the Node CLI does under a temp HOME. Without `--from`, the old install is the WorkingDirectory of
+  `local.bellwether.brain` or `local.pasture.brain` (plan D9).
+- **Pinned by:** `test/migrate.test.mjs`, "the CLI moves an install, end to end" and "step
+  by step" (both brains, each asserting where its files go; with no token in any `.env` the
+  app takes the entries' token where Node leaves the hooks); `crates/brain/tests/
+  migrate_cli.rs` (the ping, then the rewrite, against a Rust brain that takes the token,
+  one that holds another, and none); `test/tester-migrate.test.mjs` and
+  `test/tester-migrate-recheck.test.mjs`, the CLI previews; `crates/brain/src/migrate.rs`,
+  `sources_and_obsolete_keys` and `old_agents_are_found_by_what_they_run`.
+
+### 18. `pets import` is the app's; `pets fetch` is the repository's
+
+- **Node:** `pets fetch` downloads the pinned eSheep art into `data/pets/`; there is no
+  `pets import`.
+- **Rust:** `pets import <animations.xml> [--name] [--force]` checks a pet file of the
+  user's (16 MiB, UTF-8, no DOCTYPE or ENTITY, well-formed, `<animations>` root, `tilesx` and
+  `tilesy` from 1 to 64, a PNG, an animation with an id), copies it to
+  `pets/<name>/animations.xml`, pins its sha256 in `pets.user.lock.json` and proposes an
+  `animationMap` by name (plan D8). `pets fetch` says the app doesn't redistribute the art
+  (exit 3; Q6 keeps it a repository opt-in).
+- **Pinned by:** `test/pets.test.mjs`, "pets import" (each brain its own answer);
+  `crates/brain/src/pets.rs` tests.
+
+### 19. `shell start|stop|restart` are milestone 5's
+
+- **Node:** starts, stops and restarts the repository's strip (its LaunchAgent, or a
+  detached copy of `target/release/bellwether-shell`); `shell --dev` builds it.
+- **Rust:** the arguments are checked as Node checks them (`shell bogus`, `--dev`,
+  `--release`: exit 3); the actions say they arrive with milestone 5 (exit 1), and `shell
+  dock-permission` that it becomes `permissions accessibility` (milestone 6).
+- **Pinned by:** `test/shellctl.test.mjs`, "`bellwether shell bogus` and `shell start
+  --dev` are refused".
+
+### 20. `token rotate` rewrites the hook entries
+
+- **Node:** has no `token rotate`.
+- **Rust:** `token rotate --write` writes the token file, tells a running brain (entry 7),
+  then rewrites bellwether's hook entries with the new token through the installer (backup,
+  hash check, exact-URL ownership). The entries change only once the brain switched, or
+  when no brain answers at all; a brain that answers and doesn't switch (the repository's
+  Node brain has no `reload-token`) gets the old token back in the file, the entries
+  untouched, and exit 1. A settings file that can't be rewritten stops the rotation first; a
+  failed rewrite puts the old token back in the file and tells the brain again, and says
+  which of the three is off if that fails.
+- **Pinned by:** `crates/brain/tests/token_cli.rs`, `token_init_and_rotate`;
+  `crates/brain/tests/rotate_cli.rs` (a refusing brain, none, a failed write, a failed
+  switch back).
+
+### 21. Small wording differences of the installer
+
+- The "not laid out the way bellwether writes JSON" summary names the app's backup folder
+  (`<home>/backups/`) where Node says `data/backups/`.
+- A missing token says "BELLWETHER_HOOK_TOKEN is not set, and `<home>/hook-token` doesn't
+  exist or is empty. Make one with `bellwether token init`" (Node points at its `.env`).
+- A JSON error names the position in Rust's words, not V8's (`is not valid JSON (…)` either
+  way); the differential counts two refusals as the same answer.
+- Every other test matches on the cause, never on these words.
+- **Pinned by:** `test/hooks.test.mjs`, "the \"not laid out\" summary names the backup folder,
+  and a missing token names BELLWETHER_HOOK_TOKEN" (each brain its own wording).
+
+### 22. A settings file nested more than 1000 levels deep is refused
+
+- **Node:** `JSON.parse` and the installer take a settings file nested about 2000 levels
+  deep (5000 fails with "Maximum call stack size exceeded").
+- **Rust:** the lossless JSON stops at 1000 levels, so nothing can overflow the stack: `is
+  not valid JSON (nested too deeply …)`, exit 3, nothing written. No Claude Code settings
+  file is that deep.
+- **Pinned by:** `test/hooks.test.mjs`, "a settings file nested 1100 deep" (each brain its
+  own answer); `crates/core/src/lossless.rs`, `bad_json_is_refused`.
 
 ## Turned out not to differ
 
@@ -194,14 +335,5 @@ any other difference from `node --env-file`.
 ## Expected with the port, not yet in effect
 
 From plan D2 and R2. Each becomes an entry above, with its test, in the milestone that makes
-it.
-
-- **Integer-like object keys keep file order (M4).** `JSON.parse` moves keys like `"1"`
-  and `"2"` before the others, so a Node install and uninstall of a file with such keys
-  doesn't give back its bytes. The lossless JSON module keeps file order. The Node
-  behaviour is in `test/fixtures/installer-vectors/exotic-numbers-escapes-and-integer-like-keys/`
-  (`roundTrip: false`).
-- **Escapes in settings files (M4).** Node rewrites `\/`, `é` and surrogate-pair
-  escapes as the characters they stand for (the same vector). Whether the port keeps or
-  rewrites them is decided in M4.
-- **Doctor's `node` check is removed (M4).**
+it. Milestone 4 made the last three: integer-like keys (16), escapes (16, the same as Node),
+and doctor without its `node` check (14). None is left.

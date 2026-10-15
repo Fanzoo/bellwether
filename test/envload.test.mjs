@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { envFilePath } from '../brain/envpath.mjs';
-import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+
+// The app reads no .env (plan D3): its token is the token file, or BELLWETHER_HOOK_TOKEN.
+const NO_ENV_FILE = notUnderRust('the app reads no .env: its token is its token file, or BELLWETHER_HOOK_TOKEN (test/DIVERGENCES.md 6)');
 
 /**
  * Which .env the CLI reads (brain/envpath.mjs, brain/envload.mjs): the repository's
@@ -11,7 +14,7 @@ import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
  * directories only; the real .env is never read.
  */
 
-describe('which .env', () => {
+describe('which .env', NO_ENV_FILE, () => {
   test('a repository on its own: its own .env, also when there is none yet (token init creates it there)', () => {
     const repo = path.join(tempDir('envp-'), 'bellwether');
     fs.mkdirSync(repo);
@@ -51,7 +54,7 @@ describe('the CLI loads it', () => {
     const r = cli({ HOME: dir, BELLWETHER_DATA_DIR: path.join(dir, 'd'), ...env }, 'hooks', 'print', '--out', out);
     return { r, text: r.status === 0 ? fs.readFileSync(out, 'utf8') : '' };
   };
-  test('from BELLWETHER_ENV, with nothing exported', () => {
+  test('from BELLWETHER_ENV, with nothing exported', NO_ENV_FILE, () => {
     const f = path.join(tempDir('envl-f-'), 'x.env');
     fs.writeFileSync(f, `OTHER=1\nBELLWETHER_HOOK_TOKEN=${T}\n`);
     const { r, text } = hooksFile({ BELLWETHER_ENV: f });
@@ -65,7 +68,7 @@ describe('the CLI loads it', () => {
     assert.equal(r.status, 0, r.stderr);
     assert.ok(text.includes('exportedTokenWins_0123456789') && !text.includes(T));
   });
-  test('a missing file is not an error (the token check says what to do); an unreadable one exits 3', () => {
+  test('a missing file is not an error (the token check says what to do); an unreadable one exits 3', NO_ENV_FILE, () => {
     const { r } = hooksFile({ BELLWETHER_ENV: path.join(tempDir('envl-none-'), 'absent.env') });
     assert.equal(r.status, 3);
     assert.match(r.stderr, /BELLWETHER_HOOK_TOKEN is not set[\s\S]*\.\/bellwether token init/);

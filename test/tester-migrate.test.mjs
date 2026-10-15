@@ -6,11 +6,16 @@ import net from 'node:net';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { LABEL, OLD_LABELS, SHELL_LABEL, autostart, plistPath } from '../brain/autostart.mjs';
-import { hookBlock, install, uninstall } from '../brain/hooks.mjs';
 import { adoptLegacyEnv } from '../brain/envpath.mjs';
 import { migrate } from '../brain/migrate.mjs';
 import { startServer } from '../brain/server.mjs';
-import { AGENT_DIR, FIXTURES, request, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, notUnderRust, request, spawnBrainSync, tempDir } from './helpers.mjs';
+// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { hookBlock, install, uninstall } from './impl.mjs';
+
+// The repository-to-repository migration, called in process with launchd injected; the
+// app's `migrate` (into its own files, LaunchAgents left alone) runs in the CLI tests.
+const REPO_MIGRATE = notUnderRust("brain/migrate.mjs in process (the new checkout's .env and LaunchAgent plists, launchctl injected); the app's `migrate` is tested through the CLI here and in migrate.test.mjs, against both brains");
 
 /**
  * BR-3K's probes for the pasture -> bellwether rename and `migrate`. Temp directories
@@ -75,7 +80,7 @@ function world({ shellAgent = true, built = true, oldEnv, settings, newEnv, port
 const noTokens = (text, ...tokens) => tokens.every((t) => !String(text).includes(t));
 
 describe('migrate preview: changes nothing and never shows a token', () => {
-  test('sha256 of the old install, the new checkout and HOME are identical after a preview, and no launchctl call is made, with any mix of tokens', () => {
+  test('sha256 of the old install, the new checkout and HOME are identical after a preview, and no launchctl call is made, with any mix of tokens', REPO_MIGRATE, () => {
     for (const [oldEnv, newEnv] of [[undefined, undefined], [`PASTURE_HOOK_TOKEN=${OLD}\nBELLWETHER_HOOK_TOKEN=${NEW}\n`, undefined], [undefined, `BELLWETHER_HOOK_TOKEN=${NEW}\n`], [`PASTURE_HOOK_TOKEN=\n`, undefined], [`OTHER=1\n`, undefined]]) {
       const w = world({ oldEnv, newEnv });
       const before = snapshot(w.root);
@@ -85,7 +90,7 @@ describe('migrate preview: changes nothing and never shows a token', () => {
       assert.ok(noTokens(r.lines.join('\n'), OLD, NEW));
     }
   });
-  test('error paths do not print the token: a bad --from, an unreadable --env, an invalid settings file containing the token, a read-only target', () => {
+  test('error paths do not print the token: a bad --from, an unreadable --env, an invalid settings file containing the token, a read-only target', REPO_MIGRATE, () => {
     const w = world();
     for (const bad of [{ from: path.join(w.root, 'missing') }, { from: w.hub }]) {
       let msg = '';
@@ -96,6 +101,21 @@ describe('migrate preview: changes nothing and never shows a token', () => {
     let msg = '';
     try { migrate({ ...w.opts, write: true }); } catch (e) { msg = e.message; }
     assert.ok(noTokens(msg, OLD, NEW), `an invalid settings file made migrate print the token: ${msg.slice(0, 200)}`);
+  });
+  test('the CLI preview names the old hub-labelled LaunchAgents (local.<hub>.pasture.*) and changes nothing anywhere', () => {
+    const w = world({ shellAgent: false });
+    for (const l of OLD_LABELS) fs.rmSync(plistPath(w.home, l), { force: true });
+    const hubLabels = ['local.example-hub.pasture.brain', 'local.example-hub.pasture.shell'];
+    for (const l of hubLabels) fs.writeFileSync(plistPath(w.home, l), '<plist/>');
+    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(w.repo, 'brain'), { recursive: true });
+    const before = snapshot(w.root);
+    const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'd'), BELLWETHER_ENV: w.targetEnv };
+    const r = spawnBrainSync(['migrate', '--from', w.old, '--settings', w.settingsFile], { root: w.repo, cwd: w.repo, encoding: 'utf8', env });
+    assert.equal(r.status, 0, r.stderr);
+    for (const l of hubLabels) assert.match(r.stdout, new RegExp(l.replace(/\./g, '\\.')));
+    assert.match(r.stdout, /Preview only; nothing was changed/);
+    assert.ok(noTokens(r.stdout + r.stderr, OLD, NEW));
+    assert.deepEqual(snapshot(w.root), before);
   });
   test('the CLI under temp directories: preview prints no token on stdout or stderr, even for an unknown flag or a missing --from', () => {
     const w = world();
@@ -108,7 +128,7 @@ describe('migrate preview: changes nothing and never shows a token', () => {
   });
 });
 
-describe('migrate --write: idempotence, order and recovery', () => {
+describe('migrate --write: idempotence, order and recovery', REPO_MIGRATE, () => {
   test('a second --write changes no file and calls launchctl for nothing that is already done', () => {
     const w = world();
     migrate({ ...w.opts, write: true });
@@ -193,7 +213,7 @@ describe('migrate --write: idempotence, order and recovery', () => {
   });
 });
 
-describe('the token', () => {
+describe('the token', REPO_MIGRATE, () => {
   const tokenIn = (f) => /^BELLWETHER_HOOK_TOKEN=(.*)$/m.exec(fs.readFileSync(f, 'utf8'))?.[1];
   test('old token only: copied with the same value, the old .env untouched, mode 0600 for a new file; --env overrides the source', () => {
     const w = world();
@@ -285,7 +305,7 @@ describe('legacy hook entries', () => {
   });
 });
 
-describe('legacy header mapping in the server', () => {
+describe('legacy header mapping in the server', notUnderRust('the Rust brain refuses X-Pasture-* headers (test/DIVERGENCES.md 4; crates/brain hook.rs `the_guards_in_order`)'), () => {
   const POST = (port, headers) => request(port, { method: 'POST', path: '/hook', headers: { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', ...headers }, body: '{"hook_event_name":"Stop","session_id":"s"}' });
   test('only-old, only-new, both-matching, both-different (new wins, never either), and wrong tokens', async () => {
     const seen = [];
@@ -306,7 +326,7 @@ describe('legacy header mapping in the server', () => {
   });
 });
 
-describe('legacy environment variables', () => {
+describe('legacy environment variables', notUnderRust('the Node CLI reads PASTURE_* names and a .env for one release; the app reads neither (test/DIVERGENCES.md 6 and 15)'), () => {
   test('PASTURE_X fills BELLWETHER_X only when that is unset; a set (even empty) BELLWETHER_X wins; unrelated names are untouched', () => {
     const env = { PASTURE_HOOK_TOKEN: 'a', BELLWETHER_HOOK_TOKEN: 'b', PASTURE_DATA_DIR: '/x', PASTURE_E: 'e', BELLWETHER_E: '', OTHER: '1', PASTURE: 'p' };
     const used = adoptLegacyEnv(env, new Set());
@@ -325,7 +345,7 @@ describe('legacy environment variables', () => {
   });
 });
 
-describe('LaunchAgent replacement under injection', () => {
+describe('LaunchAgent replacement under injection', REPO_MIGRATE, () => {
   test('autostart install with old agents present: preview removes nothing; write boots out and removes each old agent before the new ones load; the old plists are gone afterwards', () => {
     const home = tempDir('bk3-la-');
     fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
@@ -354,7 +374,7 @@ describe('LaunchAgent replacement under injection', () => {
   });
 });
 
-describe('the old LaunchAgent labels of a real install', () => {
+describe('the old LaunchAgent labels of a real install', REPO_MIGRATE, () => {
   test('LaunchAgents named after the old hub (local.<hub>.pasture.brain / .shell, the labels pasture wrote when it lived inside a hub) are found, replaced and removed by migrate and by autostart install', () => {
     const w = world({ shellAgent: false });
     for (const l of OLD_LABELS) fs.rmSync(plistPath(w.home, l), { force: true });

@@ -9,8 +9,11 @@
  *   too, when that process runs this checkout's code.
  * - A guard fails the process (an error where it happens, and exit code 1 at the end,
  *   even if the error was caught) on any connection to 127.0.0.1:47417, any access to
- *   this checkout's .env, any write under this checkout's data/, and any read there
- *   other than the public pet art in data/pets.
+ *   this checkout's .env, any write under this checkout's data/, any read there other
+ *   than the public pet art in data/pets, and any read or write of the real Claude Code
+ *   settings files (~/.claude/settings.json and settings.local.json of the real home,
+ *   whatever HOME says). The Rust binary can't be guarded from in here, so
+ *   test/helpers.mjs gives it a temp HOME.
  *
  * BELLWETHER_TEST_GUARD=off turns the guard off (for diagnosing the guard itself).
  */
@@ -38,10 +41,55 @@ const REPO_REAL = realOr(REPO);
 const REPO_ENV = path.join(REPO_REAL, '.env');
 const REPO_DATA = path.join(REPO_REAL, 'data');
 const REPO_PETS = path.join(REPO_DATA, 'pets');
+// The real home from the password database, so a test's HOME can't hide it.
+const REAL_CLAUDE = path.join(realOr(os.userInfo().homedir), '.claude');
+const REAL_SETTINGS = [path.join(REAL_CLAUDE, 'settings.json'), path.join(REAL_CLAUDE, 'settings.local.json')].flatMap((f) => [f, realOr(f)]);
 const GUARD = process.env.BELLWETHER_TEST_GUARD !== 'off';
 
 // Kept before patching: the guard's own work must not trip it.
-const real = { mkdtempSync: fs.mkdtempSync, writeFileSync: fs.writeFileSync, readFileSync: fs.readFileSync, mkdirSync: fs.mkdirSync, realpathSync: fs.realpathSync.native, lstatSync: fs.lstatSync };
+const real = { mkdtempSync: fs.mkdtempSync, writeFileSync: fs.writeFileSync, readFileSync: fs.readFileSync, mkdirSync: fs.mkdirSync, realpathSync: fs.realpathSync.native, lstatSync: fs.lstatSync, statSync: fs.statSync };
+
+// The real settings files by identity too: a firmlink spelling (/System/Volumes/Data/…), a
+// hard link or another letter case reaches the same inode under another name. And by a
+// normalised name (firmlink prefix dropped, lower case, as APFS compares by default) for a
+// file that doesn't exist yet, such as settings.local.json.
+const FIRMLINK = '/System/Volumes/Data';
+const normName = (p) => (p.startsWith(FIRMLINK + path.sep) ? p.slice(FIRMLINK.length) : p).toLowerCase();
+const REAL_NAMES = new Set(REAL_SETTINGS.map(normName));
+const REAL_IDS = new Set(
+  REAL_SETTINGS.flatMap((f) => {
+    try {
+      const st = real.statSync.call(fs, f);
+      return [`${st.dev}:${st.ino}`];
+    } catch {
+      return [];
+    }
+  }),
+);
+// Files a test protects the same way, to try the guard's wrappers on something harmless.
+const TEST_PROTECTED = new Set();
+
+/**
+ * Whether a resolved path is one of the real Claude Code settings files (by name or by
+ * device and inode), or a file a test protected. Never reads the file: stat only.
+ */
+export function isProtected(resolved) {
+  if (resolved === null) return false;
+  const name = normName(resolved);
+  if (REAL_NAMES.has(name) || TEST_PROTECTED.has(name)) return true;
+  if (REAL_IDS.size === 0) return false;
+  try {
+    const st = real.statSync.call(fs, resolved);
+    return REAL_IDS.has(`${st.dev}:${st.ino}`);
+  } catch {
+    return false;
+  }
+}
+
+/** For the guard's own tests: treat this file like the real settings files. */
+export function protectForTest(file) {
+  TEST_PROTECTED.add(normName(resolveReal(file)));
+}
 
 // --- the isolated environment, made once per test run and inherited from then on
 if (!process.env.BELLWETHER_TEST_ROOT) {
@@ -143,12 +191,15 @@ const within = (p, dir) => p === dir || p.startsWith(dir + path.sep);
 
 /**
  * The one check. `kind` is 'meta' (does it exist, what is it), 'read' or 'write'.
- * .env: nothing at all. data/: meta anywhere, reads only in data/pets, no writes.
+ * .env: nothing at all. data/: meta anywhere, reads only in data/pets, no writes. The real
+ * Claude Code settings: meta only (the --out guard resolves the default path), never a
+ * read or a write.
  */
 function check(p, kind, api) {
   const r = resolveReal(p);
   if (r === null) return;
   if (r === REPO_ENV) throw violation(`${api} ${REPO_ENV}`);
+  if (kind !== 'meta' && isProtected(r)) throw violation(`${api} ${r}, the real Claude Code settings (or a file protected like them)`);
   if (!within(r, REPO_DATA) || kind === 'meta') return;
   if (kind === 'read' && within(r, REPO_PETS)) return;
   throw violation(`${api} ${r}`);
@@ -194,6 +245,42 @@ if (GUARD) {
   }
   wrap(fs.realpathSync, 'native', ['meta'], 'realpathSync.native');
   wrap(fs.realpath, 'native', ['meta'], 'realpath.native');
+  wrap(fs, 'openAsBlob', ['read'], 'openAsBlob');
+  // `new fs.ReadStream(path)` and `new fs.WriteStream(path)` don't go through the create
+  // functions above.
+  for (const [name, kind] of [['ReadStream', 'read'], ['WriteStream', 'write']]) {
+    const Orig = fs[name];
+    if (typeof Orig !== 'function') continue;
+    const Guarded = function (p, ...rest) {
+      check(p, kind, `new fs.${name}`);
+      return new Orig(p, ...rest);
+    };
+    Guarded.prototype = Orig.prototype;
+    Object.setPrototypeOf(Guarded, Orig);
+    try {
+      fs[name] = Guarded;
+    } catch {}
+  }
+  // process.binding('fs') reaches the native calls under every wrapper: any string
+  // argument that names a protected file stops the call (as a write: the binding's calls
+  // can't be told apart), as do .env and data/ writes.
+  const binding = process.binding;
+  if (typeof binding === 'function') {
+    process.binding = function (name) {
+      const b = binding.call(this, name);
+      if (name !== 'fs') return b;
+      return new Proxy(b, {
+        get(target, key) {
+          const v = Reflect.get(target, key);
+          if (typeof v !== 'function') return v;
+          return function (...args) {
+            for (const a of args) if (typeof a === 'string' || a instanceof URL) check(a, 'write', `process.binding('fs').${String(key)}`);
+            return v.apply(target, args);
+          };
+        },
+      });
+    };
+  }
   const loadEnvFile = process.loadEnvFile;
   process.loadEnvFile = function (p = '.env') {
     check(p, 'read', 'loadEnvFile');

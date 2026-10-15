@@ -16,7 +16,8 @@
  * parts from test/impl.mjs (the Rust brain's `__session` under rust). A file that only
  * imports brain/*.mjs has no rust result until its milestone wires it: its rust cell says
  * "not wired", and counts as red. A test with nothing to check in the Rust brain yet says
- * so (`notUnderRust` in helpers.mjs, with its reason) and is counted as skipped.
+ * so (`notUnderRust` in helpers.mjs, with its reason) and is counted as skipped; so does a
+ * test of something only the repository has (its LaunchAgents, its `.env`, its shims).
  *
  * Exit 1 when a node cell is red, or when a row whose milestone is at or before the
  * manifest's `current` is red under rust. Most rust cells are expected to be red until
@@ -173,7 +174,7 @@ function table(results, manifest, impls) {
   for (const row of results) {
     const notes = [];
     if (!row.spawns) notes.push('in-process JS only');
-    if (row[impls.at(-1)]?.skipped && impls.includes('rust')) notes.push('skips: each says why (notUnderRust: nothing in the Rust brain yet; or the file\'s own skip)');
+    if (row[impls.at(-1)]?.skipped && impls.includes('rust')) notes.push('skips: each says why (notUnderRust: the repository\'s own, or not in the Rust brain yet; or the file\'s own skip)');
     else if (row.inProcess) notes.push('also tests brain/*.mjs in process');
     if (row.milestone && milestoneNumber(row.milestone) <= milestoneNumber(manifest.current)) notes.push(`required now (${manifest.current})`);
     const rust = row.rust;

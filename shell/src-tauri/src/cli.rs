@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::login_items::{self, Service, Status};
 use bellwether_brain::exit;
 
-const USAGE: &str = "usage (the app's built-in CLI; milestones 1 and 3 of the distribution plan):
+const USAGE: &str = "usage (the app's built-in CLI; milestones 1, 3 and 4 of the distribution plan):
   bellwether serve [--port <n>] [--hang | --slow=<ms>]   run the brain in the foreground
   bellwether record [--out <file>]                       serve, and record event shapes (no content) to recordings/
   bellwether status [--watch] [--json]                   the flock as text (long-polls /state with --watch)
@@ -20,8 +20,19 @@ const USAGE: &str = "usage (the app's built-in CLI; milestones 1 and 3 of the di
   bellwether token init [--from <.env>] [--force]        make the hook token file, only if there is none (never printed);
                                                          --from takes the token of a repository install's .env;
                                                          --force replaces one that is there but unusable
-  bellwether token rotate [--write] [--settings <path>]  a new token, and the running brain told to switch (dry run unless --write)
-  bellwether doctor [--port <n>]                         check the app, its brain, token and login items
+  bellwether token rotate [--write] [--settings <path>]  a new token: the brain told to switch, then the hook entries
+                                                         rewritten with it (dry run unless --write)
+  bellwether hooks print [--out <file> [--force]]        the hook block, as a settings file for claude --settings
+  bellwether hooks install   [--write] [--settings <path>]   dry run unless --write
+  bellwether hooks uninstall [--write] [--settings <path>] [--port <old port>]   dry run unless --write
+  bellwether doctor [--json] [--e2e] [--settings <path>] [--port <n>]
+                                                         check the app, its brain, token, hooks and login items
+  bellwether pets import <animations.xml> [--name <name>] [--force]
+                                                         import a desktopPet pet file of your own (checked, then pinned)
+  bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]
+                                                         move a repository install's token, config, colours and hooks
+                                                         into the app's files (preview unless --write)
+  bellwether shell start | stop | restart                the strip (milestone 5)
   bellwether autostart status                            the two login items (brain agent, app at login)
   bellwether autostart install [--write] [--brain-only] [--via-app]
   bellwether autostart uninstall [--write] [--brain-only] [--via-app]
@@ -31,6 +42,7 @@ const USAGE: &str = "usage (the app's built-in CLI; milestones 1 and 3 of the di
   bellwether help
 
 The app's files: ~/Library/Application Support/Bellwether/ (BELLWETHER_HOME overrides it).
+Exit codes: 0 ok, 2 not installed or not running, 3 bad config or token, 1 unexpected.
 ";
 
 /// `args` is the whole argv. Returns the exit code.
@@ -60,8 +72,9 @@ fn command_result(command: &str, tail: &[String]) -> CliResult {
             println!("bellwether {} (rust)", bellwether_brain::VERSION);
             Ok(exit::OK)
         }
-        "serve" | "record" | "status" | "mute" | "unmute" | "show" | "hide" | "replay" | "token" => Ok(bellwether_brain::cli::run(command, tail)),
-        "doctor" => doctor(tail),
+        "serve" | "record" | "status" | "mute" | "unmute" | "show" | "hide" | "replay" | "token" | "hooks" | "pets" | "migrate" => Ok(bellwether_brain::cli::run(command, tail)),
+        "doctor" => Ok(doctor(tail)),
+        "shell" => shell(tail),
         "autostart" => autostart(tail),
         // The conformance harness's hidden commands: only in a build with the
         // `conformance` feature (never a release). Without it they are unknown commands.
@@ -114,6 +127,7 @@ fn has(set: &[(String, String)], name: &str) -> bool {
     set.iter().any(|(k, _)| k == name)
 }
 
+#[cfg(test)]
 fn value<'a>(set: &'a [(String, String)], name: &str) -> Option<&'a str> {
     set.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
 }
@@ -282,179 +296,132 @@ fn via_app(action: &str) -> CliResult {
     Err((format!("the app didn't report back within 30 s (expected {})", outcome.display()), exit::UNEXPECTED))
 }
 
-// --- doctor --------------------------------------------------------------------------
+// --- shell ---------------------------------------------------------------------------
 
-struct Check {
-    status: &'static str,
-    name: &'static str,
-    detail: String,
-    code: i32,
+const SHELL_USAGE: &str = "usage: bellwether shell start | stop | restart (the strip of Bellwether.app; `shell --dev` is a repository workflow, not the app's)";
+
+/// `bellwether shell start | stop | restart`. The arguments are checked as the Node CLI
+/// checks them; the actions themselves arrive with milestone 5, when the strip runs on
+/// the Rust brain.
+fn shell(args: &[String]) -> CliResult {
+    let a = bellwether_core::cliargs::parse(args, &[], &[], 1).map_err(|e| (e.message, e.code))?;
+    match a.positional.first().map(String::as_str) {
+        Some(sub @ ("start" | "stop" | "restart")) => Err((format!("`bellwether shell {sub}` arrives with milestone 5 (the strip on the Rust brain). Until then, open Bellwether.app, or quit it from its menu-bar sheep"), exit::UNEXPECTED)),
+        Some("dock-permission") => Err(("`shell dock-permission` becomes `bellwether permissions accessibility` in the app (milestone 6): macOS must attribute the request to Bellwether, not to this terminal".into(), exit::UNEXPECTED)),
+        _ => Err(bad(SHELL_USAGE)),
+    }
 }
 
-fn doctor(args: &[String]) -> CliResult {
-    let (words, set) = flags(args, &[], &["port"])?;
-    if let Some(w) = words.first() {
-        return Err(bad(format!("unexpected argument {w:?}")));
+// --- doctor --------------------------------------------------------------------------
+
+/// `bellwether doctor [--json] [--e2e] [--settings <path>] [--port <n>]`: the brain's
+/// checks (crates/brain doctor.rs, ported from brain/doctor.mjs) with the app's own lines
+/// around them: which app this is and its signature first; then login items and
+/// Accessibility. Returns the exit code.
+fn doctor(args: &[String]) -> i32 {
+    use bellwether_brain::doctor::{self, Input};
+    use bellwether_core::settings_checks::Check;
+    let a = match bellwether_core::cliargs::parse(args, &["json", "e2e"], &["settings", "port"], 0) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("bellwether: {}", e.message);
+            return e.code;
+        }
+    };
+    let port = match a.value("port") {
+        Some(v) => match bellwether_brain::cli::canonical_port(v).filter(|p| *p >= 1024) {
+            Some(p) => Some(p),
+            None => {
+                eprintln!("bellwether: --port takes an integer from 1024 to 65535");
+                return exit::BAD_CONFIG;
+            }
+        },
+        None => None,
+    };
+    let home = bellwether_brain::home::dir();
+    bellwether_brain::cli::remember_token(&home);
+    let config = bellwether_core::config::load(&home, std::env::var("BELLWETHER_CONFIG").ok().as_deref());
+    let sharing = config.as_ref().ok().map(|c| {
+        let v: serde_json::Value = serde_json::from_str(&bellwether_core::json::stringify(&c.merged)).unwrap_or(serde_json::Value::Null);
+        let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(windows) { "win32" } else { "linux" };
+        let count = v.pointer(&format!("/privacy/sharingProcesses/{os}")).and_then(|l| l.as_array()).map(|l| l.len()).unwrap_or(0);
+        (crate::privacy::sharing_warnings_for(&v, os), count)
+    });
+    let input = Input {
+        settings_file: a.value("settings").map(|s| bellwether_core::hooks::resolve(Path::new(s))).unwrap_or_else(doctor::user_settings),
+        home: home.clone(),
+        user_home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
+        env_token: std::env::var("BELLWETHER_HOOK_TOKEN").ok(),
+        config,
+        port,
+        probe_timeout: Duration::from_millis(1000),
+        project_dir: std::env::current_dir().ok(),
+        managed_file: doctor::managed_settings(),
+        e2e: a.has("e2e"),
+        sharing,
+    };
+    if input.e2e {
+        bellwether_brain::cli::err_line("doctor --e2e: running one `claude -p` with haiku (one small API call)…");
     }
     let session = crate::identity::session();
     let mut checks: Vec<Check> = Vec::new();
-    let mut add = |status: &'static str, name: &'static str, detail: String, code: i32| checks.push(Check { status, name, detail, code: if status == "FAIL" { code } else { exit::OK } });
+    let add = |checks: &mut Vec<Check>, status: &'static str, name: &str, detail: String| checks.push(Check::new(name, status, detail, exit::UNEXPECTED));
 
     // Which app this is.
     match crate::identity::bundle_path() {
         Some(bundle) => {
             let id = crate::identity::bundle_id().unwrap_or_else(|| "(no CFBundleIdentifier)".into());
-            add("PASS", "identity", format!("{id} {} from {}", bellwether_brain::VERSION, bundle.display()), exit::OK);
+            add(&mut checks, "PASS", "identity", format!("{id} {} from {}", bellwether_brain::VERSION, bundle.display()));
             let (status, detail) = signature(&bundle, session);
-            add(status, "signature", detail, exit::UNEXPECTED);
+            add(&mut checks, status, "signature", detail);
         }
-        None => add("INFO", "identity", format!("a development binary ({}), not Bellwether.app: no login items, and macOS permissions belong to this exact file", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default()), exit::OK),
+        None => add(&mut checks, "INFO", "identity", format!("a development binary ({}), not Bellwether.app: no login items, and macOS permissions belong to this exact file", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())),
     }
+    add(&mut checks, "INFO", "app data", home.display().to_string());
 
-    // The app's files and the token.
-    let home = bellwether_brain::home::dir();
-    add("INFO", "app data", home.display().to_string(), exit::OK);
-    let token = match bellwether_brain::home::token(&home).and_then(|t| bellwether_brain::check_token(&t).map(|_| t)) {
-        Ok(t) => {
-            let from_env = std::env::var("BELLWETHER_HOOK_TOKEN").ok().filter(|t| !t.is_empty()).is_some();
-            if from_env {
-                add("PASS", "token", "from BELLWETHER_HOOK_TOKEN in the environment".into(), exit::OK);
-            } else {
-                token_file_mode(&bellwether_brain::home::token_file(&home), &mut add);
-            }
-            Some(t)
-        }
-        Err(e) => {
-            add("FAIL", "token", e.message, exit::BAD_CONFIG);
-            None
-        }
-    };
-
-    // The brain.
-    let port = match value(&set, "port") {
-        Some(v) => v.parse::<u16>().ok().filter(|p| *p >= 1024).ok_or_else(|| bad("--port takes an integer from 1024 to 65535"))?,
-        None => match bellwether_brain::home::configured_port(&home) {
-            Ok(p) => p.unwrap_or(bellwether_brain::DEFAULT_PORT),
-            Err(e) => {
-                add("FAIL", "config", e.message, exit::BAD_CONFIG);
-                bellwether_brain::DEFAULT_PORT
-            }
-        },
-    };
-    let brain_pid = brain_checks(port, token.as_deref(), &mut add);
+    // The brain's checks: config, token, the brain, the hook entries, the other settings
+    // levels, the strip's log, pets, legacy LaunchAgents.
+    checks.extend(doctor::checks(&input));
+    let checked_port = input.port().unwrap_or(bellwether_brain::DEFAULT_PORT);
 
     // Login items. The brain answering on the port is this app's agent when launchd (pid
     // 1) runs this very executable for it.
     if crate::identity::in_app_bundle() {
+        let brain_pid = match doctor::probe_health(checked_port, input.probe_timeout) {
+            doctor::Health::Bellwether(h) => h["pid"].as_u64(),
+            _ => None,
+        };
         let ours = brain_pid.and_then(|pid| crate::identity::bundle_processes().into_iter().find(|(p, _, _)| *p as u64 == pid)).filter(|(_, ppid, _)| *ppid == 1).map(|(p, _, _)| p);
         for s in [Service::Brain, Service::MainApp] {
             let (status, detail) = login_verdict(s, login_items::status(s), session, if s == Service::Brain { ours } else { None });
-            add(status, if s == Service::Brain { "login: brain" } else { "login: app" }, detail, exit::OK);
+            add(&mut checks, status, if s == Service::Brain { "login: brain" } else { "login: app" }, detail);
         }
-    }
-
-    // LaunchAgents from the repository versions: two brains would fight over the port.
-    let agents = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Library").join("LaunchAgents");
-    let legacy: Vec<String> = ["local.bellwether.brain", "local.bellwether.shell", "local.pasture.brain", "local.pasture.shell"]
-        .iter()
-        .filter(|l| agents.join(format!("{l}.plist")).exists())
-        .map(|l| l.to_string())
-        .collect();
-    if !legacy.is_empty() {
-        add("WARN", "legacy agents", format!("{} in {}: the repository version's login items. Two brains on one port fight over it; the app's migration (milestone 8) moves them aside", legacy.join(", "), agents.display()), exit::OK);
     }
 
     // Accessibility, for this exact identity (unknown from an old session).
     if session == crate::identity::Session::Stale {
-        add("INFO", "accessibility", "can't check from this terminal session (it predates your last login); open a new terminal window".into(), exit::OK);
+        add(&mut checks, "INFO", "accessibility", "can't check from this terminal session (it predates your last login); open a new terminal window".into());
     } else if crate::ax::trusted() {
-        add("PASS", "accessibility", "granted to this app: sheep can stand on the Dock".into(), exit::OK);
+        add(&mut checks, "PASS", "accessibility", "granted to this app: sheep can stand on the Dock".into());
     } else {
-        add("INFO", "accessibility", "not granted to this app: the strip uses its full width. If you granted it before and it now says not granted, System Settings > Privacy & Security > Accessibility still lists the old entry: remove it with −, then grant again".into(), exit::OK);
+        add(&mut checks, "INFO", "accessibility", "not granted to this app: the strip uses its full width. If you granted it before and it now says not granted, System Settings > Privacy & Security > Accessibility still lists the old entry: remove it with −, then grant again".into());
     }
 
-    // An enabled brain agent with no brain answering: launchd is refusing or failing it.
+    // An enabled brain agent with no brain answering: launchd is refusing or failing it,
+    // unless the agent listens on another port than the one checked (M1 review D3).
     let agent_on = checks.iter().any(|c| c.name == "login: brain" && c.status == "PASS");
     let brain_down = checks.iter().any(|c| c.name == "brain" && c.status == "FAIL");
     if agent_on && brain_down {
-        let (status, detail) = agent_down_hint(agent_port(), port);
-        checks.push(Check { status, name: "login: brain", detail, code: exit::OK });
+        let (status, detail) = agent_down_hint(agent_port(), checked_port);
+        add(&mut checks, status, "login: brain", detail);
     }
-    for c in &checks {
-        println!("  {:<4}  {:<22} {}", c.status, c.name, c.detail);
-    }
-    let fails: Vec<&Check> = checks.iter().filter(|c| c.status == "FAIL").collect();
-    println!("{}", if fails.is_empty() { "all checks passed".to_string() } else { format!("{} check(s) failed", fails.len()) });
-    Ok(if fails.iter().any(|c| c.code == exit::BAD_CONFIG) {
-        exit::BAD_CONFIG
-    } else if fails.iter().any(|c| c.code == exit::NOT_RUNNING) {
-        exit::NOT_RUNNING
-    } else if fails.is_empty() {
-        exit::OK
+    let report = doctor::finish(&input, checks);
+    if a.has("json") {
+        bellwether_brain::cli::out(&doctor::to_json(&report));
     } else {
-        exit::UNEXPECTED
-    })
-}
-
-fn token_file_mode(file: &Path, add: &mut impl FnMut(&'static str, &'static str, String, i32)) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        match std::fs::metadata(file) {
-            Ok(m) if m.permissions().mode() & 0o077 == 0 => add("PASS", "token", format!("{} (0600)", file.display()), exit::OK),
-            Ok(m) => add("FAIL", "token", format!("{} is mode {:o}: other users can read it. Run `chmod 600 '{}'`", file.display(), m.permissions().mode() & 0o777, file.display()), exit::BAD_CONFIG),
-            Err(e) => add("FAIL", "token", format!("{}: {e}", file.display()), exit::BAD_CONFIG),
-        }
+        bellwether_brain::cli::out(&doctor::render(&report));
     }
-    #[cfg(not(unix))]
-    add("PASS", "token", file.display().to_string(), exit::OK);
-}
-
-/// /health, which brain answers it (Rust or Node, by its process), and whether /hook
-/// accepts the token (doctor's ping, which the brain counts but never shows).
-/// Returns the answering brain's pid, if one answered.
-fn brain_checks(port: u16, token: Option<&str>, add: &mut impl FnMut(&'static str, &'static str, String, i32)) -> Option<u64> {
-    let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_millis(1500))).http_status_as_error(false).build().new_agent();
-    let base = format!("http://127.0.0.1:{port}");
-    let health = agent.get(&format!("{base}/health")).call();
-    let mut resp = match health {
-        Ok(r) => r,
-        Err(e) => {
-            let why = e.to_string();
-            let detail = if why.contains("onnection refused") || why.contains("Connection refused") {
-                format!("nothing listening on 127.0.0.1:{port}. With start at login on, launchd starts it (`bellwether autostart status`); or run `bellwether serve`")
-            } else {
-                format!("127.0.0.1:{port} didn't answer /health ({why}): a hung process, or a brain started with --hang")
-            };
-            add("FAIL", "brain", detail, exit::NOT_RUNNING);
-            return None;
-        }
-    };
-    let body: serde_json::Value = resp.body_mut().read_to_string().ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(serde_json::Value::Null);
-    if resp.status() != 200 || body["name"] != "bellwether" {
-        add("FAIL", "brain", format!("port {port} is held by something that isn't a bellwether brain (it answered {}). Stop it, or use another port", resp.status()), exit::NOT_RUNNING);
-        return None;
-    }
-    let pid = body["pid"].as_u64().unwrap_or(0);
-    let which = process_path(pid).map(|p| if p.ends_with("/node") || p.ends_with("node") { format!("the Node brain ({p})") } else { format!("the Rust brain ({p})") }).unwrap_or_else(|| "an unknown process".into());
-    if body["mode"] == "hang" {
-        add("FAIL", "brain", format!("pid {pid} runs with --hang: /hook never answers, so every hook stalls for its full timeout"), exit::NOT_RUNNING);
-        return Some(pid);
-    }
-    add("PASS", "brain", format!("{which}, version {}, pid {pid}, on 127.0.0.1:{port}", body["version"].as_str().unwrap_or("?")), exit::OK);
-    let Some(token) = token else { return Some(pid) };
-    let ping = agent
-        .post(&format!("{base}/hook"))
-        .header("Content-Type", "application/json")
-        .header("X-Bellwether-Token", token)
-        .send(r#"{"hook_event_name":"BellwetherDoctorPing"}"#);
-    match ping.map(|r| r.status().as_u16()) {
-        Ok(204) => add("PASS", "brain token", "/hook accepts the token (204, empty)".into(), exit::OK),
-        Ok(403) => add("FAIL", "brain token", "the brain refused the token (403): it was started with a different one; restart it".into(), exit::BAD_CONFIG),
-        Ok(s) => add("FAIL", "brain token", format!("/hook answered {s}; it must only ever answer 204 or 403"), exit::UNEXPECTED),
-        Err(e) => add("FAIL", "brain token", format!("/hook didn't answer: {e}"), exit::NOT_RUNNING),
-    }
-    Some(pid)
+    report.exit_code
 }
 
 /// The port the bundled brain agent listens on: its plist's `--port`, else `port` in
@@ -499,16 +466,6 @@ pub fn login_verdict(s: Service, st: Status, session: crate::identity::Session, 
         Status::RequiresApproval | Status::Unavailable => "WARN",
     };
     (status, login_items::advice(s, st))
-}
-
-/// The executable of a process, from `ps` (read only).
-fn process_path(pid: u64) -> Option<String> {
-    if pid == 0 {
-        return None;
-    }
-    let out = std::process::Command::new("/bin/ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().ok()?;
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!s.is_empty()).then_some(s)
 }
 
 /// The code signature, from `codesign -dv` (which prints to stderr). The Team ID is
@@ -682,20 +639,38 @@ mod tests {
         assert!(!script.contains("--features") && !script.contains("conformance"), "scripts/build-app.mjs passes a feature");
     }
 
-    /// test/DIVERGENCES.md 13: the app's help is its own text (the Node CLI's lists `shell`,
-    /// `hooks`, `pets`, `migrate`); it names every brain command milestone 3 ported.
+    /// test/DIVERGENCES.md 13: the app's help is its own text; it names every brain command
+    /// milestones 3 and 4 ported, with the hook flags of the Node CLI's help.
     #[test]
     fn help_lists_the_brain_commands() {
-        for c in ["serve [--port <n>]", "record [--out <file>]", "status [--watch] [--json]", "mute | unmute", "show | hide", "replay <file.jsonl>", "replay --burst", "token init", "token rotate", "version"] {
+        for c in [
+            "serve [--port <n>]",
+            "record [--out <file>]",
+            "status [--watch] [--json]",
+            "mute | unmute",
+            "show | hide",
+            "replay <file.jsonl>",
+            "replay --burst",
+            "token init",
+            "token rotate",
+            "hooks print [--out <file> [--force]]",
+            "hooks install   [--write] [--settings <path>]",
+            "hooks uninstall [--write] [--settings <path>] [--port <old port>]",
+            "doctor [--json] [--e2e] [--settings <path>] [--port <n>]",
+            "pets import <animations.xml>",
+            "migrate [--from <dir>]",
+            "shell start | stop | restart",
+            "version",
+        ] {
             assert!(USAGE.contains(&format!("bellwether {c}")), "{c}");
         }
     }
 
     #[test]
     fn unknown_commands_exit_1_and_bad_flags_exit_3() {
-        // A hidden command that isn't ported yet (milestone 4): "unknown command" without the
-        // conformance feature, "not ported yet" with it; exit 1 either way.
-        assert_eq!(run(&s(&["bellwether", "__json"])), exit::UNEXPECTED);
+        // A hidden word that isn't a command: "unknown command" without the conformance
+        // feature, "unknown hidden command" with it; exit 1 either way.
+        assert_eq!(run(&s(&["bellwether", "__nope"])), exit::UNEXPECTED);
         assert_eq!(run(&s(&["bellwether", "autostart", "install", "--nope"])), exit::BAD_CONFIG);
         assert_eq!(run(&s(&["bellwether", "autostart", "sideways"])), exit::BAD_CONFIG);
         assert_eq!(run(&s(&["bellwether", "version"])), exit::OK);

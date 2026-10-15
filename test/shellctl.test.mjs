@@ -5,7 +5,10 @@ import { describe, test } from 'node:test';
 import { SHELL_LABEL, plistPath, shellPlistText } from '../brain/autostart.mjs';
 import { runDoctor } from '../brain/doctor.mjs';
 import { shellControl } from '../brain/shellctl.mjs';
-import { AGENT_DIR, TOKEN, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+
+// The repository's strip control, which the app replaces (milestone 5).
+const REPO_SHELL = notUnderRust("the repository's `shell start|stop|restart` (its LaunchAgent, or a detached copy of target/release/bellwether-shell); the app's strip control arrives in milestone 5. The argument checks at the end run against both");
 
 /** `bellwether shell start | stop | restart` (temp HOME and fakes only: launchd and the live strip are never touched). */
 
@@ -18,7 +21,7 @@ const withAgent = (shellBin = '/x/target/release/bellwether-shell') => {
 // The login item's strip: its parent is launchd and its command line is the agent's ProgramArguments.
 const loginStrip = (pid, shellBin) => ({ processes: () => new Map([[pid, shellBin]]), parents: () => new Map([[pid, 1]]), commands: () => new Map([[pid, `${shellBin} --no-spawn-brain`]]) });
 
-describe('with the strip LaunchAgent installed: launchctl, behind the real-home guard', () => {
+describe('with the strip LaunchAgent installed: launchctl, behind the real-home guard', REPO_SHELL, () => {
   test('restart is kickstart -k, start is kickstart, stop is kill TERM; each says what it did', async () => {
     const calls = [];
     const run = (cmd, args) => (calls.push([cmd, ...args].join(' ')), { ok: true, out: '' });
@@ -49,7 +52,7 @@ describe('with the strip LaunchAgent installed: launchctl, behind the real-home 
   });
 });
 
-describe('without it: bellwether\'s own detached copy, found by pid file or exact binary path', () => {
+describe('without it: bellwether\'s own detached copy, found by pid file or exact binary path', REPO_SHELL, () => {
   const setup = () => {
     const dataDir = tempDir();
     const shellBin = path.join(tempDir(), 'bellwether-shell');
@@ -108,7 +111,7 @@ describe('without it: bellwether\'s own detached copy, found by pid file or exac
 });
 
 describe('doctor and the CLI', () => {
-  test('doctor says `bellwether shell start` when the strip agent is installed but no strip runs', async () => {
+  test('doctor says `bellwether shell start` when the strip agent is installed but no strip runs', REPO_SHELL, async () => {
     const home = withAgent();
     fs.writeFileSync(plistPath(home), '');
     const run = (running) => runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: path.join(home, 'none.json'), configLoader: () => ({ config: { port: 1 }, usingExample: false }), home, dataDir: tempDir(), probeTimeoutMs: 100, isStripRunning: () => running });

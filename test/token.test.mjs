@@ -2,11 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { nextStep } from '../brain/doctor.mjs';
 import { tokenInit } from '../brain/token.mjs';
 import { AGENT_DIR, IMPL, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
 // brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
-import { CliError, envValue, maskToken } from './impl.mjs';
+import { CliError, envValue, maskToken, nextStep } from './impl.mjs';
 
 // The in-place .env writer of `token init` is retired with the Node CLI: the app writes the
 // token file instead (plan D3; test/DIVERGENCES.md, "token init writes the token file").
@@ -24,7 +23,7 @@ describe('the token is masked in everything a person sees (D1)', () => {
     fs.writeFileSync(path.join(h, '.claude', 'settings.json'), '{}\n');
     return h;
   };
-  test('hooks install preview, hooks print to stdout and errors show 4 characters and "…"; print --out and --write keep the value', notUnderRust('hooks install and hooks print are ported in milestone 4'), () => {
+  test('hooks install preview, hooks print to stdout and errors show 4 characters and "…"; print --out and --write keep the value', () => {
     const h = home();
     const env = { PATH: process.env.PATH, HOME: h, BELLWETHER_DATA_DIR: path.join(h, 'data'), BELLWETHER_HOOK_TOKEN: T };
     const prev = cli(['hooks', 'install'], env);
@@ -57,7 +56,7 @@ describe('"all set" only when nothing fails (D2)', () => {
     return h;
   };
   const base = [{ name: 'config', status: 'PASS' }, { name: 'token', status: 'PASS' }, { name: 'brain', status: 'PASS' }];
-  test('a failing check names itself and its fix, before hooks and instead of "all set"', notUnderRust('doctor is ported in milestone 4'), () => {
+  test('a failing check names itself and its fix, before hooks and instead of "all set"', () => {
     const h = home();
     const fail = { name: 'disableAllHooks', status: 'FAIL', detail: 'settings set disableAllHooks: true; remove it' };
     const s = nextStep({ checks: [...base, fail], installed: true, home: h, platform: 'darwin', shellBuilt: true });

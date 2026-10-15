@@ -55,7 +55,7 @@ const mk = (name, text) => {
 const j = (o, indent = 2) => JSON.stringify(o, null, indent) + '\n';
 const keep = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'keep' }] }] }, theme: 'dark' };
 
-describe('D1: no argument shape reaches the default settings file', notUnderRust('hooks install, uninstall and print are ported in milestone 4'), () => {
+describe('D1: no argument shape reaches the default settings file', () => {
   const original = j({ theme: 'dark', marker: 1 });
   const shapes = [
     ['hooks', 'install', '--write', '--settings'],
@@ -107,7 +107,7 @@ describe('D1: no argument shape reaches the default settings file', notUnderRust
   });
 });
 
-describe('M1-7: relative paths mean what the caller typed', notUnderRust('hooks --settings and --out are ported in milestone 4, and the shim is the Node CLI\'s'), () => {
+describe('M1-7: relative paths mean what the caller typed', () => {
   test('--settings and --out resolve against the caller cwd (which has a space in it)', () => {
     const f = mk('rel.json', j({ theme: 'dark' }));
     const r = bellwether(['hooks', 'install', '--write', '--settings', 'rel.json']);
@@ -130,7 +130,7 @@ describe('M1-7: relative paths mean what the caller typed', notUnderRust('hooks 
     assert.equal(JSON.parse(read(path.join(elsewhere, 'rel2.json'))).hooks, undefined, 'the other directory was not touched');
   });
 
-  test('a symlink to the shim on PATH works', () => {
+  test('a symlink to the shim on PATH works', notUnderRust('the /bin/sh shim runs the Node CLI; the app\'s lower-case symlink is shell/src-tauri dispatch.rs, tested there'), () => {
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin, { recursive: true });
     fs.symlinkSync(path.join(agent, 'bellwether'), path.join(bin, 'bellwether'));
@@ -162,7 +162,7 @@ describe('M1-13: Node version floor in the shim', notUnderRust('the /bin/sh shim
   }
 });
 
-describe('M1-8/M1-9: lossless layout, numbers and the install record', notUnderRust('hooks install, uninstall and print are ported in milestone 4'), () => {
+describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
   const roundTrip = (name, text, { expectIdentical = true } = {}) => {
     const f = mk(name, text);
     const a = bellwether(['hooks', 'install', '--write', '--settings', f]);
@@ -335,7 +335,7 @@ describe('M1-8/M1-9: lossless layout, numbers and the install record', notUnderR
 });
 
 describe('new write paths: hooks print --out and record --out', () => {
-  test('hooks print --out refuses to overwrite the user settings file (or any existing non-bellwether file)', notUnderRust('hooks install, uninstall and print are ported in milestone 4'), () => {
+  test('hooks print --out refuses to overwrite the user settings file (or any existing non-bellwether file)', () => {
     const precious = j({ theme: 'dark', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'precious' }] }] } });
     fs.writeFileSync(defaultSettings, precious);
     const r = bellwether(['hooks', 'print', '--out', defaultSettings]);
@@ -345,7 +345,7 @@ describe('new write paths: hooks print --out and record --out', () => {
     assert.equal(read(other), 'important notes', 'hooks print --out overwrote an arbitrary existing file');
   });
 
-  test('hooks print --out to a directory gives a message, not a stack', notUnderRust('hooks install, uninstall and print are ported in milestone 4'), () => {
+  test('hooks print --out to a directory gives a message, not a stack', () => {
     const r = bellwether(['hooks', 'print', '--out', caller]);
     assert.notEqual(r.code, 0);
     assert.doesNotMatch(r.err, /at .*\.mjs:\d+/);
@@ -374,7 +374,7 @@ describe('M1-14/15: doctor', () => {
   const doctor = (extra = {}, args = []) => bellwether(['doctor', '--json', '--settings', mk(`d-${Math.random().toString(36).slice(2)}.json`, '{}\n'), ...args], { extraEnv: extra });
   const check = (r, n) => JSON.parse(r.out).checks.find((c) => c.name === n);
 
-  test('the old example token is refused by doctor, serve, hooks print and hooks install', notUnderRust('doctor and hooks are ported in milestone 4; serve refusing the example token is checked by crates/core token.rs'), () => {
+  test('the old example token is refused by doctor, serve, hooks print and hooks install', () => {
     const ex = { BELLWETHER_HOOK_TOKEN: 'q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh' };
     for (const a of [['doctor'], ['serve'], ['hooks', 'print'], ['hooks', 'install']]) {
       const r = bellwether(a, { extraEnv: ex });
@@ -419,7 +419,7 @@ describe('M1-14/15: doctor', () => {
       c.on('close', (code) => resolve({ code, out }));
     });
 
-  test('--hang brain: FAIL on brain naming --hang, exit 2', notUnderRust('doctor is ported in milestone 4'), async () => {
+  test('--hang brain: FAIL on brain naming --hang, exit 2', async () => {
     const b = await brainProc(['--hang']);
     try {
       const r = await doctorAsync(['doctor', '--json', '--settings', mk('hang-s.json', '{}')]);
@@ -432,7 +432,7 @@ describe('M1-14/15: doctor', () => {
     }
   });
 
-  test('--slow brain longer than the probe: reported as a problem, not a pass', notUnderRust('doctor is ported in milestone 4'), async () => {
+  test('--slow brain longer than the probe: reported as a problem, not a pass', async () => {
     const b = await brainProc(['--slow=3000']);
     try {
       const r = await doctorAsync(['doctor', '--json', '--settings', mk('slow-s.json', '{}')]);

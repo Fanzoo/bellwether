@@ -390,6 +390,11 @@ function diffVectors(installer) {
   add('edges', 'CRLF against LF diff line for line', 'a\r\nb\r\n', 'a\nb\nc\n');
   add('edges', 'no trailing newline', 'a\nb', 'a\nc');
   add('edges', 'blank lines', '\n\n\n', '\n\nx\n\n');
+  // A CR goes with the LF after it only (split(/\r?\n/)): a lone CR stays in its line.
+  add('lone CR', 'a final lone CR is part of the last line', 'a\r', 'a');
+  add('lone CR', 'a lone CR inside a line', 'a\rb\nc\n', 'a\rb\nd\n');
+  add('lone CR', 'a line that is only a CR', 'a\n\r\nb\n\r', 'a\n\r\nb\n');
+  add('lone CR', 'CR CR LF', 'x\r\r\ny\n', 'x\r\ny\n');
   add('hunks', 'two changes 6 lines apart share a hunk', lines(20), lines(20, (i) => (i === 5 || i === 11 ? `changed ${i}` : `line ${i}`)));
   add('hunks', 'two changes 7 lines apart get two hunks', lines(20), lines(20, (i) => (i === 5 || i === 12 ? `changed ${i}` : `line ${i}`)));
   add('hunks', 'a change on the first line', lines(10), lines(10, (i) => (i === 0 ? 'first' : `line ${i}`)));
