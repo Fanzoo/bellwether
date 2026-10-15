@@ -472,7 +472,11 @@ pub fn run() {
             let mut kept = privacy::load_kept(&data_dir);
             app.manage(tray::Switches { kept: std::sync::Mutex::new(kept), data_dir: data_dir.clone(), port, token: token.clone() });
             if !flags.selftest {
-                if let Err(e) = tray::build(&handle, kept, false) {
+                // Legacy agents and login items waiting for approval (plan D5): the app's
+                // own concern, so only in the app layout. The repository's strip is itself
+                // run by a legacy agent.
+                let notices = if app_layout && !flags.demo { tray::startup_notices() } else { Vec::new() };
+                if let Err(e) = tray::build(&handle, kept, false, &notices) {
                     log(&format!("warning: no tray icon ({e}); use `bellwether mute` / `bellwether show` instead"));
                     if kept.hidden {
                         // Fail open: with no tray, a strip saved hidden would be lost.

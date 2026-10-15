@@ -7,7 +7,7 @@ import path from 'node:path';
 import { describe, test } from 'node:test';
 import { loadConfig } from '../brain/config.mjs';
 import { DATA_DIR } from '../brain/util.mjs';
-import { AGENT_DIR, IMPL, REAL_HOME, TOKEN, brainCommand, isRealHome, rustEnv, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, IMPL, REAL_HOME, TOKEN, brainCommand, isRealHome, refuseRust, rustEnv, spawnBrainSync, tempDir } from './helpers.mjs';
 import { runDoctor } from './impl.mjs';
 import { ISOLATED, isProtected, protectForTest, resolveReal, takeViolations } from './setup.mjs';
 
@@ -190,5 +190,36 @@ describe('doctor and old rejections', () => {
     assert.match(old.detail, /token=9 refused since the brain started[\s\S]*none in the last 15 minutes/);
     assert.equal((await doctorAt({ accepted: 1, rejected })).status, 'WARN');
     assert.equal(await doctorAt({ accepted: 1, rejected: { origin: 0, host: 0, contentType: 0, token: 0 }, lastRejectedAt: null }), undefined);
+  });
+});
+
+describe('the harness never lets an app bundle run `autostart` (plan deviation 56)', () => {
+  // BR-3K's M6 repro: BELLWETHER_BIN as a symlink, outside any bundle, to a bundle's
+  // executable. The binary resolves its own path to find its bundle, so it would register
+  // real login items; the harness must resolve it the same way. A stand-in file, never run.
+  test('a symlink to Bellwether.app/Contents/MacOS/Bellwether is refused', () => {
+    const dir = tempDir('iso-bundle-');
+    const exe = path.join(dir, 'Bellwether.app', 'Contents', 'MacOS', 'Bellwether');
+    fs.mkdirSync(path.dirname(exe), { recursive: true });
+    fs.writeFileSync(exe, '#!/bin/sh\nexit 99\n', { mode: 0o755 });
+    const link = path.join(dir, 'bin', 'bellwether-shell');
+    fs.mkdirSync(path.dirname(link));
+    fs.symlinkSync(exe, link);
+    for (const args of [['autostart', 'install', '--write'], ['autostart', 'install', '--write', '--brain-only'], ['autostart', 'uninstall', '--write'], ['autostart']]) {
+      assert.throws(() => refuseRust(args, link), /app bundle/, args.join(' '));
+      assert.throws(() => refuseRust(args, exe), /app bundle/, args.join(' '));
+    }
+    // A chain of links, and a relative one, resolve the same way.
+    const link2 = path.join(dir, 'bin', 'again');
+    fs.symlinkSync('bellwether-shell', link2);
+    assert.throws(() => refuseRust(['autostart', 'install', '--write'], link2), /app bundle/);
+    // A development binary outside a bundle may run it; `settings` never; other commands always.
+    const dev = path.join(dir, 'bin', 'dev-bellwether-shell');
+    fs.writeFileSync(dev, '', { mode: 0o755 });
+    assert.doesNotThrow(() => refuseRust(['autostart', 'install', '--write'], dev));
+    assert.throws(() => refuseRust(['autostart', 'settings'], dev), /System Settings/);
+    assert.doesNotThrow(() => refuseRust(['doctor'], link));
+    // A path that doesn't resolve is refused rather than guessed at.
+    assert.throws(() => refuseRust(['autostart', 'status'], path.join(dir, 'missing')), /app bundle/);
   });
 });

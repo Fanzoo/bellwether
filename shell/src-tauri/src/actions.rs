@@ -14,6 +14,7 @@ use crate::login_items::{self, Service};
 
 pub const NAMES: &[&str] = &[
     "login-items-status",
+    "login-items-settings",
     "brain-agent-register",
     "brain-agent-unregister",
     "main-app-register",
@@ -54,6 +55,10 @@ fn perform(name: &str) -> (bool, String) {
         "login-items-status" => {
             let lines: Vec<String> = [Service::Brain, Service::MainApp].iter().map(|s| login_items::advice(*s, login_items::status(*s))).collect();
             (true, lines.join("; "))
+        }
+        "login-items-settings" => {
+            login_items::open_settings();
+            (true, "opened System Settings > General > Login Items & Extensions".into())
         }
         "brain-agent-register" => service(Service::Brain, true),
         "brain-agent-unregister" => service(Service::Brain, false),

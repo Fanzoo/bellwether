@@ -187,9 +187,35 @@ export function rustEnv(args, given, root = AGENT_DIR) {
 }
 
 // Commands a test never runs under rust: on this Mac they would reach the real system.
-const RUST_REFUSED = {
-  autostart: 'the Rust `autostart` registers SMAppService login items on this Mac (milestone 6 ports the command and tests it on a spare account)',
+// `autostart` reaches SMAppService only from inside an app bundle: a development binary
+// refuses install and uninstall (exit 2, nothing registered or written; plan milestone 6),
+// so it runs, except `autostart settings`, which opens System Settings on screen. Any
+// binary inside a `.app` (a BELLWETHER_BIN pointing into a bundle) is refused it.
+// The binary's real path decides (symlinks resolved, as the binary resolves its own path
+// to find its bundle): a symlink elsewhere to Bellwether.app/Contents/MacOS/Bellwether is
+// the bundle. A path that can't be resolved counts as a bundle (refused).
+const inBundle = (bin) => {
+  let real;
+  try {
+    real = fs.realpathSync(bin);
+  } catch {
+    return true;
+  }
+  return /\.app\/Contents\/MacOS\/[^/]+$/.test(real);
 };
+/** Why the Rust binary `bin` must not run `args` here, or null (exported for its test). */
+export function rustRefusal(args, bin = rustBin()) {
+  if (args[0] !== 'autostart') return null;
+  if (args.includes('settings')) return '`autostart settings` opens System Settings on this screen';
+  if (inBundle(bin)) return `the Rust \`autostart\` of an app bundle (${bin}) registers SMAppService login items on this Mac; tests run it only from a development binary, which can't`;
+  return null;
+}
+
+/** Throws when the Rust binary `bin` must not run `args` here (what brainCommand checks). */
+export function refuseRust(args, bin = rustBin()) {
+  const why = rustRefusal(args, bin);
+  if (why) throw new Error(`not run under BELLWETHER_IMPL=rust: ${why}`);
+}
 
 /**
  * The command a test runs for `bellwether <args>`:
@@ -204,8 +230,7 @@ export function brainCommand(args, { root = AGENT_DIR, shim = null, ...options }
     if (shim) return { file: '/bin/sh', args: [shim, ...args], options };
     return { file: process.execPath, args: [path.join(root, 'brain', 'cli.mjs'), ...args], options };
   }
-  const why = RUST_REFUSED[args[0]];
-  if (why) throw new Error(`not run under BELLWETHER_IMPL=rust: ${why}`);
+  refuseRust(args);
   // argv[0] `bellwether` makes the binary its CLI whatever the arguments, never the
   // strip (no arguments, or a first argument starting with "-", would start the app).
   return { file: rustBin(), args, options: { ...options, argv0: 'bellwether', env: rustEnv(args, options.env ?? process.env, root) } };

@@ -16,7 +16,7 @@ import { checkSettings, countGroups, hookBlock, install, isLegacyHandler, maskTo
 // What the app doesn't carry over from the rename (plan, Configuration; test/DIVERGENCES.md).
 const PASTURE_NAMES = notUnderRust('the app reads no PASTURE_* names and no .env (test/DIVERGENCES.md 6 and 15); `migrate` imports a legacy token');
 const PASTURE_HEADERS = notUnderRust('the Rust brain refuses X-Pasture-* headers (test/DIVERGENCES.md 4; crates/brain hook.rs `the_guards_in_order`)');
-const REPO_AGENTS = notUnderRust("the repository's LaunchAgent autostart; the app's `autostart` drives SMAppService (milestone 6), and the harness never runs it on this Mac (plan deviation 22)");
+const REPO_AGENTS = notUnderRust("the repository's LaunchAgent autostart, which writes plists; the app's `autostart` drives SMAppService and never writes ~/Library/LaunchAgents (test/DIVERGENCES.md 23, shell/src-tauri/tests/no_launchagents.rs)");
 
 /**
  * The rename from pasture to bellwether: for one release the old names (PASTURE_*
@@ -212,6 +212,21 @@ describe('pasture\'s LaunchAgents', () => {
     const name = IMPL === 'rust' ? 'legacy agents' : 'old LaunchAgents';
     assert.equal(r.checks.find((c) => c.name === name)?.status, 'WARN');
     assert.match(r.checks.find((c) => c.name === name)?.detail ?? '', /local\.pasture\.brain[\s\S]*bellwether migrate/);
+  });
+  test("the app's doctor names every legacy agent, of both names, and never asks launchd under a temp HOME", { skip: process.platform !== 'darwin' || IMPL !== 'rust' ? 'the app doctor on macOS (the Node doctor counts local.bellwether.* as its own, not legacy)' : false }, async () => {
+    const home = withOld(['local.bellwether.brain', 'local.bellwether.shell', 'local.pasture.shell']);
+    const settings = path.join(home, 'settings.json');
+    fs.writeFileSync(settings, '{}');
+    const port = await freePort();
+    const r = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: settings, configLoader: () => ({ config: { port }, usingExample: false }), home, dataDir: tempDir('rn-data-'), isStripRunning: () => false });
+    const line = r.checks.find((c) => c.name === 'legacy agents');
+    assert.equal(line?.status, 'WARN');
+    // Plists only: a temp HOME isn't the real home, so launchd (with this Mac's real agents) isn't asked.
+    assert.match(line.detail, /^local\.bellwether\.brain \(plist present\), local\.bellwether\.shell \(plist present\), local\.pasture\.shell \(plist present\): /);
+    assert.doesNotMatch(line.detail, /pid \d/);
+    fs.rmSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
+    const none = await runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: settings, configLoader: () => ({ config: { port }, usingExample: false }), home, dataDir: tempDir('rn-data-'), isStripRunning: () => false });
+    assert.equal(none.checks.find((c) => c.name === 'legacy agents'), undefined);
   });
 });
 

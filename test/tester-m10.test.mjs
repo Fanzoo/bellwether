@@ -22,7 +22,7 @@ const lint = (text) => {
   return spawnSync('plutil', ['-lint', f], { encoding: 'utf8' });
 };
 
-describe('autostart: both LaunchAgents, temp HOME only', notUnderRust("the repository's LaunchAgent autostart; the app's `autostart` drives SMAppService (milestone 6), and the harness never runs it on this Mac (plan deviation 22)"), () => {
+describe('autostart: both LaunchAgents, temp HOME only', notUnderRust("the repository's LaunchAgent autostart, which writes plists; the app's `autostart` drives SMAppService and never writes ~/Library/LaunchAgents (test/DIVERGENCES.md 23, shell/src-tauri/tests/no_launchagents.rs)"), () => {
   const mkHome = () => {
     const h = tempDir('m10-home-');
     fs.mkdirSync(path.join(h, 'Library', 'LaunchAgents'), { recursive: true });

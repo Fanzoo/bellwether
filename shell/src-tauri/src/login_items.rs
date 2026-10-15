@@ -93,19 +93,50 @@ pub fn bundle_agent_overrides() -> (Option<u16>, Option<String>) {
 /// The checks every change of a login item passes first, whichever path asks for it
 /// (the CLI, or the app's `--action` hand-off): not from an old login session (F9), and
 /// for a registration, nothing that would start with the wrong port or home (F10).
-pub fn preflight(services: &[Service], registering: bool, session: crate::identity::Session, overrides: (Option<u16>, Option<String>), env_home: Option<String>) -> Result<(), String> {
+///
+/// `agent_token` is the brain agent's own token, read from its home as the agent will read
+/// it (no environment): a registered agent without a usable one exits 3 at once and
+/// launchd starts it again every 10 s, so registering the brain is refused until `token
+/// init` has run (deviation 60).
+pub fn preflight(services: &[Service], registering: bool, session: crate::identity::Session, overrides: (Option<u16>, Option<String>), env_home: Option<String>, agent_token: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
     if session == crate::identity::Session::Stale {
         return Err(STALE_SESSION.to_string());
     }
     if registering {
         install_refusal(services, overrides, env_home)?;
+        if services.contains(&Service::Brain) {
+            agent_token()?;
+        }
     }
     Ok(())
 }
 
+/// The home the bundled brain agent uses: its plist's BELLWETHER_HOME (a test build), else
+/// ~/Library/Application Support/Bellwether under this process's HOME.
+pub fn agent_home(overrides: &(Option<u16>, Option<String>)) -> std::path::PathBuf {
+    match &overrides.1 {
+        Some(h) => std::path::PathBuf::from(h),
+        None => std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join("Library").join("Application Support").join("Bellwether"),
+    }
+}
+
+/// Whether `home` holds a hook token the brain agent can use; the refusal if not.
+pub fn agent_token_check(home: &std::path::Path) -> Result<(), String> {
+    bellwether_core::token::read(home, None).map(|_| ()).map_err(|e| {
+        format!(
+            "refused: the brain agent would start without a usable hook token ({}). It reads only {} (it gets no environment), and without a token it exits at once and launchd restarts it every 10 s. Run `bellwether token init` first{}, then install again",
+            e.message,
+            bellwether_core::token::file(home).display(),
+            if home.ends_with("Library/Application Support/Bellwether") { String::new() } else { format!(" (with BELLWETHER_HOME={})", home.display()) }
+        )
+    })
+}
+
 /// `preflight` with this process's session, bundle and environment.
 pub fn preflight_here(services: &[Service], registering: bool) -> Result<(), String> {
-    preflight(services, registering, crate::identity::session(), bundle_agent_overrides(), std::env::var("BELLWETHER_HOME").ok().filter(|h| !h.is_empty()))
+    let overrides = bundle_agent_overrides();
+    let home = agent_home(&overrides);
+    preflight(services, registering, crate::identity::session(), overrides, std::env::var("BELLWETHER_HOME").ok().filter(|h| !h.is_empty()), &|| agent_token_check(&home))
 }
 
 /// The agent plist's file name: `<bundle id>.brain.plist`.
@@ -190,12 +221,26 @@ pub fn unregister(_s: Service) -> Result<Status, String> {
 #[cfg(not(target_os = "macos"))]
 pub fn open_settings() {}
 
+/// What to do about `requiresApproval`: the item is registered, but macOS won't start it
+/// until the user turns it on.
+pub const APPROVAL: &str = "registered, but waiting for your approval: open System Settings > General > Login Items & Extensions (Login Items before macOS 15) and turn Bellwether on under \"Allow in the Background\" (`bellwether autostart settings` opens that pane). It won't start until you do";
+
+/// The exit code of `autostart install --write`, from the statuses it ended with: 2 (not
+/// running) when any item waits for approval, as macOS won't start it yet.
+pub fn install_exit(ended: &[Status]) -> i32 {
+    if ended.contains(&Status::RequiresApproval) {
+        bellwether_brain::exit::NOT_RUNNING
+    } else {
+        bellwether_brain::exit::OK
+    }
+}
+
 /// What to tell the user about a status, in one line.
 pub fn advice(s: Service, st: Status) -> String {
     match st {
         Status::Enabled => format!("{}: enabled", s.name()),
         Status::NotRegistered => format!("{}: off (`bellwether autostart install --write` turns it on)", s.name()),
-        Status::RequiresApproval => format!("{}: waiting for your approval in System Settings > General > Login Items (turn Bellwether on under \"Allow in the Background\")", s.name()),
+        Status::RequiresApproval => format!("{}: {APPROVAL}", s.name()),
         // macOS reports notFound for a service it has never had registered, as well as
         // for a plist missing from the bundle (measured on macOS 26.6).
         Status::NotFound => format!("{}: off; macOS has never had it registered (`bellwether autostart install --write`). If it still says notFound after that, the bundle lacks the item: rebuild with `node scripts/build-app.mjs`", s.name()),
@@ -207,6 +252,22 @@ pub fn advice(s: Service, st: Status) -> String {
 mod tests {
     use super::*;
     use crate::identity::Session;
+
+    #[test]
+    fn the_brain_agent_needs_a_token_in_its_own_home() {
+        let home = std::env::temp_dir().join(format!("bw-agent-token-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let e = agent_token_check(&home).unwrap_err();
+        assert!(e.contains("Run `bellwether token init` first (with BELLWETHER_HOME=") && e.contains("restarts it every 10 s"), "{e}");
+        std::fs::write(home.join("hook-token"), "short\n").unwrap();
+        assert!(agent_token_check(&home).is_err(), "an unusable token is refused too");
+        std::fs::write(home.join("hook-token"), "testTokenNotReal_abcdefghijklmnopq\n").unwrap();
+        assert!(agent_token_check(&home).is_ok());
+        assert_eq!(agent_home(&(Some(47431), Some("/tmp/x".into()))), std::path::PathBuf::from("/tmp/x"));
+        assert!(agent_home(&(None, None)).ends_with("Library/Application Support/Bellwether"));
+        let _ = std::fs::remove_dir_all(home);
+    }
 
     #[test]
     fn test_builds_never_start_the_app_at_login() {
@@ -231,14 +292,21 @@ mod tests {
         // The app's --action hand-off and the CLI both end in register/unregister, which
         // call preflight first: a test build's app item and an old session are refused.
         let test_build = (Some(47418), Some("/tmp/bw-m1".to_string()));
-        let e = preflight(&[Service::MainApp], true, Session::Current, test_build.clone(), None).unwrap_err();
+        let ok = || Ok(());
+        let no_token = || Err("refused: no token".to_string());
+        let e = preflight(&[Service::MainApp], true, Session::Current, test_build.clone(), None, &ok).unwrap_err();
         assert!(e.contains("--brain-only"), "{e}");
-        assert!(preflight(&[Service::Brain], true, Session::Current, test_build.clone(), None).is_ok());
+        assert!(preflight(&[Service::Brain], true, Session::Current, test_build.clone(), None, &ok).is_ok());
         for registering in [true, false] {
-            let e = preflight(&[Service::Brain], registering, Session::Stale, (None, None), None).unwrap_err();
+            let e = preflight(&[Service::Brain], registering, Session::Stale, (None, None), None, &ok).unwrap_err();
             assert!(e.contains("predates your last login"), "{e}");
         }
-        assert!(preflight(&[Service::MainApp], false, Session::Current, test_build, None).is_ok(), "unregistering is never refused in a current session");
+        assert!(preflight(&[Service::MainApp], false, Session::Current, test_build.clone(), None, &no_token).is_ok(), "unregistering is never refused in a current session");
+        // No usable token in the agent's home: registering the brain is refused, the app
+        // item alone and unregistering are not.
+        assert_eq!(preflight(&[Service::Brain], true, Session::Current, test_build.clone(), None, &no_token).unwrap_err(), "refused: no token");
+        assert!(preflight(&[Service::Brain], false, Session::Current, test_build.clone(), None, &no_token).is_ok());
+        assert!(preflight(&[Service::MainApp], true, Session::Current, (None, None), None, &no_token).is_ok());
         let src = include_str!("login_items.rs");
         let body = |name: &str| src.split(&format!("pub fn {name}(s: Service)")).nth(1).unwrap().split("pub fn").next().unwrap().to_string();
         assert!(body("register").contains("super::preflight_here(&[s], true)?"), "register runs the checks");

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, FIXTURES, notUnderRust, request, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, IMPL, notUnderRust, request, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 const ENV_WRITER = notUnderRust('the .env writer is retired with the Node CLI; the app writes a token file (test/DIVERGENCES.md 6; token.test.mjs runs `token init` against both)');
 
@@ -401,11 +401,13 @@ describe('first run, on a fresh clone (M10)', () => {
     assert.equal(fs.existsSync(path.join(repo, '.env')), false, 'no second .env');
     fs.rmSync(hub, { recursive: true, force: true });
   });
-  test('autostart install without --write previews and writes nothing under HOME', notUnderRust("the repository's LaunchAgent autostart; the app's `autostart` drives SMAppService (milestone 6), and the harness never runs it on this Mac (plan deviation 22)"), () => {
+  test('autostart install without --write previews and writes nothing under HOME', () => {
     const r = cli(['autostart', 'install']);
-    // the copy has no built shell, so this is also the "strip not built" failure: exit 2 with a cause
+    // node: the copy has no built shell, so this is also the "strip not built" failure.
+    // rust: a development binary outside Bellwether.app has no login items (test/DIVERGENCES.md 23).
+    // Either way: exit 2 with a cause, and no LaunchAgents folder.
     assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(r.stdout + r.stderr, /shell|build|bellwether-shell/i);
+    assert.match(r.stdout + r.stderr, IMPL === 'rust' ? /not running from Bellwether\.app[\s\S]*nothing was registered or written/ : /shell|build|bellwether-shell/i);
     assert.doesNotMatch(r.stderr, /\n\s+at .*\.mjs/);
     assert.equal(fs.existsSync(path.join(HOME, 'Library', 'LaunchAgents')), false);
   });

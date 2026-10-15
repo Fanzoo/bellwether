@@ -314,6 +314,33 @@ does, what Rust does and why, and names the test.
 - **Pinned by:** `test/hooks.test.mjs`, "a settings file nested 1100 deep" (each brain its
   own answer); `crates/core/src/lossless.rs`, `bad_json_is_refused`.
 
+### 23. `autostart` drives SMAppService and never writes a LaunchAgent
+
+- **Node:** `autostart install --write` writes `local.bellwether.brain` and `.shell` plists into
+  `~/Library/LaunchAgents` and loads them with `launchctl`; `uninstall` boots them out and
+  deletes them; `status` reads them. Its doctor has `autostart`, `old LaunchAgents` and `strip
+  running` lines.
+- **Rust:** `autostart status|install|uninstall` registers the bundle's two login items through
+  SMAppService (plan D5): the brain agent, whose plist lives inside the signed bundle, and the
+  app. Nothing is written to `~/Library/LaunchAgents`. Outside Bellwether.app (a development
+  binary) `install` and `uninstall` refuse, exit 2, before any preview: there are no login
+  items to change. Registering the brain agent is refused (exit 3) until its home has a usable
+  hook token. `requiresApproval` makes `install --write` exit 2 and offers System
+  Settings' Login Items pane (default no) (`autostart settings` opens it). The repository's LaunchAgents are
+  found and named (doctor's `legacy agents`, the tray), never written, loaded or removed; that
+  is the migration's (plan D9, milestone 8).
+- **Tests retired with the Node CLI** (skipped under rust with this reason): `test/tester-m3.test.mjs`
+  "autostart", `test/tester-m10.test.mjs` "autostart: both LaunchAgents", `test/rename.test.mjs`'s
+  repository-agent tests.
+- **Pinned by:** `shell/src-tauri/tests/no_launchagents.rs` (the real binary under a temp HOME,
+  every `autostart`, hook, token, doctor and migrate command and the login-item actions; the
+  LaunchAgents folder unchanged, byte for byte and by mtime); `shell/src-tauri/src/cli.rs`,
+  `autostart_outside_the_app_changes_nothing_and_says_why` and
+  `waiting_for_approval_says_what_to_do_and_offers_the_pane`; `crates/brain/src/legacy.rs` (what
+  counts as a legacy agent); `test/tester-regression.test.mjs`, "autostart install without
+  --write…" (both brains: exit 2, no LaunchAgents folder); `test/rename.test.mjs`, "the app's
+  doctor names every legacy agent…".
+
 ## Turned out not to differ
 
 - **Lone surrogates in hook payloads** (listed as expected for M3). The Rust brain keeps every

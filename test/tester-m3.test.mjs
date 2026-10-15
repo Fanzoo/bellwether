@@ -210,7 +210,7 @@ describe('the pet expression evaluator cannot run code', () => {
   });
 });
 
-describe('autostart (temp HOME only; launchctl is never run)', notUnderRust("the repository's LaunchAgent autostart; the app's `autostart` drives SMAppService (milestone 6), and the harness never runs it on this Mac (plan deviation 22)"), () => {
+describe('autostart (temp HOME only; launchctl is never run)', notUnderRust("the repository's LaunchAgent autostart, which writes plists; the app's `autostart` drives SMAppService and never writes ~/Library/LaunchAgents (test/DIVERGENCES.md 23, shell/src-tauri/tests/no_launchagents.rs)"), () => {
   const never = () => {
     throw new Error('launchctl was called');
   };

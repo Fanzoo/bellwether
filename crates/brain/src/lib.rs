@@ -19,6 +19,7 @@ pub mod conns;
 pub mod doctor;
 mod hook;
 pub mod home;
+pub mod legacy;
 pub mod migrate;
 pub mod pets;
 mod state;

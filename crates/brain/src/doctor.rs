@@ -28,7 +28,7 @@ use crate::{BIND_HOST, DOCTOR_PING};
 pub const REJECTION_RECENT_MS: f64 = 15.0 * 60.0 * 1000.0;
 
 /// The four LaunchAgent labels of the repository versions (plan D5).
-pub const LEGACY_LABELS: [&str; 4] = ["local.bellwether.brain", "local.bellwether.shell", "local.pasture.brain", "local.pasture.shell"];
+pub use crate::legacy::LABELS as LEGACY_LABELS;
 
 /// Where Claude Code reads managed (policy) settings on this OS.
 pub fn managed_settings() -> Option<PathBuf> {
@@ -156,19 +156,15 @@ pub fn checks(input: &Input) -> Vec<Check> {
     if let Some(c) = config {
         out.push(pets_check(&input.home, c));
     }
-    let legacy = legacy_agents(&input.user_home);
-    if !legacy.is_empty() {
-        add(
-            &mut out,
-            "legacy agents",
-            "WARN",
-            format!(
-                "{} in {}: the repository version's login items. Two brains on one port fight over it; `bellwether migrate` (the app's migration, milestone 8) moves them aside",
-                legacy.join(", "),
-                input.user_home.join("Library").join("LaunchAgents").display()
-            ),
-            OK,
-        );
+    let (legacy, unsure) = crate::legacy::scan_here_reporting_unknown(&input.user_home);
+    if let Some(c) = legacy_check(&legacy, &input.user_home) {
+        out.push(c);
+    }
+    if let Some((_, why)) = unsure.first() {
+        add(&mut out, "legacy agents", "INFO", format!("couldn't tell whether launchd has {} loaded ({why}); their plists aren't in ~/Library/LaunchAgents. `launchctl list | grep -E 'local\\.(bellwether|pasture)'` shows them", unsure.iter().map(|(l, _)| *l).collect::<Vec<_>>().join(", ")), OK);
+    }
+    if let Some(why) = crate::legacy::unreadable(&input.user_home) {
+        add(&mut out, "legacy agents", "WARN", format!("{why}: a repository LaunchAgent there (local.bellwether.* or local.pasture.*) can't be seen, and it would start a second brain at login. Check the folder's permissions (`ls -ld ~/Library/LaunchAgents`)"), OK);
     }
     out
 }
@@ -548,10 +544,25 @@ fn pets_check(home: &Path, c: &Config) -> Check {
     }
 }
 
-/// LaunchAgents of the repository versions still in ~/Library/LaunchAgents.
-pub fn legacy_agents(user_home: &Path) -> Vec<String> {
-    let dir = user_home.join("Library").join("LaunchAgents");
-    LEGACY_LABELS.iter().filter(|l| dir.join(format!("{l}.plist")).exists()).map(|l| l.to_string()).collect()
+/// The `legacy agents` line (plan D5): a WARN naming each legacy agent and its state, or
+/// nothing when there is none. A loaded one holds its port now; a plist alone comes back
+/// at the next login.
+pub fn legacy_check(agents: &[crate::legacy::Agent], user_home: &Path) -> Option<Check> {
+    if agents.is_empty() {
+        return None;
+    }
+    let loaded = agents.iter().any(|a| a.loaded.is_loaded());
+    Some(Check::new(
+        "legacy agents",
+        "WARN",
+        format!(
+            "{}: the repository version's login items ({}). {}; `bellwether migrate` (the app's migration, milestone 8) moves them aside. The app never stops or removes them itself",
+            crate::legacy::summary(agents),
+            user_home.join("Library").join("LaunchAgents").display(),
+            if loaded { "A legacy brain and this app's brain fight over one port" } else { "At your next login they start again, and a legacy brain would fight this app's brain over one port" }
+        ),
+        OK,
+    ))
 }
 
 /// `doctor --e2e`: one real, cheap `claude -p` run (haiku) with bellwether's hooks from a

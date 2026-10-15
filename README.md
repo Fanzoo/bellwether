@@ -694,13 +694,37 @@ Developer ID build's brain ("Launch Constraint Violation"). If that happens anyw
 `autostart uninstall --write`, then `install --write` again.
 
 More about `autostart`:
+- `autostart status` prints `enabled`, `off` (`notRegistered`, or `notFound` for an item
+  macOS has never had registered), `requiresApproval` or `unavailable` for each item.
+- **Waiting for approval.** macOS may register an item but not start it until you allow
+  it. `install --write` and `status` then say so, exit 2 (install) and, at a terminal, ask
+  whether to open System Settings > General > Login Items & Extensions (Login Items before
+  macOS 15); only `y` opens it. Turn Bellwether on under "Allow in the Background", then run `autostart
+  status` again. `bellwether autostart settings` opens that pane any time; doctor shows the
+  item as a WARN, and the strip's menu-bar sheep has an "Approve the … in Login Items…"
+  line that opens it.
+- `install` refuses the brain agent until its home has a hook token (`bellwether token
+  init`, with `BELLWETHER_HOME` for a test build): without one the agent would exit at once
+  and launchd would restart it every 10 s.
 - A test build (`--test-port`/`--test-home`) may only use `--brain-only`: a test build's
   strip never starts at login. (Before milestone 5 the reason was that such a strip would
   use the live defaults, port 47417; it now takes the bundle's test port and home.)
 - `uninstall --write` also stops this bundle's running strip.
+- Outside Bellwether.app (a development binary from `target-dev/`) `install` and
+  `uninstall` refuse with exit 2: there are no login items to change.
 - In a terminal opened before your last login (a herdr or tmux server that outlived a
   logout), macOS won't answer about login items. `autostart` and `doctor` then say so:
   open a new terminal window.
+
+**Legacy agents.** The repository version's LaunchAgents (`local.bellwether.brain` and
+`.shell`, or pasture's `local.pasture.brain` and `.shell`) run a second brain that fights
+the app's for port 47417. Doctor's `legacy agents` line and a line at the top of the
+strip's menu-bar menu name each one that is still there: its plist in
+`~/Library/LaunchAgents` (it loads again at the next login), or loaded in launchd for your
+user (with its pid), even with its plist deleted. The app only looks (`launchctl print`);
+it never stops, loads, moves or deletes them. Moving them aside is the migration's job
+(`bellwether migrate --to-app`, milestone 8; until then, the distribution plan's hand
+switch-over, milestone 5). launchd is asked only when HOME is your real home folder.
 
 ## Licensing
 
@@ -731,7 +755,7 @@ with `node scripts/third-party.mjs` after changing a dependency (offline;
 | `bellwether shell start` / `stop` / `restart` | The strip in the background. With its LaunchAgent installed: `launchctl kickstart` / `kill TERM` / `kickstart -k`. Otherwise bellwether runs the release build itself (pid in `data/shell.pid`), and stops only that exact binary. Use `restart` after a config change |
 | `bellwether mute` / `bellwether unmute` | Do-not-disturb through the brain, the same as the tray's Mute; kept across restarts |
 | `bellwether show` / `bellwether hide` | Show or hide the strip, the same as the tray's Hide; a running shell follows within a second; kept across restarts |
-| `bellwether autostart install\|uninstall [--write] [--brain-only]`, `autostart status` | The brain's and the strip's LaunchAgents (macOS). Preview by default |
+| `bellwether autostart install\|uninstall [--write] [--brain-only]`, `autostart status` | The brain's and the strip's LaunchAgents (macOS). Preview by default. In Bellwether.app: its two login items (SMAppService), plus `autostart settings` |
 | `bellwether pets fetch [<pet>]` | Downloads the pinned pet art into `data/pets/` and checks its sha256. The art is never committed |
 | `bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]` | Moves a pasture install over (token, config, colours and slots, hook entries, LaunchAgents). Preview unless `--write`; see "Coming from pasture" |
 | `bellwether hooks print [--out <file> [--force]]` | The hook block as a standalone settings file, to stdout or (0600) to a file. Replaces only an earlier bellwether hooks file unless `--force`; never a Claude Code settings file |
@@ -797,8 +821,9 @@ oracle until the Rust brain replaces it:
   `shell/src-tauri/target-dev/debug/bellwether-shell`, which must not be older than its
   sources. Under rust the helper makes the test's data dir the binary's
   `BELLWETHER_HOME` and passes the test's config as `BELLWETHER_CONFIG`, refuses anything
-  that would use port 47417, and never runs `autostart` (it would register login items on
-  this Mac).
+  that would use port 47417, and runs `autostart` only from a development binary (outside a
+  bundle it can't reach SMAppService; a binary inside a `.app` is refused it, and so is
+  `autostart settings`, which opens System Settings).
 - Tests that check the brain's parts in process take them from `test/impl.mjs`: brain/*.mjs
   under node, and under rust the Rust brain, called synchronously through its hidden
   `__session` command (one call per line, over two FIFOs); `startBrain` is then a Rust

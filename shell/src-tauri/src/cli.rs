@@ -37,7 +37,9 @@ const USAGE: &str = "usage (the app's built-in CLI; milestones 1, 3, 4 and 5 of 
   bellwether autostart install [--write] [--brain-only] [--via-app]
   bellwether autostart uninstall [--write] [--brain-only] [--via-app]
                                                          dry run unless --write; --via-app hands the call
-                                                         to Bellwether.app instead of making it here
+                                                         to Bellwether.app instead of making it here.
+                                                         Never writes ~/Library/LaunchAgents (SMAppService)
+  bellwether autostart settings                          open System Settings > General > Login Items
   bellwether version
   bellwether help
 
@@ -150,8 +152,20 @@ fn autostart(args: &[String]) -> CliResult {
     if words.len() > 1 {
         return Err(bad(format!("unexpected argument {:?}", words[1])));
     }
-    if !matches!(sub, "status" | "install" | "uninstall") {
-        return Err(bad(format!("unknown autostart command {sub:?} (status, install, uninstall)")));
+    if !matches!(sub, "status" | "install" | "uninstall" | "settings") {
+        return Err(bad(format!("unknown autostart command {sub:?} (status, install, uninstall, settings)")));
+    }
+    if sub != "install" && sub != "uninstall" && has(&set, "write") {
+        return Err(bad("--write is for install and uninstall"));
+    }
+    if sub != "install" && sub != "uninstall" && has(&set, "brain-only") {
+        return Err(bad("--brain-only is for install and uninstall"));
+    }
+    // Outside Bellwether.app there are no login items to change: say so before any
+    // preview, rather than preview something that can't happen (a development binary
+    // never reaches SMAppService, so nothing is registered and nothing is written).
+    if !crate::identity::in_app_bundle() && (sub == "install" || sub == "uninstall") {
+        return Err((NOT_THE_APP.to_string(), exit::NOT_RUNNING));
     }
     // From a terminal that predates the user's last login, SMAppService answers notFound
     // for everything and registrations can't be trusted (M1 finding F9).
@@ -164,15 +178,24 @@ fn autostart(args: &[String]) -> CliResult {
         login_items::preflight_here(&services, true).map_err(|m| (m, exit::BAD_CONFIG))?;
     }
     match sub {
-        "status" => {
-            if has(&set, "write") {
-                return Err(bad("--write is for install and uninstall"));
+        "settings" => {
+            if has(&set, "via-app") {
+                return via_app("login-items-settings");
             }
+            login_items::open_settings();
+            println!("opened System Settings > General > Login Items & Extensions (Login Items before macOS 15)");
+            Ok(exit::OK)
+        }
+        "status" => {
             if has(&set, "via-app") {
                 return via_app("login-items-status");
             }
-            for s in [Service::Brain, Service::MainApp] {
-                println!("{}", login_items::advice(s, login_items::status(s)));
+            let statuses: Vec<Status> = [Service::Brain, Service::MainApp].iter().map(|s| login_items::status(*s)).collect();
+            for (s, st) in [Service::Brain, Service::MainApp].iter().zip(&statuses) {
+                println!("{}", login_items::advice(*s, *st));
+            }
+            if statuses.contains(&Status::RequiresApproval) {
+                offer_settings();
             }
             Ok(exit::OK)
         }
@@ -185,6 +208,7 @@ fn autostart(args: &[String]) -> CliResult {
                 return Ok(exit::OK);
             }
             let mut code = exit::OK;
+            let mut ended: Vec<Status> = Vec::new();
             for s in &services {
                 if has(&set, "via-app") {
                     let action = match (s, on) {
@@ -196,20 +220,26 @@ fn autostart(args: &[String]) -> CliResult {
                     if via_app(action)? != exit::OK {
                         code = exit::UNEXPECTED;
                     }
+                    // The app reports in words; read the status back here.
+                    ended.push(login_items::status(*s));
                     continue;
                 }
                 let r = if on { login_items::register(*s) } else { login_items::unregister(*s) };
                 match r {
                     Ok(st) => {
                         println!("{}", login_items::advice(*s, st));
-                        if st == Status::RequiresApproval {
-                            login_items::open_settings();
-                        }
+                        ended.push(st);
                     }
                     Err(e) => {
                         eprintln!("bellwether: {}: {e}", s.name());
                         code = exit::UNEXPECTED;
                     }
+                }
+            }
+            if on && ended.contains(&Status::RequiresApproval) {
+                offer_settings();
+                if code == exit::OK {
+                    code = login_items::install_exit(&ended);
                 }
             }
             // Unregistering doesn't quit what is already running: stop this bundle's own
@@ -220,8 +250,39 @@ fn autostart(args: &[String]) -> CliResult {
             }
             Ok(code)
         }
-        _ => Err(bad(format!("unknown autostart command {sub:?} (status, install, uninstall)"))),
+        _ => Err(bad(format!("unknown autostart command {sub:?} (status, install, uninstall, settings)"))),
     }
+}
+
+/// What `autostart install|uninstall` says outside Bellwether.app.
+pub const NOT_THE_APP: &str = "not running from Bellwether.app: login items belong to the app bundle (SMAppService), so a development binary has none to change, and nothing was registered or written. Build the app with `node scripts/build-app.mjs` and run its `Contents/MacOS/Bellwether autostart …`. The repository's own LaunchAgents are `./bellwether autostart` in the checkout";
+
+/// After a `requiresApproval`: offer to open the Login Items pane. Asked only when a
+/// person is at the terminal (stdin and stdout both a terminal); otherwise the command
+/// that opens it is printed. Never opens anything unasked.
+fn offer_settings() {
+    use std::io::IsTerminal;
+    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    if !interactive {
+        println!("`bellwether autostart settings` opens System Settings > General > Login Items & Extensions");
+        return;
+    }
+    print!("Open System Settings > General > Login Items & Extensions now? [y/N] ");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let mut answer = String::new();
+    let _ = std::io::stdin().read_line(&mut answer);
+    if wants_settings(&answer) {
+        login_items::open_settings();
+        println!("opened it: turn Bellwether on under \"Allow in the Background\", then run `bellwether autostart status`");
+    } else {
+        println!("left closed; `bellwether autostart settings` opens it later");
+    }
+}
+
+/// The answer to [`offer_settings`]'s question: only an explicit "y" or "yes" opens the
+/// pane; an empty line, Ctrl-D (end of input) or anything else leaves it closed.
+pub fn wants_settings(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 /// Whether a command line is the app (the strip), not `serve` or a CLI command.
@@ -636,6 +697,50 @@ mod tests {
         let (status, detail) = agent_down_hint(47418, 47418);
         assert_eq!(status, "WARN");
         assert!(detail.contains("Launch Constraint Violation"));
+    }
+
+    #[test]
+    fn autostart_outside_the_app_changes_nothing_and_says_why() {
+        // This test binary is outside any bundle: install and uninstall refuse before a
+        // preview, with exit 2; status reports "unavailable"; bad usage is still exit 3.
+        for sub in ["install", "uninstall"] {
+            for extra in [&[][..], &["--write"][..], &["--write", "--brain-only"][..]] {
+                let mut a = s(&[sub]);
+                a.extend(s(extra));
+                let (message, code) = autostart(&a).unwrap_err();
+                assert_eq!(code, exit::NOT_RUNNING, "{sub} {extra:?}");
+                assert!(message.starts_with("not running from Bellwether.app") && message.contains("nothing was registered or written"), "{message}");
+            }
+        }
+        assert_eq!(autostart(&s(&["status", "--write"])).unwrap_err().1, exit::BAD_CONFIG);
+        assert_eq!(autostart(&s(&["settings", "--brain-only"])).unwrap_err().1, exit::BAD_CONFIG);
+        assert_eq!(autostart(&s(&["sideways"])).unwrap_err().1, exit::BAD_CONFIG);
+        assert!(USAGE.contains("bellwether autostart settings"));
+    }
+
+    #[test]
+    fn waiting_for_approval_says_what_to_do_and_offers_the_pane() {
+        for s in [Service::Brain, Service::MainApp] {
+            let line = login_items::advice(s, Status::RequiresApproval);
+            assert!(line.contains("System Settings > General > Login Items") && line.contains("Allow in the Background") && line.contains("bellwether autostart settings"), "{line}");
+            let (status, detail) = login_verdict(s, Status::RequiresApproval, Session::Current, None);
+            assert_eq!((status, detail.as_str()), ("WARN", line.as_str()), "doctor reports it as a WARN with the same advice");
+        }
+        assert_eq!(login_items::install_exit(&[Status::Enabled, Status::Enabled]), exit::OK);
+        assert_eq!(login_items::install_exit(&[Status::Enabled, Status::RequiresApproval]), exit::NOT_RUNNING);
+        // Only an explicit yes opens it: Enter, Ctrl-D (read_line gives ""), anything else: no.
+        for yes in ["y\n", "Y", "yes\n", " Yes \n"] {
+            assert!(wants_settings(yes), "{yes:?}");
+        }
+        for no in ["", "\n", "n\n", "No", "yeah", "y y", "ok", "\u{4}"] {
+            assert!(!wants_settings(no), "{no:?}");
+        }
+        // The offer comes after install and status; it asks first and only at a terminal.
+        let src = include_str!("cli.rs");
+        let body = src.split("fn autostart(").nth(1).unwrap().split("\nfn ").next().unwrap();
+        assert_eq!(body.matches("offer_settings();").count(), 2);
+        let offer = src.split("fn offer_settings(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(offer.find("is_terminal()").unwrap() < offer.find("read_line").unwrap() && offer.find("read_line").unwrap() < offer.find("open_settings()").unwrap());
     }
 
     #[test]

@@ -1956,7 +1956,7 @@ Builds:
 - killing the app with `kill -9` stops the brain child within a second; a launchd brain
   survives it.
 
-#### M5 status (developer, 2026-10-14): done locally, except what needs a live session; CI not yet run
+#### M5 status (developer, 2026-10-14; maintainer by-hand checks in part, 2026-10-15): done locally; live sessions shown by hand; some by-hand checks still open
 
 Built:
 - **Two layouts in the shell** (`shell/src-tauri/src/settings.rs`; deviation 45):
@@ -2077,11 +2077,13 @@ The repository layout (how a rebuilt repository strip stays safe; deviation 45):
   148 ms after its parent got `kill -9`.
 
 Progress against **Done when**:
-- [ ] On a machine without Node in PATH, the installed `.app` shows sheep for a live Claude Code
-  session, a bubble, lambs and click-to-focus. Shown here with recorded sessions on the signed
-  test bundle with Node off PATH (above); a live session and a real click are by-hand checks 1,
-  3, 6 and 12–13 below.
-- [ ] The README's by-hand checks 1–11 with the app: the checklist below, for the maintainer.
+- [x] On a machine without Node in PATH, the `.app` shows sheep for a live Claude Code session, a
+  bubble, lambs and click-to-focus. Shown with recorded sessions on the signed test bundle with
+  Node off PATH (above), then by the maintainer with real sessions (by-hand results below: checks
+  1, 3, 6). It was a test build on port 47418, not an installed release build; click-to-focus was
+  shown in iTerm2 only (herdr and Terminal.app, checks 12–13, are still open).
+- [ ] The README's by-hand checks 1–11 with the app: 1, 3, 6 and 8 passed (below); 2, 4, 5, 7, 9,
+  10 and 11 are still open.
 - [x] The strip capability still lists exactly the six permissions: cargo
   `the_strip_capability_lists_exactly_the_six_permissions` (and the Node source scans).
 - [x] `kill -9` of the app stops its brain child within a second (97 ms; 148 ms for the
@@ -2232,6 +2234,21 @@ Use a test build so nothing touches the live install: `node scripts/build-app.mj
 14. **Afterwards**: `"$B" shell stop` (with `BELLWETHER_HOME`), `tccutil reset AppleEvents
     com.fanzootechnology.bellwether`, and delete `/tmp/bw-m5`.
 
+**Results (maintainer, 2026-10-15).** A test build on port 47418 with home `/tmp/bw-m5`; real
+Claude Code sessions started with Node off PATH and `--settings /tmp/bw-m5/hooks.json`. Every
+check that was run passed:
+- 1: two sessions gave two sheep in two colours;
+- 6: a permission prompt gave an alert with a bubble, and an Explore subagent showed a lamb;
+- 3: clicking a sheep brought its iTerm2 tab forward, after an Automation prompt naming
+  Bellwether;
+- 8: the tray's Mute, Hide and Quit worked, and Quit stopped its brain child.
+
+The AppleEvents grant was reset afterwards (step 14).
+
+Still open (not run by hand): 2 click-through, 4 restart keeping colours and slots, 5 and 9 full
+screen, 7 capture and sharing, 10 fade and clicks, 11 two monitors, 12 a click inside herdr, 13
+Terminal.app.
+
 #### M5 switch-over: moving the live repository install to the app by hand (not run)
 
 For the maintainer, when he chooses to, before M8 automates it. It keeps the same token and
@@ -2308,6 +2325,224 @@ and tray line for legacy `local.bellwether.*` and `local.pasture.*` agents.
 - with a `local.bellwether.brain` plist loaded, the tray and doctor name it;
 - no file is ever written to `~/Library/LaunchAgents` by the app (test with a temp
   HOME).
+
+#### M6 status (developer, 2026-10-15): done locally, except what needs a release build or a reboot; CI not yet run
+
+Built:
+- **`autostart`** (`shell/src-tauri/src/cli.rs`, `login_items.rs`; SMAppService directly, per
+  F5, with `--via-app` kept): the preflight guards of M1 review D2 stay on every path (CLI and
+  `--action`), and so do F7's ad-hoc refusal, F10's test-build refusal and F11's strip stop.
+  New:
+  - outside Bellwether.app, `install` and `uninstall` refuse with exit 2 before any preview
+    ("not running from Bellwether.app … nothing was registered or written"); they used to
+    preview "would register (now unavailable)" (deviation 54);
+  - `requiresApproval`: the line says what to do (System Settings > General > Login Items &
+    Extensions, "Allow in the Background", and that it won't start until then); `install
+    --write` and `status` then offer to open the pane, asking at a terminal and printing the
+    command otherwise; `install --write` exits 2 while an item waits (deviation 54);
+  - `autostart settings` opens that pane, and `--via-app` hands it to the app (action
+    `login-items-settings`) (deviation 53);
+  - doctor's `login: brain` / `login: app` lines show `requiresApproval` as a WARN with the
+    same advice (unchanged M1 code, now tested for it).
+- **Legacy agents** (`crates/brain/src/legacy.rs`, new; deviation 55): the four labels of D5.
+  One counts when its plist is in `~/Library/LaunchAgents` (loaded or not), or when launchd has
+  the label loaded in this user's GUI domain (plist deleted or not). launchd is asked with
+  `launchctl print gui/<uid>/<label>` (read-only), and an answer counts only if its first line
+  is exactly that target, so another user's domain never matters; it is asked only when HOME is
+  the real home. Doctor's `legacy agents` WARN names each one with its state
+  (`local.bellwether.brain (loaded, pid N)`, `… (plist only: launchd loads it at your next
+  login)`, `… (loaded, pid N; its plist is gone, so it stops at logout)`).
+- **The tray** (`tray.rs`): at the app's start (app layout only; not the repository strip,
+  `--demo` or `--selftest`) one greyed line naming the legacy agents, and a line per login item
+  waiting for approval that opens the Login Items pane (deviation 58). Both go to `shell.log`
+  (`tray: notice: …`).
+- **No writes to `~/Library/LaunchAgents`**: `shell/src-tauri/tests/no_launchagents.rs` runs the
+  real binary (a development build, outside a bundle) under a temp HOME through every
+  `autostart` form, `token init`, `hooks install/uninstall --write`, `doctor`, `migrate
+  --write`, `shell stop` and the five login-item actions, with the folder missing and with
+  three legacy plists in it, and checks it unchanged (entries, bytes, mtimes; not created when
+  missing). With a scratch mutant that writes a plist from `autostart`, it fails ("empty:
+  ~/Library/LaunchAgents changed"). `legacy.rs` and `tray.rs` have source checks that they only
+  read (deviation 59).
+- **The harness** (`test/helpers.mjs`): `autostart` now runs under rust for a development
+  binary, which can't reach SMAppService; a `BELLWETHER_BIN` inside a `.app`, and `autostart
+  settings`, are still refused (deviation 56). tester-regression's "autostart install without
+  --write…" runs under both brains; rename.test has a rust test for both names' plists.
+  test/DIVERGENCES.md 23.
+
+Proved on a signed test bundle (`node scripts/build-app.mjs --test-port 47431 --test-home
+<scratch>/bw-m6`: Developer ID, hardened runtime, not notarized; codesign "valid on disk /
+satisfies its Designated Requirement"; entitlements only `automation.apple-events`; the build
+ended `TEST BUILD (brain agent on port 47431, …)`). Every command with `BELLWETHER_HOME=<scratch>/bw-m6`
+and the real HOME, from a current login session (`launchctl managername`: Aqua):
+- before: `autostart status` → `brain agent: off …`, `app at login: off …`;
+- `autostart install --write` → `refused: this is a test build (its brain agent runs on port
+  47431), but the app started at login gets no environment … Use --brain-only with test builds`,
+  exit 3 (F10);
+- the app's own side, launched through LaunchServices (`open -n -g -a … --args --action
+  main-app-register`): its outcome file says `"ok":false`, `app at login: refused: this is a test
+  build …` (M1 review D2, on the action path);
+- `autostart install --write --brain-only --via-app` → `brain agent: enabled (by the app)`, exit 0;
+  `autostart status` → `brain agent: enabled`, `app at login: off`; `/health` on 47431 from pid
+  49274, `ps`: `Bellwether serve --port 47431` with ppid 1; `launchctl print`: `state = running`,
+  `program identifier = Contents/MacOS/Bellwether (mode: 2)`;
+- `doctor --settings <scratch>/settings.json`: `PASS login: brain`, `INFO login: app … off`, and
+  `WARN legacy agents  local.bellwether.brain (loaded, pid 25449), local.bellwether.shell
+  (loaded, pid 32594): the repository version's login items (~/Library/LaunchAgents). A legacy
+  brain and this app's brain fight over one port; …` (the maintainer's live agents, read with
+  `launchctl print` only);
+- the tray: `shell start` (the test strip on 47431, its own single-instance lock beside the live
+  strip's) logged `warning: legacy agents: local.bellwether.brain (loaded, pid 25449),
+  local.bellwether.shell (loaded, pid 32594); …`, `tray: notice: Legacy agents:
+  local.bellwether.brain (running), local.bellwether.shell (running) (see bellwether doctor)` and
+  `tray: 1 notice(s), Mute, Hide the strip, Show labels, Quit` (no "no tray icon" warning); then
+  `brain on port 47431: … (this app's login agent)`. `shell stop` → `stopped the strip`; the
+  launchd brain kept answering. The menu itself was not looked at (no screenshot, no
+  Accessibility scripting on the maintainer's screen);
+- `autostart uninstall --write --brain-only` (the direct path) → `brain agent: off`; `status` off
+  and off; `launchctl print gui/501/com.fanzootechnology.bellwether.brain` → `Could not find
+  service`; pid 49274 gone; nothing listening on 47431;
+- `ls -laT ~/Library/LaunchAgents` before and after: identical (the two `local.bellwether.*`
+  plists still Oct 11 09:11:09; no new file).
+
+Progress against **Done when**:
+- [ ] `autostart install --write`, then `status` shows `enabled` for both. The brain item: shown
+  above (both paths, test build). The app item: a test build refuses it (F10), so only a release
+  build can show it; unit tests cover the paths (`install_refusal`, `every_path_gets_the_same_checks`,
+  `waiting_for_approval_says_what_to_do_and_offers_the_pane`). By-hand step 3 below.
+- [ ] A reboot brings both up. Not done here (it would restart the maintainer's Mac). M1's
+  logout/login brought the brain agent and, with a notarized build, the app item up (M1 by-hand
+  results 1 and 1.6). By-hand step 5 below.
+- [ ] `uninstall --write` removes both from Login Items. The brain item: shown above (`Could not
+  find service`). Both, with the System Settings listing: by-hand step 6.
+- [x] With a `local.bellwether.brain` plist loaded, the tray and doctor name it: above, with the
+  maintainer's live agents (doctor's line and the strip's tray notice, from its log). The other
+  shapes (a plist not loaded, loaded with its plist deleted, `local.pasture.*`, another user's
+  domain, a temp HOME) are unit-tested in `crates/brain/src/legacy.rs` and by rename.test under
+  rust.
+- [x] Nothing is written to `~/Library/LaunchAgents` by the app: `no_launchagents.rs` under a
+  temp HOME (and its mutant), and the live run above.
+
+Counts and checks (this Mac, 2026-10-15, every run under `caffeinate -dims`):
+- `npm test`: 998 tests, 996 pass, 0 fail, 2 skipped (the private recordings, and rename.test's new
+  rust-only doctor test). 997 at M5, plus that test.
+- `npm run test:cargo`: 154 passed, 0 failed (146 at M5: `legacy.rs` 4, tray 1, cli 2,
+  `no_launchagents.rs` 1); with `--features bellwether-shell/conformance`: 156 (148 at M5).
+- `npm run test:rust` (conformance binary rebuilt first): exit 0, node 29 of 29 files green, rust
+  29 of 29 (tester-regression 25/25 + 2 skipped, was 24/24 + 3: the autostart test now runs;
+  rename 10/10 + 12 skipped).
+- `npm run differential` (seed 1): env, redact, normalise and diff 0 differences in 10⁵ each; json
+  0 unexplained (22 336 explained, integer-like keys); fixture 0 (21); `node --env-file` 0
+  unexplained.
+- `npm run test:vectors`: all 60 files match. `third-party.mjs --check`: up to date (no new crate).
+- `cargo check -p bellwether-core -p bellwether-brain --all-targets` for `x86_64-unknown-linux-gnu`
+  and `x86_64-pc-windows-msvc`: clean, no warnings.
+- Release check (`--target-dir shell/src-tauri/target-dev/release-check`): `__fixture`, `__json`,
+  `__diff`, `__session` print `unknown command`, exit 1.
+  `shell/src-tauri/target/release/bellwether-shell` kept sha256 `35ceb697…ae22` throughout.
+
+Not done or not proved:
+- the app login item registered, listed in System Settings, brought up by a reboot, and removed
+  (release build only; by-hand steps below);
+- `requiresApproval` live: macOS gave `enabled` at once here, so the advice, the exit code, the
+  terminal offer and the tray's approval line are unit-tested only, and `autostart settings`
+  (it opens System Settings) was not run;
+- the tray line seen in the menu (only its log line was read);
+- CI.
+
+#### M6 by-hand checks (maintainer, with a release build: during the switch-over or M8)
+
+A test build can't do these (F10). Use the release build of the M5 switch-over (step 1:
+`node scripts/build-app.mjs --notarize`, last line `release build: no test port or home in the
+bundle`, copied to `/Applications`), `A=/Applications/Bellwether.app`, `B="$A/Contents/MacOS/Bellwether"`,
+in a terminal opened after your last login (not a herdr pane from before it, F9). Steps 1–5 fit
+into the switch-over. Step 6 removes the app's login items and stops the brain: **do not run it
+except as the switch-over rollback** (or on a spare account).
+
+1. **Before anything moves** (after switch-over step 4): `ls -laT ~/Library/LaunchAgents > /tmp/la-before.txt`.
+   `"$B" doctor` should show `WARN legacy agents  local.bellwether.brain (loaded, pid <the Node
+   brain>), local.bellwether.shell (loaded, pid <the repository strip>)`.
+2. **The tray line** (optional, before the swap): `"$B" shell start`. Two strips now draw the
+   same flock for a moment. Click the app's menu-bar sheep: its first line is greyed, `Legacy
+   agents: local.bellwether.brain (running), local.bellwether.shell (running) (see bellwether
+   doctor)`. Then `"$B" shell stop`.
+3. **Both items** (switch-over step 5.3): `"$B" autostart install --write` prints `brain agent:
+   enabled` and `app at login: enabled`, exit 0. Then `"$B" autostart status` shows `enabled`
+   twice. If either says **waiting for your approval**, the command exits 2 and asks whether to
+   open System Settings (default no): type y, turn Bellwether on under "Allow in the Background", and run
+   `status` again (both `enabled`). Note which happened. Note also whether the strip started at
+   once from the app item (M1 showed only the brain agent starting at registration); if not,
+   switch-over step 5.5 starts it.
+4. **System Settings > General > Login Items & Extensions**: Bellwether under "Allow in the
+   Background" (on), and Bellwether under "Open at Login" (the app item). Note the wording.
+5. **Reboot** (Apple menu > Restart), log in, open a new terminal:
+   1. `curl -s http://127.0.0.1:47417/health`: `"name":"bellwether"`; `ps -o ppid,args -p <its pid>`:
+      `1 /Applications/Bellwether.app/Contents/MacOS/Bellwether serve`.
+   2. The strip is up by itself: sheep above the Dock for any running session, and `ps -axo
+      pid,ppid,args | grep "[/]Applications/Bellwether.app/Contents/MacOS/Bellwether$"` shows it.
+   3. `"$B" doctor`: `PASS login: brain`, `PASS login: app`, and no `legacy agents` line (the old
+      plists were moved in switch-over step 6).
+   4. If the brain doesn't answer and Console shows "Launch Constraint Violation" (F7: the stale
+      ad-hoc app record), run `"$B" autostart uninstall --write`, then `install --write`, and
+      note it.
+6. **Removal.**
+
+   **DO NOT RUN, except as the switch-over rollback (step 9) or on a spare user account.** It
+   stops the brain your hooks use: every Claude Code session prints hook errors until something
+   answers on 47417 again.
+
+   `"$B" autostart uninstall
+   --write` prints `brain agent: off` and `app at login: off`, and `stopped the running strip
+   (pid N)`. `launchctl print gui/$(id -u)/com.fanzootechnology.bellwether.brain` says `Could not
+   find service`; System Settings no longer lists Bellwether as on. Then either finish the
+   rollback, or `install --write` again.
+7. **Nothing written**: `ls -laT ~/Library/LaunchAgents | diff /tmp/la-before.txt -` shows only
+   what you did by hand (the two `local.bellwether.*` plists moved away in switch-over step 6);
+   no file from the app.
+
+
+#### M6 review fixes (BR-3K: "ship", 2026-10-15)
+
+BR-3K added `crates/brain/tests/tester_m6_legacy.rs` (hostile plist shapes: malformed, a dangling
+symlink, a directory, a FIFO, lookalike names, mode 000, an unsearchable folder; hostile
+`launchctl print` answers; temp and symlinked homes). It runs in `npm run test:cargo` (a
+workspace member's integration test).
+- **The harness hole (deviation 56).** `inBundle` used `path.resolve`, so a `BELLWETHER_BIN`
+  symlinked to `Bellwether.app/Contents/MacOS/Bellwether` passed as a development binary, while
+  the binary canonicalises its own path and would have registered real login items. It now uses
+  `fs.realpathSync` (an unresolvable path counts as a bundle), behind an exported `refuseRust`
+  that `brainCommand` calls. isolation.test, "a symlink to Bellwether.app/Contents/MacOS/Bellwether
+  is refused": BR-3K's repro, a chain of links, the bundle path itself, a missing path; with
+  `path.resolve` put back it fails (`Missing expected exception: autostart install --write`).
+- **By-hand step 6** is now a bold "DO NOT RUN, except as the switch-over rollback" line.
+- **The pane offer defaults to no** (`[y/N]`): only `y` or `yes` (any case, trimmed) opens it;
+  Enter, Ctrl-D (end of input) and anything else don't. Tested (`wants_settings`).
+- **No token in the agent's home** (deviation 60): registering the brain agent is refused.
+- **`launchctl print` is bounded**: 2 s (`LAUNCHCTL_TIMEOUT`), then the child it started is
+  stopped by its handle and the answer is unknown: with a plist, doctor says "launchd didn't say
+  whether it is loaded (launchctl print didn't answer within 2 s)"; without one, an INFO
+  `legacy agents` line names the labels it couldn't check. Tested with `/bin/sleep 30` (stopped
+  at 0.3 s).
+- **An unsearchable LaunchAgents folder** gives a WARN `legacy agents` line, "can't read
+  ~/Library/LaunchAgents (…): a repository LaunchAgent there … can't be seen", for a folder that
+  can't be listed (modes 000, 300) or searched (600). `legacy::unreadable`, tested. `scan`
+  itself is unchanged (BR-3K's test pins that a loaded agent still counts there).
+
+After the fixes (this Mac, 2026-10-15, under `caffeinate -dims`):
+- `npm test`: 999 tests, 997 pass, 0 fail, 2 skipped (998 before: isolation's symlink test).
+- `npm run test:cargo`: 162 passed, 0 failed; with `--features bellwether-shell/conformance`: 164
+  (154 and 156 before: BR-3K's 4, `legacy.rs` 3, `login_items.rs` 1).
+- `npm run test:rust` (conformance binary rebuilt): exit 0, node 29 of 29, rust 29 of 29
+  (isolation 9/9 under both).
+- `npm run differential` (seed 1): env, redact, normalise, diff 0 differences in 10⁵ each; json 0
+  unexplained (22 336 explained); fixture 0 (21); `node --env-file` 0 unexplained.
+- `npm run test:vectors`: all 60 files match. `third-party.mjs --check`: up to date.
+- The cross-target check of core and brain (Linux, Windows): clean, no warnings (the brain crate
+  rechecked).
+- Release check: `__fixture`, `__json`, `__diff`, `__session` print `unknown command`, exit 1.
+  `shell/src-tauri/target/release/bellwether-shell` kept sha256 `35ceb697…ae22`.
+- Not rerun live after the fixes: the test bundle (the token refusal, the 2 s bound and the
+  unreadable-folder line are unit-tested; the live run above predates them and had a token).
 
 ### M7. Onboarding window
 
@@ -2995,3 +3230,71 @@ Recorded by the developer while building M5 (2026-10-14).
     - Done: the runtime identifier the lock is named after is `<id>.p<port>` for any port but
       47417, unchanged on 47417 (so the lock matches every earlier build on the live port).
       Two strips on one port still exclude each other; strips on different ports coexist.
+
+Recorded by the developer while building M6 (2026-10-15).
+
+53. **`autostart settings`, a new subcommand.**
+    - Plan (D5): on `requiresApproval`, `autostart status` and onboarding offer
+      `openSystemSettingsLoginItems`.
+    - True: a CLI can only offer by asking, and a script must never get a window it didn't ask
+      for.
+    - Done: after `install --write` or `status` finds an item waiting, the CLI asks "Open System
+      Settings > General > Login Items & Extensions now? [Y/n]" when stdin and stdout are both a
+      terminal, and otherwise prints the command that opens it: `bellwether autostart settings`
+      (also `--via-app`, the action `login-items-settings`). M1 opened the pane unasked after a
+      registration that needed approval; that is gone.
+54. **Exit codes of `autostart`.**
+    - `install --write` exits 2 ("not running") when an item ends `requiresApproval`: macOS
+      won't start it until the user acts, so a script must not read it as done.
+    - Outside Bellwether.app, `install` and `uninstall` exit 2 before any preview, saying
+      nothing was registered or written. Before, the preview said "would register … (now
+      unavailable)" with exit 0 and `--write` failed per item with exit 1. `status` still prints
+      `unavailable` with exit 0.
+55. **What counts as a legacy agent, and how launchd is asked.**
+    - Plan (D5): the app shows a line "if any are still loaded".
+    - True: a plist that isn't loaded (booted out by hand, or the user hasn't logged in since)
+      comes back at the next login and fights the app's brain then; a loaded agent whose plist
+      was deleted runs until logout. M4's doctor looked at plists only.
+    - Done: an agent counts when its plist is present or launchd has it loaded, and the line
+      says which (`crates/brain/src/legacy.rs`). launchd is asked by `launchctl print
+      gui/<uid>/<label>` (read-only; four calls, about 3 ms each), for this user's GUI domain
+      only (where a LaunchAgent loads at login); an answer counts only when its first line is
+      exactly that target. Not asked: other users' domains, `user/<uid>` and `system` (a brain
+      loaded there by hand would still hold the port; the migration's port check in M8 names
+      whatever holds 47417). Only the four labels count: an agent under another label that
+      runs a repository brain (the hub-labelled ones `migrate` finds by what they run) isn't
+      named here. Asked only when HOME is the real home (the passwd entry), the
+      same rule as `migrate`'s brain ping: under a temp HOME the real launchd state would be
+      the wrong answer, and the test harness always uses a temp HOME.
+56. **The harness runs `autostart` under rust (deviation 22, narrowed).** A development binary
+    can't reach SMAppService (`login_items::service` refuses outside a bundle, before any
+    call), so the harness allows it; it still refuses `autostart` for a `BELLWETHER_BIN`
+    inside a `.app`, and `autostart settings` always (it opens System Settings).
+57. **No spare macOS user account.** The test plan puts M6 on a spare account. There is none
+    here, so: the temp-HOME test, unit tests for every status and refusal, and the brain item
+    live from a signed test bundle with `--brain-only` on this account (F10 refuses the app item
+    for test builds). The app item, its Login Items listing and the reboot are the
+    maintainer's by-hand checks (M6 status).
+58. **The tray's notices.**
+    - Plan (D5): one line in the tray for legacy agents.
+    - Done: that line, greyed (information only; the app never stops them), plus one line per
+      login item waiting for approval, which opens the Login Items pane (D5's "offer" in the
+      app). Found once at the app's start, as D5 says, in the app layout only: the repository's
+      strip is itself started by a legacy agent, and `--demo` and `--selftest` are for checks.
+59. **The "nothing written to LaunchAgents" test is a cargo test**
+    (`shell/src-tauri/tests/no_launchagents.rs`), not a Node test: the Node CLI's `autostart`
+    writes LaunchAgents by design, so the test has nothing to run against Node. It runs the
+    binary's CLI and its `--action` side, not the strip (a window); the strip's only new code
+    there is the startup check, which `legacy.rs`'s `scanning_only_reads` and tester-m3's
+    tray.rs scan cover.
+60. **`autostart install` refuses the brain agent without a token in its home** (BR-3K's M6
+    review). The agent gets no environment and reads only `<its home>/hook-token`; without a
+    usable one it exits 3 at once and launchd restarts it every 10 s, and nothing said so.
+    - Choice: refuse rather than warn. A registered agent that can never run is worse than no
+      agent, and the fix (`bellwether token init`) is one command the message names (with
+      `BELLWETHER_HOME=<home>` for a test build).
+    - The check is in `login_items::preflight` (registering the brain only; the app item and
+      unregistering aren't affected), so the CLI, `--via-app` and the app's `--action` all get
+      it. It reads the agent's home as the agent will: the bundle plist's BELLWETHER_HOME, else
+      `~/Library/Application Support/Bellwether` under HOME, never the environment's token. A
+      dry-run `install` says the same, since it runs the preflight too.
