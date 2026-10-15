@@ -74,6 +74,7 @@ test('pets import (the app, plan D8): checked, copied, pinned, and a file that f
   const lock = JSON.parse(fs.readFileSync(path.join(data, 'pets.user.lock.json'), 'utf8'));
   assert.equal(lock.pets.mypet.sha256, createHash('sha256').update(fs.readFileSync(src)).digest('hex'), 'pinned by its sha256');
   assert.match(r.stdout, /"animationMap"[\s\S]*"walk": "walk"[\s\S]*"graze": "eat"/, 'a proposed map, by name matching');
+  assert.match(r.stdout, /\{\n {2}"walk": "walk",\n/, 'the map keeps its line breaks (milestone 5: they printed as "?")');
   assert.equal(cli(src).status, 3, 'an imported pet is replaced only with --force');
   assert.equal(cli(src, '--force').status, 0);
   for (const [why, text] of [

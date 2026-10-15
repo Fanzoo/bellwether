@@ -353,10 +353,36 @@ fn base64_prefix(text: &str, n: usize) -> Option<Vec<u8>> {
     (out.len() >= n).then_some(out)
 }
 
-/// Text from an imported file made safe to print: control characters (C0, DEL, C1) and
-/// bidirectional overrides become `?`, so a title can't drive the terminal.
+/// Unicode 16's format characters (general category Cf): soft hyphen, bidi marks,
+/// overrides and isolates, zero-width space, joiners, word joiner, invisible operators, the
+/// byte-order mark, interlinear annotation, the tag characters and the rest.
+const FORMAT: &[(u32, u32)] = &[
+    (0x00AD, 0x00AD), (0x0600, 0x0605), (0x061C, 0x061C), (0x06DD, 0x06DD), (0x070F, 0x070F),
+    (0x0890, 0x0891), (0x08E2, 0x08E2), (0x180E, 0x180E), (0x200B, 0x200F), (0x202A, 0x202E),
+    (0x2060, 0x2064), (0x2066, 0x206F), (0xFEFF, 0xFEFF), (0xFFF9, 0xFFFB), (0x110BD, 0x110BD),
+    (0x110CD, 0x110CD), (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A),
+    (0xE0001, 0xE0001), (0xE0020, 0xE007F),
+];
+
+/// Characters that draw as nothing but aren't Cf: the combining grapheme joiner, the Hangul
+/// fillers, the Khmer inherent vowels, the braille blank and the unassigned rest of the tag
+/// block.
+const INVISIBLE: &[(u32, u32)] = &[
+    (0x034F, 0x034F), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x2800, 0x2800), (0x3164, 0x3164),
+    (0xFFA0, 0xFFA0), (0xE0000, 0xE0000), (0xE0002, 0xE001F),
+];
+
+/// Whether `c` must not reach a terminal from an imported file: controls (Cc), format
+/// characters (Cf), the line and paragraph separators (Zl, Zp), and the invisibles above.
+pub fn unprintable(c: char) -> bool {
+    let n = c as u32;
+    c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') || FORMAT.iter().chain(INVISIBLE).any(|(lo, hi)| (*lo..=*hi).contains(&n))
+}
+
+/// Text from an imported file made safe to print: every `unprintable` character becomes
+/// `?`, so a title can't drive the terminal or hide what it says.
 pub fn printable(s: &str) -> String {
-    s.chars().map(|c| if c.is_control() || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}') { '?' } else { c }).collect()
+    s.chars().map(|c| if unprintable(c) { '?' } else { c }).collect()
 }
 
 /// `pets.animationMap.<name>` by name matching: for each behaviour, the first of its names
@@ -388,6 +414,12 @@ fn read_lock(home: &Path) -> Obj {
 
 /// Whether an imported pet still matches its pin.
 pub fn verify(home: &Path, name: &str) -> Result<(), String> {
+    load(home, name).map(|_| ())
+}
+
+/// An imported pet's file, read once and checked against its pin: what the strip loads
+/// (milestone 5), so the bytes checked are the bytes used.
+pub fn load(home: &Path, name: &str) -> Result<Vec<u8>, String> {
     let file = pet_file(home, name);
     let lock = read_lock(home);
     let Some(want) = lock.get(name).and_then(|e| e.get("sha256").as_str().map(str::to_string)) else {
@@ -397,7 +429,7 @@ pub fn verify(home: &Path, name: &str) -> Result<(), String> {
     if sha256_hex(&bytes) != want {
         return Err(format!("{} changed after it was imported (its sha256 no longer matches {}), so the strip won't load it. Import the file again: `bellwether pets import <file> --name {name} --force`", file.display(), lock_file(home).display()));
     }
-    Ok(())
+    Ok(bytes)
 }
 
 /// What `pets import` did.
@@ -498,6 +530,20 @@ mod tests {
         assert!(check(pet("<animation id=\"9\" a=\"1\" a=\"2\"/>", "<tilesx>8</tilesx><tilesy>4</tilesy>").as_bytes()).unwrap_err().contains("twice"));
         let p = check(pet("", "<tilesx>8</tilesx><tilesy>4</tilesy>").replace("T &amp; co", "&#27;]0;owned&#7;\u{202e}x").as_bytes()).unwrap();
         assert_eq!(printable(&p.title), "?]0;owned??x");
+        // The M4 review's follow-up: the Arabic letter mark, the zero-width space and the
+        // byte-order mark are neutralised too; ordinary text, accents and emoji are kept.
+        assert_eq!(printable("a\u{061C}b\u{200B}c\u{FEFF}d\u{2067}e\u{200F}f"), "a?b?c?d?e?f");
+        assert_eq!(printable("Schäfchen 🐑 x"), "Schäfchen 🐑 x");
+        // BR-3K's M5 list, and the category rule behind it: Cc, Cf, Zl, Zp and the invisibles.
+        for c in ['\u{2028}', '\u{2029}', '\u{2060}', '\u{00AD}', '\u{180E}', '\u{200C}', '\u{200D}', '\u{034F}', '\u{2800}', '\u{E0000}', '\u{E0001}', '\u{E0041}', '\u{E007F}', '\u{0085}', '\u{009B}', '\u{FFF9}', '\u{1D173}', '\u{3164}'] {
+            assert_eq!(printable(&format!("a{c}b")), "a?b", "U+{:04X}", c as u32);
+        }
+        assert_eq!(printable("A B\u{E0041}C"), "A B?C", "a tag character can't hide ASCII");
+        for c in ['é', 'ß', '中', 'ا', '\u{0301}', '\u{FE0F}', '\u{00A0}', '\u{3000}', '\u{E0080}'] {
+            assert!(!unprintable(c), "U+{:04X} is visible", c as u32);
+        }
+        let p = check(pet("", "<tilesx>8</tilesx><tilesy>4</tilesy>").replace("T &amp; co", "&#x61C;&#x200B;&#xFEFF;ok").as_bytes()).unwrap();
+        assert_eq!(printable(&p.title), "???ok");
     }
 
     #[test]

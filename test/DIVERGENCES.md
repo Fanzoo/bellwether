@@ -258,15 +258,24 @@ does, what Rust does and why, and names the test.
 - **Pinned by:** `test/pets.test.mjs`, "pets import" (each brain its own answer);
   `crates/brain/src/pets.rs` tests.
 
-### 19. `shell start|stop|restart` are milestone 5's
+### 19. `shell start|stop|restart` control Bellwether.app's strip
 
 - **Node:** starts, stops and restarts the repository's strip (its LaunchAgent, or a
   detached copy of `target/release/bellwether-shell`); `shell --dev` builds it.
-- **Rust:** the arguments are checked as Node checks them (`shell bogus`, `--dev`,
-  `--release`: exit 3); the actions say they arrive with milestone 5 (exit 1), and `shell
-  dock-permission` that it becomes `permissions accessibility` (milestone 6).
+- **Rust (since milestone 5):** the arguments are checked as Node checks them (`shell bogus`,
+  `--dev`, `--release`: exit 3). The actions control the strip of the app the CLI belongs
+  to: `start` opens it through LaunchServices (`open -g -a <bundle>`, passing
+  `BELLWETHER_HOME` on) unless its strip already runs; `stop` sends SIGTERM to that
+  bundle's running strip, found by the exact executable path (never another copy, never a
+  repository's `bellwether-shell`), and waits up to 5 s; `restart` is both. A brain started
+  by launchd keeps running; a brain the strip started stops with it. Outside an app bundle
+  (a development binary) they refuse with exit 2 and point at the repository's
+  `./bellwether shell …`. `shell dock-permission` says it becomes `permissions
+  accessibility` (milestone 6).
 - **Pinned by:** `test/shellctl.test.mjs`, "`bellwether shell bogus` and `shell start
-  --dev` are refused".
+  --dev` are refused" and "`shell stop` outside the app" (each brain its own answer);
+  `shell/src-tauri/src/cli.rs`, `unknown_commands_exit_1_and_bad_flags_exit_3`. The app's
+  start, stop and restart were run on a signed test bundle (plan, milestone 5 status).
 
 ### 20. `token rotate` rewrites the hook entries
 

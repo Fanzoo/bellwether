@@ -450,15 +450,15 @@ async fn run(bound: Bound, opts: Options, stop: Option<tokio::sync::oneshot::Rec
 }
 
 /// A brain the app started carries BELLWETHER_PARENT_PID: when that process is gone (even
-/// by SIGKILL), this brain stops within a second. Never set for a brain started by launchd
-/// or by hand.
+/// by SIGKILL), this brain stops within a second (it looks every 250 ms). Never set for a
+/// brain started by launchd or by hand.
 async fn parent_watchdog(log: Logger) {
     #[cfg(unix)]
     {
         let parent = std::env::var("BELLWETHER_PARENT_PID").ok().and_then(|p| p.parse::<i32>().ok()).filter(|p| *p > 1);
         if let Some(parent) = parent {
             loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_millis(250)).await;
                 if unsafe { libc::getppid() } != parent {
                     log.log(&format!("the app that started this brain (pid {parent}) is gone; stopping"));
                     return;

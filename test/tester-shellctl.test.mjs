@@ -11,7 +11,7 @@ import { AGENT_DIR, notUnderRust, tempDir } from './helpers.mjs';
 import { DEFAULT_PALETTE, OLD_DEFAULT_PALETTE, withDefaults } from './impl.mjs';
 
 // What the app replaces: the repository's strip control and its LaunchAgent lines in doctor.
-const REPO_SHELL = notUnderRust("the repository's `shell start|stop|restart` (its LaunchAgent, or a detached copy of target/release/bellwether-shell); the app's strip control arrives in milestone 5");
+const REPO_SHELL = notUnderRust("the repository's `shell start|stop|restart` (its LaunchAgent, or a detached copy of target/release/bellwether-shell); the app's `shell start|stop|restart` controls Bellwether.app's own strip (test/DIVERGENCES.md 19)");
 const REPO_AGENTS = notUnderRust("doctor's lines for the repository's LaunchAgents (`autostart`, `strip running`); the app's doctor reports its login items (shell/src-tauri cli.rs `login_verdict`) and leftover LaunchAgents (`legacy agents`, rename.test.mjs)");
 
 /**
@@ -291,7 +291,7 @@ describe('the single-instance bypass (M10-14: only --locate bypasses it; --selft
     assert.doesNotMatch(lib, /if [^\n{]*selftest[^\n{]*\{\s*builder = builder\.plugin/, '--selftest must stay under single-instance');
   });
   test('--locate returns before any window, tray or brain is created; every other mode that opens a window is under the plugin', () => {
-    const setup = lib.slice(lib.indexOf('.setup(move |app|'), lib.indexOf('.build(tauri::generate_context!())'));
+    const setup = lib.slice(lib.indexOf('.setup(move |app|'), lib.indexOf('.build(context)'));
     const locateAt = setup.indexOf('flags.locate');
     const exitAt = setup.indexOf('handle.exit(0);\n                return Ok(());');
     const openAt = setup.indexOf('strips::open(');

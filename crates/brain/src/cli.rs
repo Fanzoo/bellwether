@@ -775,8 +775,9 @@ fn pets(args: &[String]) -> CmdResult {
     let Some(file) = a.positional.first() else { return Err(bad(PETS_USAGE)) };
     let home = home::dir();
     let r = crate::pets::import(&home, &user_path(file), a.value("name"), a.has("force"))?;
-    // Names come from the file: printed with control characters replaced.
-    let map = crate::pets::printable(&json::stringify_pretty(&Js::Obj(r.map.clone()), "  "));
+    // Names come from the file: printed with control characters replaced, line by line, so
+    // the layout's own line breaks stay (JSON already escapes C0 controls inside strings).
+    let map = json::stringify_pretty(&Js::Obj(r.map.clone()), "  ").lines().map(crate::pets::printable).collect::<Vec<_>>().join("\n");
     out(&format!(
         "{} {} ({}, {}×{} tiles, {} animations) to {}, pinned in {} (sha256 {}…).\nThe strip draws it with \"pets\": {{ \"default\": \"{}\" }} in config.json; a proposed \"animationMap\" entry for it, by name matching:\n\"{}\": {map}\n",
         if r.replaced { "replaced" } else { "imported" },

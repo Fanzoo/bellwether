@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::login_items::{self, Service, Status};
 use bellwether_brain::exit;
 
-const USAGE: &str = "usage (the app's built-in CLI; milestones 1, 3 and 4 of the distribution plan):
+const USAGE: &str = "usage (the app's built-in CLI; milestones 1, 3, 4 and 5 of the distribution plan):
   bellwether serve [--port <n>] [--hang | --slow=<ms>]   run the brain in the foreground
   bellwether record [--out <file>]                       serve, and record event shapes (no content) to recordings/
   bellwether status [--watch] [--json]                   the flock as text (long-polls /state with --watch)
@@ -32,7 +32,7 @@ const USAGE: &str = "usage (the app's built-in CLI; milestones 1, 3 and 4 of the
   bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]
                                                          move a repository install's token, config, colours and hooks
                                                          into the app's files (preview unless --write)
-  bellwether shell start | stop | restart                the strip (milestone 5)
+  bellwether shell start | stop | restart                Bellwether.app's strip (stop leaves a launchd brain running)
   bellwether autostart status                            the two login items (brain agent, app at login)
   bellwether autostart install [--write] [--brain-only] [--via-app]
   bellwether autostart uninstall [--write] [--brain-only] [--via-app]
@@ -230,27 +230,39 @@ pub fn is_app_mode(args: &str) -> bool {
     crate::dispatch::mode_of(&words) == crate::dispatch::Mode::App && !words.iter().any(|w| w == "--action")
 }
 
+/// This bundle's running strips (app mode, not `serve`, the CLI or `--action`), never
+/// this process or the ones that started it.
+fn own_strips() -> Vec<i32> {
+    let me = std::process::id() as i32;
+    let parent = unsafe { libc::getppid() };
+    crate::identity::bundle_processes().into_iter().filter(|(pid, _, a)| *pid != me && *pid != parent && is_app_mode(a)).map(|(p, _, _)| p).collect()
+}
+
+/// SIGTERM to these pids (this bundle's strips), then up to 5 s for each to go. The
+/// strip quits as from the menu: it stops a brain it started. Returns (pid, stopped).
+fn stop_strips(strips: &[i32]) -> Vec<(i32, bool)> {
+    for pid in strips {
+        unsafe { libc::kill(*pid, libc::SIGTERM) };
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline && strips.iter().any(|p| unsafe { libc::kill(*p, 0) } == 0) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    strips.iter().map(|p| (*p, unsafe { libc::kill(*p, 0) } != 0)).collect()
+}
+
 /// After `uninstall --write`: SIGTERM to this bundle's running strip (when the app item
 /// was removed), then report anything of this bundle still running. Only processes whose
 /// executable is this exact bundle's, never this process or the ones that started it.
 fn stop_own_instances(app_removed: bool) {
     let me = std::process::id() as i32;
     let parent = unsafe { libc::getppid() };
-    let procs: Vec<(i32, i32, String)> = crate::identity::bundle_processes().into_iter().filter(|(pid, _, _)| *pid != me && *pid != parent).collect();
-    let strips: Vec<i32> = procs.iter().filter(|(_, _, a)| is_app_mode(a)).map(|(p, _, _)| *p).collect();
     if app_removed {
-        for pid in &strips {
-            unsafe { libc::kill(*pid, libc::SIGTERM) };
-        }
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while std::time::Instant::now() < deadline && strips.iter().any(|p| unsafe { libc::kill(*p, 0) } == 0) {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        for pid in &strips {
-            if unsafe { libc::kill(*pid, 0) } == 0 {
-                println!("the strip (pid {pid}) didn't quit within 5 s; quit it from the menu-bar sheep, or `kill {pid}`");
-            } else {
+        for (pid, stopped) in stop_strips(&own_strips()) {
+            if stopped {
                 println!("stopped the running strip (pid {pid})");
+            } else {
+                println!("the strip (pid {pid}) didn't quit within 5 s; quit it from the menu-bar sheep, or `kill {pid}`");
             }
         }
     }
@@ -300,15 +312,86 @@ fn via_app(action: &str) -> CliResult {
 
 const SHELL_USAGE: &str = "usage: bellwether shell start | stop | restart (the strip of Bellwether.app; `shell --dev` is a repository workflow, not the app's)";
 
-/// `bellwether shell start | stop | restart`. The arguments are checked as the Node CLI
-/// checks them; the actions themselves arrive with milestone 5, when the strip runs on
-/// the Rust brain.
+/// `bellwether shell start | stop | restart`: Bellwether.app's strip (test/DIVERGENCES.md
+/// 19). The arguments are checked as the Node CLI checks them.
 fn shell(args: &[String]) -> CliResult {
     let a = bellwether_core::cliargs::parse(args, &[], &[], 1).map_err(|e| (e.message, e.code))?;
     match a.positional.first().map(String::as_str) {
-        Some(sub @ ("start" | "stop" | "restart")) => Err((format!("`bellwether shell {sub}` arrives with milestone 5 (the strip on the Rust brain). Until then, open Bellwether.app, or quit it from its menu-bar sheep"), exit::UNEXPECTED)),
+        Some(sub @ ("start" | "stop" | "restart")) => shell_control(sub),
         Some("dock-permission") => Err(("`shell dock-permission` becomes `bellwether permissions accessibility` in the app (milestone 6): macOS must attribute the request to Bellwether, not to this terminal".into(), exit::UNEXPECTED)),
         _ => Err(bad(SHELL_USAGE)),
+    }
+}
+
+/// - start: through LaunchServices (`open -g -a <this bundle>`), so macOS treats it as the
+///   app (its permissions, its Dock-less menu-bar sheep), unless this bundle's strip already
+///   runs. BELLWETHER_HOME, if set, is passed on.
+/// - stop: SIGTERM to this bundle's running strip, by the executable's exact path (never
+///   another copy of the app, never a repository's bellwether-shell); it quits as from the
+///   menu, stopping a brain it started. A brain started by launchd keeps running.
+/// - restart: stop, then start.
+fn shell_control(sub: &str) -> CliResult {
+    let Some(bundle) = crate::identity::bundle_path() else {
+        return Err(("`bellwether shell start|stop|restart` controls Bellwether.app's strip, and this is a development binary outside the app. In a checkout, the repository's strip is `./bellwether shell start|stop|restart`".into(), exit::NOT_RUNNING));
+    };
+    if sub != "start" {
+        let running = own_strips();
+        for (pid, stopped) in stop_strips(&running) {
+            if !stopped {
+                return Err((format!("the strip (pid {pid}) didn't quit within 5 s; quit it from the menu-bar sheep, or `kill {pid}`"), exit::UNEXPECTED));
+            }
+            println!("stopped the strip (pid {pid})");
+        }
+        if sub == "stop" {
+            if running.is_empty() {
+                println!("the strip was not running");
+            }
+            return Ok(exit::OK);
+        }
+    } else if let Some(pid) = own_strips().first() {
+        println!("the strip is already running (pid {pid})");
+        return Ok(exit::OK);
+    }
+    let mut cmd = std::process::Command::new("/usr/bin/open");
+    cmd.args(["-g", "-a"]).arg(&bundle);
+    if let Some(h) = std::env::var_os("BELLWETHER_HOME").filter(|h| !h.is_empty()) {
+        let mut kv = std::ffi::OsString::from("BELLWETHER_HOME=");
+        kv.push(h);
+        cmd.arg("--env").arg(kv);
+    }
+    let status = cmd.status().map_err(|e| (format!("couldn't run open: {e}"), exit::UNEXPECTED))?;
+    if !status.success() {
+        return Err((format!("`open` couldn't launch {}", bundle.display()), exit::UNEXPECTED));
+    }
+    // A strip that finds another one holding its single-instance lock (another copy of the
+    // app on the same port) hands over and quits at once; so a pid counts as started only
+    // once it is still alive 1.5 s after it appeared.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let mut quit: Vec<i32> = Vec::new();
+    while std::time::Instant::now() < deadline {
+        let fresh: Vec<i32> = own_strips().into_iter().filter(|p| !quit.contains(p)).collect();
+        if let Some(&pid) = fresh.first() {
+            std::thread::sleep(Duration::from_millis(1500));
+            if unsafe { libc::kill(pid, 0) } == 0 {
+                println!("{} the strip (pid {pid}); it starts a brain of its own only if none answers", if sub == "restart" { "restarted" } else { "started" });
+                return Ok(exit::OK);
+            }
+            quit.push(pid);
+            continue;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err((start_failure(&bundle, &quit), exit::NOT_RUNNING))
+}
+
+/// What `shell start` says when no strip stayed up.
+pub fn start_failure(bundle: &Path, quit: &[i32]) -> String {
+    match quit {
+        [] => format!("asked macOS to open {}, but no strip of it is running after 10 s; its shell.log says why", bundle.display()),
+        pids => format!(
+            "the strip started (pid {}) but quit at once. Most likely another strip on the same port holds the single-instance lock (a second copy of Bellwether.app, which `shell stop` doesn't touch) and it handed over to that one; otherwise its shell.log says why",
+            pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")
+        ),
     }
 }
 
@@ -674,5 +757,19 @@ mod tests {
         assert_eq!(run(&s(&["bellwether", "autostart", "install", "--nope"])), exit::BAD_CONFIG);
         assert_eq!(run(&s(&["bellwether", "autostart", "sideways"])), exit::BAD_CONFIG);
         assert_eq!(run(&s(&["bellwether", "version"])), exit::OK);
+        // Outside Bellwether.app (this test binary), the strip commands refuse: exit 2,
+        // nothing started or stopped.
+        for sub in ["start", "stop", "restart"] {
+            assert_eq!(command_result("shell", &s(&[sub])).unwrap_err().1, exit::NOT_RUNNING, "{sub}");
+        }
+        assert_eq!(command_result("shell", &s(&["bogus"])).unwrap_err().1, exit::BAD_CONFIG);
+        // A strip that appeared and quit (a single-instance hand-off) is not "started".
+        let b = std::path::Path::new("/x/Bellwether.app");
+        assert!(start_failure(b, &[30100]).starts_with("the strip started (pid 30100) but quit at once"));
+        assert!(start_failure(b, &[]).contains("no strip of it is running after 10 s"));
+        let src = include_str!("cli.rs");
+        let body = src.split("fn shell_control(").nth(1).unwrap().split("\nfn ").next().unwrap();
+        assert!(body.find("libc::kill(pid, 0)").unwrap() < body.find("println!(\"{} the strip (pid {pid})").unwrap(), "alive is checked before success is printed");
+        assert_eq!(command_result("shell", &s(&["start", "--dev"])).unwrap_err().1, exit::BAD_CONFIG);
     }
 }

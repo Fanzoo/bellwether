@@ -238,6 +238,21 @@ pub fn to_json(r: &Report) -> String {
     json::stringify_pretty(&v, "  ") + "\n"
 }
 
+/// The next step for a failing token check, by its cause: none at all (`token init`), one
+/// that is there but unusable (`token init` refuses it: `--force`), a token file others can
+/// read (`chmod`), or a bad `BELLWETHER_HOOK_TOKEN` in the environment.
+pub fn token_next(detail: &str) -> String {
+    if detail.starts_with("BELLWETHER_HOOK_TOKEN in the environment") {
+        "fix BELLWETHER_HOOK_TOKEN in your environment (the token line above says what is wrong), or unset it to use the token file".into()
+    } else if detail.contains("other users can read it") {
+        "make the token file private: run the `chmod` the token line above shows".into()
+    } else if detail.starts_with("no hook token") {
+        "make the hook token: `bellwether token init`".into()
+    } else {
+        "replace the unusable hook token: `bellwether token init --force`, then `bellwether hooks install --write` so the hooks carry the new one".into()
+    }
+}
+
 /// The one thing to do next, in the order that keeps a brain running whenever hooks are
 /// installed: config, token, a brain, anything else failing, then hooks.
 pub fn next_step(checks: &[Check], installed: bool) -> String {
@@ -245,8 +260,8 @@ pub fn next_step(checks: &[Check], installed: bool) -> String {
     if status("config") == Some("FAIL") {
         return "fix config.json (the config line above says what is wrong)".into();
     }
-    if status("token") == Some("FAIL") {
-        return "make the hook token: `bellwether token init`".into();
+    if let Some(t) = checks.iter().find(|c| c.name == "token" && c.status == "FAIL") {
+        return token_next(&t.detail);
     }
     if status("brain") != Some("PASS") {
         return "start the brain: at login with `bellwether autostart install --write`, or now with `bellwether serve`".into();
@@ -649,4 +664,19 @@ pub fn user_settings() -> PathBuf {
 /// A JS-flavoured view of a settings file for callers that have one parsed already.
 pub fn parse_settings(text: &str) -> Result<Lj, String> {
     lossless::parse(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unusable_token_points_at_init_force() {
+        let next = |detail: &str| next_step(&[Check::new("config", "PASS", "", BAD_CONFIG), Check::new("token", "FAIL", detail, BAD_CONFIG)], true);
+        assert!(next("no hook token: BELLWETHER_HOOK_TOKEN is not set, and /h/hook-token doesn't exist or is empty. Make one with `bellwether token init`").ends_with("`bellwether token init`"));
+        let short = bellwether_core::token::check("short").unwrap_err().message;
+        assert!(next(&short).contains("`bellwether token init --force`"), "{short}");
+        assert!(next("/h/hook-token is mode 644: other users can read it. Run `chmod 600 '/h/hook-token'`").contains("chmod"));
+        assert!(next("BELLWETHER_HOOK_TOKEN in the environment: too short").contains("unset it"));
+    }
 }

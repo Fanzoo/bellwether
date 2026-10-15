@@ -5,10 +5,10 @@ import { describe, test } from 'node:test';
 import { SHELL_LABEL, plistPath, shellPlistText } from '../brain/autostart.mjs';
 import { runDoctor } from '../brain/doctor.mjs';
 import { shellControl } from '../brain/shellctl.mjs';
-import { AGENT_DIR, TOKEN, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, IMPL, TOKEN, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
 
 // The repository's strip control, which the app replaces (milestone 5).
-const REPO_SHELL = notUnderRust("the repository's `shell start|stop|restart` (its LaunchAgent, or a detached copy of target/release/bellwether-shell); the app's strip control arrives in milestone 5. The argument checks at the end run against both");
+const REPO_SHELL = notUnderRust("the repository's `shell start|stop|restart` (its LaunchAgent, or a detached copy of target/release/bellwether-shell); the app's `shell start|stop|restart` controls Bellwether.app's own strip (test/DIVERGENCES.md 19). The argument checks at the end run against both");
 
 /** `bellwether shell start | stop | restart` (temp HOME and fakes only: launchd and the live strip are never touched). */
 
@@ -124,5 +124,16 @@ describe('doctor and the CLI', () => {
     const cli = (...a) => spawnBrainSync(['shell', ...a], { encoding: 'utf8', env });
     assert.equal(cli('bogus').status, 3);
     assert.equal(cli('start', '--dev').status, 3);
+  });
+  test('`shell stop` outside the app: the repository stops its own detached strip (none here); the app\'s CLI refuses outside a bundle', () => {
+    const env = { PATH: process.env.PATH, HOME: tempDir(), BELLWETHER_DATA_DIR: tempDir(), BELLWETHER_HOOK_TOKEN: TOKEN };
+    const r = spawnBrainSync(['shell', 'stop'], { encoding: 'utf8', env });
+    if (IMPL === 'rust') {
+      assert.equal(r.status, 2, r.stderr);
+      assert.match(r.stderr, /controls Bellwether\.app's strip, and this is a development binary outside the app/);
+    } else {
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /the strip was not running/);
+    }
   });
 });

@@ -50,7 +50,7 @@ fn verify_pet(folder: &str, bytes: &[u8]) -> Result<(), String> {
         .ok_or_else(|| format!("{folder} is not a pinned pet (pets.lock.json); only pinned pets are loaded"))?;
     let got: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
     if got != want {
-        return Err(format!("data/pets/{folder}/animations.xml doesn't match its pinned sha256 (expected {want}, got {got}); run `bellwether pets fetch`"));
+        return Err(format!("pets/{folder}/animations.xml doesn't match its pinned sha256 (expected {want}, got {got}); run `bellwether pets fetch`"));
     }
     Ok(())
 }
@@ -75,8 +75,7 @@ struct Places {
 }
 
 struct Shared {
-    agent_dir: PathBuf,
-    data_dir: PathBuf,
+    pets: PetPlace,
     config: Value,
     selftest: bool,
     /// Debug only: where `--snapshot` writes the strip's canvas. None in normal use,
@@ -95,28 +94,70 @@ struct PetPayload {
     display: Value,
 }
 
-/// The pet's animations.xml from data/pets/<folder>/, plus what the webview needs to
-/// draw it. The folder name comes from config and must be a plain name: no path.
+/// Where pets come from (distribution plan D8, milestone 5).
+enum PetPlace {
+    /// A repository: `data/pets/<name>/animations.xml`, pinned in pets.lock.json.
+    Repository { data_dir: PathBuf },
+    /// The app: a bundled pet (`Contents/Resources/pets/<name>/animations.xml`, pinned in
+    /// the pets.lock.json compiled into this binary), else an imported one
+    /// (`<home>/pets/<name>/animations.xml`, pinned in `<home>/pets.user.lock.json` by
+    /// `bellwether pets import`).
+    App { resources: Option<PathBuf>, home: PathBuf },
+}
+
+/// The pet's file, checked against its pin, as text. `name` is already a plain name.
+fn pet_xml(place: &PetPlace, name: &str) -> Result<String, String> {
+    let read_size = |path: &std::path::Path, missing: &str| -> Result<(), String> {
+        let meta = std::fs::metadata(path).map_err(|_| missing.to_string())?;
+        if meta.len() > MAX_PET_BYTES {
+            return Err(format!("{} is larger than {} MB", path.display(), MAX_PET_BYTES / 1024 / 1024));
+        }
+        Ok(())
+    };
+    let read = |path: &std::path::Path, missing: &str| -> Result<Vec<u8>, String> {
+        read_size(path, missing)?;
+        std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))
+    };
+    let bytes = match place {
+        PetPlace::Repository { data_dir } => {
+            let path = data_dir.join("pets").join(name).join("animations.xml");
+            let bytes = read(&path, &format!("{} is missing: run `bellwether pets fetch`", path.display()))?;
+            // The same pins `bellwether pets fetch` uses (pets.lock.json, compiled in): a pet
+            // that isn't pinned, or whose file doesn't match, is refused.
+            verify_pet(name, &bytes)?;
+            bytes
+        }
+        PetPlace::App { resources, home } => {
+            let bundled = resources.as_ref().map(|r| r.join("pets").join(name).join("animations.xml")).filter(|p| p.exists());
+            match bundled {
+                Some(path) => {
+                    let bytes = read(&path, "")?;
+                    verify_pet(name, &bytes).map_err(|e| format!("the bundled pet {name}: {e}"))?;
+                    bytes
+                }
+                None => {
+                    let path = bellwether_brain::pets::pet_file(home, name);
+                    read_size(&path, &format!("no pet named {name:?}: it isn't bundled with this app, and {} doesn't exist. Import one with `bellwether pets import <animations.xml> --name {name}`, or set pets.default in config.json to a pet you imported", path.display()))?;
+                    bellwether_brain::pets::load(home, name)?
+                }
+            }
+        }
+    };
+    let xml = String::from_utf8(bytes).map_err(|_| format!("the pet {name} is not UTF-8"))?;
+    reject_doctype(&xml)?;
+    Ok(xml)
+}
+
+/// The pet's animations.xml (see `PetPlace`), plus what the webview needs to draw it. The
+/// name comes from config (`pets.default`) and must be a plain name: no path.
 #[tauri::command]
 fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
-    let folder = shared.config.pointer("/pets/default").and_then(Value::as_str).unwrap_or("esheep64").to_string();
+    let fallback = if matches!(shared.pets, PetPlace::App { .. }) { "bellwether" } else { "esheep64" };
+    let folder = shared.config.pointer("/pets/default").and_then(Value::as_str).unwrap_or(fallback).to_string();
     if folder.is_empty() || !folder.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
         return Err(format!("pets.default {folder:?} must be a plain folder name"));
     }
-    let path = shared.data_dir.join("pets").join(&folder).join("animations.xml");
-    let meta = std::fs::metadata(&path).map_err(|_| format!("{} is missing: run `bellwether pets fetch`", path.display()))?;
-    if meta.len() > MAX_PET_BYTES {
-        return Err(format!("{} is larger than {} MB", path.display(), MAX_PET_BYTES / 1024 / 1024));
-    }
-    let bytes = std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    // The same pins `bellwether pets fetch` uses (pets.lock.json, compiled in): a pet that
-    // isn't pinned, or whose file doesn't match, is refused.
-    verify_pet(&folder, &bytes).map_err(|e| {
-        log(&format!("error: refusing to load pet {folder}: {e}"));
-        e
-    })?;
-    let xml = String::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8", path.display()))?;
-    reject_doctype(&xml).map_err(|e| {
+    let xml = pet_xml(&shared.pets, &folder).map_err(|e| {
         log(&format!("error: refusing to load pet {folder}: {e}"));
         e
     })?;
@@ -337,28 +378,30 @@ pub fn run() {
             std::process::exit(3);
         }
     };
-    log::init(settings.data_dir.join("shell.log"));
-    log(&format!("starting: agent dir {}, brain on 127.0.0.1:{}", settings.agent_dir.display(), settings.port));
+    log::init(settings.log_file.clone());
+    match &settings.agent_dir {
+        Some(dir) => log(&format!("starting: repository layout, agent dir {}, data {}, brain on 127.0.0.1:{}", dir.display(), settings.data_dir.display(), settings.port)),
+        None => log(&format!("starting: Bellwether {}, app data {}, brain on 127.0.0.1:{}", bellwether_brain::VERSION, settings.data_dir.display(), settings.port)),
+    }
 
     let brain = Brain::new();
     let strip_height = settings.f64_at("/strip/heightPx", 140.0);
+    let app_layout = settings.layout == settings::Layout::App;
     let brain_cfg = brain::BrainConfig {
         port: settings.port,
         token: settings.token.clone(),
-        node_path: settings.node_path.clone(),
-        agent_dir: settings.agent_dir.clone(),
-        data_dir: settings.data_dir.clone(),
         spawn: flags.spawn_brain && !flags.selftest,
+        child_env: settings.brain_env.clone(),
+        child_gets_token: settings.brain_gets_token,
+        check_version: app_layout && !flags.selftest,
     };
     let shared = Shared {
-        agent_dir: settings.agent_dir.clone(),
-        data_dir: settings.data_dir.clone(),
+        pets: if app_layout { PetPlace::App { resources: settings.resources.clone(), home: settings.data_dir.clone() } } else { PetPlace::Repository { data_dir: settings.data_dir.clone() } },
         config: settings.config.clone(),
         selftest: flags.selftest,
         snapshot: flags.snapshot.clone().map(|p| (p, flags.snapshot_after)),
         snapshot_every: flags.snapshot_every,
     };
-    let _ = &shared.agent_dir;
     let capture_exclusion = settings.config.pointer("/privacy/captureExclusion").and_then(Value::as_bool).unwrap_or(true);
     let hide_when_sharing = settings.config.pointer("/privacy/hideWhenSharing").and_then(Value::as_bool).unwrap_or(true);
     let sharing_names = if hide_when_sharing { privacy::wanted_names(&settings.config) } else { Vec::new() };
@@ -378,6 +421,13 @@ pub fn run() {
     let token_for_places = settings.token.clone();
 
     let brain_for_setup = brain.clone();
+    // The single-instance lock (/tmp/<identifier>_si.sock) is keyed by the port: one strip
+    // per brain. On the default port the identifier is the build's own, so a rebuilt
+    // repository strip and an already-running one (any earlier build) still exclude each
+    // other; a test bundle or a dev strip on another port never hands off to them.
+    let mut context = tauri::generate_context!();
+    let lock_id = single_instance_id(&context.config().identifier, settings.port);
+    context.config_mut().identifier = lock_id;
     let mut builder = tauri::Builder::default();
     // One strip at a time. Only `--locate` skips this: it opens no window and quits
     // after one lookup. `--selftest` keeps it, because it does open a window (the pet is
@@ -473,7 +523,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the bellwether shell");
 
     // SIGINT (Ctrl-C), SIGTERM and SIGHUP go through the same shutdown as a normal
@@ -634,6 +684,17 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
             synced = Some((muted, kept));
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+/// The identifier the single-instance lock is named after: the build's own on the default
+/// port (47417), `<identifier>.p<port>` on any other. It changes only the lock (and Tauri's
+/// own path-resolver folders, which the shell doesn't use), never the bundle id macOS sees.
+pub fn single_instance_id(identifier: &str, port: u16) -> String {
+    if port == bellwether_brain::DEFAULT_PORT {
+        identifier.to_string()
+    } else {
+        format!("{identifier}.p{port}")
     }
 }
 
@@ -963,6 +1024,98 @@ mod tests {
         assert!(reject_doctype("<?xml version=\"1.0\"?><!DOCTYPE a [<!ENTITY x \"y\">]><animations/>").is_err());
         assert!(reject_doctype("<animations><!ENTITY x></animations>").is_err());
         assert!(reject_doctype("<animations><header/></animations>").is_ok());
+    }
+
+    /// The strip's webview surface (plan D1, D6; milestone 5's "done when"): its one
+    /// capability grants exactly the six commands, to strip windows only; the handler list,
+    /// build.rs and the autogenerated permission files name the same six, and no other
+    /// capability exists.
+    #[test]
+    fn the_strip_capability_lists_exactly_the_six_permissions() {
+        const SIX: [&str; 6] = ["get_pet", "get_snapshot", "report_hitboxes", "sprite_clicked", "shell_log", "debug_snapshot"];
+        let allow: Vec<String> = SIX.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).collect();
+        let cap: Value = serde_json::from_str(include_str!("../capabilities/strip.json")).unwrap();
+        let granted: Vec<&str> = cap["permissions"].as_array().unwrap().iter().map(|p| p.as_str().expect("a plain permission name, no scope object")).collect();
+        assert_eq!(granted, allow, "exactly the six, in this order");
+        assert_eq!(cap["windows"], serde_json::json!(["strip-*"]));
+        assert!(cap.get("remote").is_none() && cap.get("platforms").is_none());
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let caps: Vec<String> = std::fs::read_dir(dir.join("capabilities")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(caps, ["strip.json"]);
+        let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["app"]["security"]["capabilities"], serde_json::json!(["strip"]));
+        let src = include_str!("lib.rs");
+        let handler: Vec<&str> = src.split(concat!("generate_", "handler![")).nth(1).unwrap().split(']').next().unwrap().split(',').map(str::trim).collect();
+        assert_eq!(handler, SIX);
+        let build = include_str!("../build.rs");
+        let list = build.split(".commands(&[").nth(1).unwrap().split(']').next().unwrap();
+        let mut declared: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+        declared.sort();
+        let mut six = SIX.to_vec();
+        six.sort();
+        assert_eq!(declared, six);
+        let mut generated: Vec<String> = std::fs::read_dir(dir.join("permissions").join("autogenerated")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        generated.sort();
+        assert_eq!(generated, six.iter().map(|c| format!("{c}.toml")).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_single_instance_lock_is_per_port_and_unchanged_on_the_live_port() {
+        // The plugin's socket: /tmp/<identifier with . and - as _>_si.sock.
+        let sock = |id: String| format!("/tmp/{}_si.sock", id.replace(['.', '-'], "_"));
+        // The dev identifier, from the one file that names it (rename.test.mjs).
+        let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let dev = conf["identifier"].as_str().unwrap();
+        assert_eq!(sock(single_instance_id(dev, 47417)), format!("/tmp/{}_si.sock", dev.replace('.', "_")), "the running repository strip's own lock, as every earlier build named it");
+        assert_eq!(sock(single_instance_id("com.fanzootechnology.bellwether", 47417)), "/tmp/com_fanzootechnology_bellwether_si.sock");
+        assert_eq!(sock(single_instance_id(dev, 47432)), format!("/tmp/{}_p47432_si.sock", dev.replace('.', "_")));
+        assert_eq!(sock(single_instance_id("com.fanzootechnology.bellwether", 47431)), "/tmp/com_fanzootechnology_bellwether_p47431_si.sock");
+        assert_ne!(single_instance_id("x", 47431), single_instance_id("x", 47432));
+        let src = include_str!("lib.rs");
+        assert!(src.contains(concat!("context.config_mut().identifier = ", "lock_id;")) && src.contains(concat!(".build(", "context)")));
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("bellwether-pets-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A small pet file `pets import` accepts (a 1×1 PNG, one animation).
+    const TINY_PET: &str = "<animations><header><title>tiny</title></header><image><tilesx>1</tilesx><tilesy>1</tilesy><png>iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==</png><transparency>Magenta</transparency></image><spawns><spawn id=\"1\"><x>0</x><y>0</y><next probability=\"100\">1</next></spawn></spawns><animations><animation id=\"1\"><name>walk</name><start><x>0</x><y>0</y><interval>200</interval></start><end><x>0</x><y>0</y><interval>200</interval></end><sequence repeat=\"0\" repeatfrom=\"0\"><frame>0</frame></sequence></animation></animations></animations>";
+
+    #[test]
+    fn the_app_loads_imported_pets_by_their_pin_and_never_a_path() {
+        let home = temp("app");
+        let src = home.join("src.xml");
+        std::fs::write(&src, TINY_PET).unwrap();
+        bellwether_brain::pets::import(&home, &src, Some("tiny"), false).unwrap();
+        let app = PetPlace::App { resources: None, home: home.clone() };
+        assert_eq!(pet_xml(&app, "tiny").unwrap(), TINY_PET);
+        let e = pet_xml(&app, "bellwether").unwrap_err();
+        assert!(e.contains("isn't bundled") && e.contains("pets import"), "{e}");
+        // Changed after import: refused.
+        std::fs::write(bellwether_brain::pets::pet_file(&home, "tiny"), TINY_PET.replace("tiny", "tinz")).unwrap();
+        assert!(pet_xml(&app, "tiny").unwrap_err().contains("changed after it was imported"));
+        // Not pinned at all: refused.
+        let other = bellwether_brain::pets::pet_file(&home, "loose");
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(&other, TINY_PET).unwrap();
+        assert!(pet_xml(&app, "loose").is_err());
+        // A bundled pet must match the pin compiled into the binary.
+        let res = temp("res");
+        let bundled = res.join("pets").join("esheep64").join("animations.xml");
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        std::fs::write(&bundled, TINY_PET).unwrap();
+        let app = PetPlace::App { resources: Some(res.clone()), home: home.clone() };
+        assert!(pet_xml(&app, "esheep64").unwrap_err().contains("doesn't match its pinned sha256"));
+        // The repository keeps data/pets and pets.lock.json.
+        let repo = PetPlace::Repository { data_dir: home.clone() };
+        assert!(pet_xml(&repo, "tiny").unwrap_err().contains("not a pinned pet"));
+        assert!(pet_xml(&repo, "nothere").unwrap_err().contains("pets fetch"));
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&res);
     }
 
     #[test]

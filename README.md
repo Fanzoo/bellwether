@@ -230,10 +230,14 @@ Screen Recording is never needed.
   invisible except for the sheep.
 - Started before there is a token, it waits: it looks for `BELLWETHER_HOOK_TOKEN` every
   3 s and connects once `bellwether token init` adds one (logged in `data/shell.log`).
-- If the brain isn't running, the shell starts it, and stops it again when the shell
+- If the brain isn't running, the shell starts one, and stops it again when the shell
   quits: on Ctrl-C, `kill` (TERM, HUP) or a normal quit. If the shell is killed
   outright (`kill -9`), that brain notices within a second and stops itself. A brain
-  you started yourself, or the login autostart's, is never stopped by the shell.
+  you started yourself, or the login autostart's, is never stopped by the shell. Since
+  milestone 5 of the distribution plan the brain it starts is the Rust one, from the
+  shell's own binary (`bellwether-shell serve`), with this checkout's config, token and
+  `data/`; Node isn't involved. The login autostart runs the shell with
+  `--no-spawn-brain`, so it never starts one: its brain is the Node brain's LaunchAgent.
 - Quit it with Ctrl-C in its terminal, or from its menu-bar icon.
 - It loads only pinned pets whose file matches the sha256 in `pets.lock.json` (the
   same pins `pets fetch` uses). A changed or unknown pet file is refused with a line
@@ -556,11 +560,17 @@ The token is never shown, and nothing changes without `--write`.
 ## The signed app (in development)
 
 The distribution plan in `docs/` turns Bellwether into one signed, notarized
-`Bellwether.app`. Milestones 1 (a skeleton), 3 (the brain's state) and 4 (the hook
-installer, doctor, `pets import` and `migrate`) are in the repository. Nothing in it
-replaces the setup above yet: its brain keeps the flock and answers `/state` and
-`/control`, but its strip still reads the Node brain (milestone 5). Building it never
-touches the repository strip or its LaunchAgents.
+`Bellwether.app`. Milestones 1 (a skeleton), 3 (the brain's state), 4 (the hook
+installer, doctor, `pets import` and `migrate`) and 5 (the strip on the Rust brain, with
+the app's own files) are in the repository. The app runs without Node. It doesn't replace
+the setup above by itself: moving a repository install into the app is milestone 8, and
+until then the plan's milestone 5 status lists the steps to do it by hand. Building it
+never touches the repository strip or its LaunchAgents.
+
+**The repository's strip is unchanged.** A strip built from this checkout (`bellwether
+shell build --release`, `shell --dev`) is not inside an app bundle, so it keeps the
+checkout's layout: `config.json`, the token from the environment or the `.env`, `data/`
+and `data/shell.log`. Only `Bellwether.app` reads the app's files below.
 
 **One executable, three modes.** `Bellwether.app/Contents/MacOS/Bellwether`:
 - launched from Finder, it is the strip;
@@ -572,9 +582,38 @@ touches the repository strip or its LaunchAgents.
   has take its flags and print its output (`test/DIVERGENCES.md` lists the exceptions).
 
 Its files live in `~/Library/Application Support/Bellwether/`: `hook-token`, `config.json`
-(optional; every key has a default), `state.json`, `shell-state.json` and `recordings/`.
-`BELLWETHER_HOME` overrides that folder (logs then go to `<home>/logs/`), and
-`BELLWETHER_CONFIG` names another config file. The brain reads its token from `hook-token`
+(optional; every key has a default), `state.json`, `shell-state.json`, `recordings/` and
+imported pets (`pets/`, pinned in `pets.user.lock.json`). Logs go to
+`~/Library/Logs/Bellwether/` (`brain.log`, `shell.log`). `BELLWETHER_HOME` overrides that
+folder (logs then go to `<home>/logs/`), and `BELLWETHER_CONFIG` names another config file.
+
+**The strip** (the app opened from Finder, or `bellwether shell start`):
+- reads the port and `config.json` from that folder, and the token from `hook-token` (or
+  `BELLWETHER_HOOK_TOKEN`). Started before there is a token, it looks again every 3 s; it
+  reads the file again when the brain refuses the old one (after `token rotate`);
+- runs once per port: a second strip on the same port hands over to the first and quits,
+  while strips on different ports (a test build beside the installed app) run side by side;
+- uses the brain answering on the port. When none answers, it starts one: its own
+  executable as `Bellwether serve`. That brain stops when the strip quits, and within a
+  second when the strip is killed outright (`kill -9`). A brain started by the login agent
+  or by hand is never stopped by the strip;
+- at start, compares its version with the brain's `/health`. If the brain is this app's
+  own login agent (launchd lists that pid for the app's agent) running another version
+  (after an update), it restarts the agent (`launchctl kickstart -k`) and waits for the
+  new version. Any other brain is left alone,
+  with a line in `shell.log`;
+- loads a pet bundled with the app (none until milestone 10), else one you imported with
+  `bellwether pets import`, each only while it matches its pin. `pets.default` in
+  `config.json` names it. Until the app has its own sheep, import one and set it:
+
+```
+bellwether pets import <folder>/esheep64/animations.xml       # pinned in pets.user.lock.json
+# config.json: {"pets": {"default": "esheep64", "animationMap": {"esheep64": {…}}}}
+#   (the animationMap the import prints, or the one in config.example.json)
+bellwether shell start | stop | restart                        # the app's strip
+```
+
+The brain reads its token from `hook-token`
 (one line, mode 0600), or from `BELLWETHER_HOOK_TOKEN`:
 
 ```
@@ -624,7 +663,9 @@ node scripts/build-app.mjs --adhoc           # no keychain: ad hoc, hardened, un
 
 - The app goes to `shell/src-tauri/target-dev/release/bundle/macos/Bellwether.app`.
 - `--test-port 47418 --test-home <dir>` makes a test build whose bundled brain agent
-  runs on that port with that home, so it can't collide with a brain on 47417.
+  runs on that port with that home, so it can't collide with a brain on 47417. Its strip
+  takes the same port and home from the bundle, however it is started, and refuses a
+  different `BELLWETHER_HOME`.
 - The script refuses `--test-port 47417`, and fails if
   `shell/src-tauri/target/release/bellwether-shell` changed during the build.
 - `BELLWETHER_SIGNING_IDENTITY` picks one identity (a name or SHA-1) when there are
@@ -653,9 +694,9 @@ Developer ID build's brain ("Launch Constraint Violation"). If that happens anyw
 `autostart uninstall --write`, then `install --write` again.
 
 More about `autostart`:
-- A test build (`--test-port`/`--test-home`) may only use `--brain-only`. The app
-  started at login gets no environment, so its strip would use the live defaults
-  (port 47417).
+- A test build (`--test-port`/`--test-home`) may only use `--brain-only`: a test build's
+  strip never starts at login. (Before milestone 5 the reason was that such a strip would
+  use the live defaults, port 47417; it now takes the bundle's test port and home.)
 - `uninstall --write` also stops this bundle's running strip.
 - In a terminal opened before your last login (a herdr or tmux server that outlived a
   logout), macOS won't answer about login items. `autostart` and `doctor` then say so:

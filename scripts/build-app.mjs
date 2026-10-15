@@ -21,6 +21,10 @@
  * target/ (the repository strip's login-item binary) is never written, and the script
  * checks that afterwards. The generated config lives in target-dev/bundle-config/.
  *
+ * The app left by an earlier build is deleted first, so a build without the test flags
+ * never leaves a test build behind; afterwards the bundled agent plist is checked against
+ * the flags given, and the last line says which kind of build it is.
+ *
  * Signing identity: BELLWETHER_SIGNING_IDENTITY (a name or SHA-1), else the only
  * "Developer ID Application" identity in the keychain. Notarization: the notarytool
  * keychain profile BELLWETHER_NOTARY_PROFILE (default "bellwether"), made once with
@@ -44,6 +48,21 @@ const TAURI_CLI = path.join(AGENT, 'shell', 'node_modules', '.bin', 'tauri');
 /** "(ABCDE12345)" after a certificate name, and TeamIdentifier=… lines: masked. */
 export function maskTeam(text) {
   return String(text).replace(/\(([A-Z0-9]{10})\)/g, '(TEAM ID)').replace(/(TeamIdentifier=|team(?:ID| id)?[:=]\s*)[A-Z0-9]{10}\b/gi, '$1(TEAM ID)');
+}
+
+/** The test port and home a bundled agent plist carries (a release build carries neither). */
+export function testFlags(plist) {
+  const strings = [...String(plist).matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]);
+  const i = strings.indexOf('--port');
+  const port = i >= 0 ? Number(strings[i + 1]) : null;
+  const home = /<key>BELLWETHER_HOME<\/key>\s*<string>([^<]*)<\/string>/.exec(String(plist))?.[1]?.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') ?? null;
+  return { port, home };
+}
+
+/** Whether the built bundle's plist matches the flags the build was given. */
+export function bundleMatches(plist, o) {
+  const f = testFlags(plist);
+  return f.port === o.testPort && f.home === o.testHome;
 }
 
 function fail(message) {
@@ -146,6 +165,8 @@ function main() {
   const overlayFile = path.join(OUT_DIR, 'tauri.conf.json');
   fs.writeFileSync(overlayFile, JSON.stringify(overlay, null, 2));
 
+  // A clean output: never a test build left where a release build is expected.
+  fs.rmSync(APP, { recursive: true, force: true });
   const before = fingerprint(LIVE_BIN);
   const env = { ...process.env, CARGO_TARGET_DIR: TARGET_DEV, APPLE_SIGNING_IDENTITY: id.sha };
   // Notarization is done below with the keychain profile, not by the bundler.
@@ -155,13 +176,20 @@ function main() {
   if (fingerprint(LIVE_BIN) !== before) fail(`${LIVE_BIN} changed during the build; it must never be written by this script. Check CARGO_TARGET_DIR and .cargo/config.toml`);
   if (build.status !== 0) fail(`tauri build failed (exit ${build.status})`);
   say(`built ${APP}`);
+  const agentDir = path.join(APP, 'Contents', 'Library', 'LaunchAgents');
+  const plists = fs.existsSync(agentDir) ? fs.readdirSync(agentDir).filter((f) => f.endsWith('.brain.plist')) : [];
+  if (plists.length !== 1) fail(`expected one brain agent plist in ${agentDir}, found ${plists.length}`);
+  const bundled = fs.readFileSync(path.join(agentDir, plists[0]), 'utf8');
+  if (!bundleMatches(bundled, o)) fail(`the bundled agent plist doesn't match this build's flags (it carries ${JSON.stringify(testFlags(bundled))}); delete ${APP} and build again`);
 
   const verify = run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-vvv', APP]);
   if (!verify.ok) fail('codesign --verify failed');
   run('/usr/bin/codesign', ['-d', '--entitlements', '-', '--xml', APP]);
 
+  const kind = o.testPort !== null || o.testHome !== null ? `TEST BUILD (brain agent on port ${o.testPort ?? 'from config'}, home ${o.testHome ?? 'the default'}): for testing only; never install or ship it` : 'release build: no test port or home in the bundle';
   if (!o.notarize) {
     say('not notarized (add --notarize). Until it is, Gatekeeper rejects it on other Macs.');
+    say(kind);
     return;
   }
   const profile = process.env.BELLWETHER_NOTARY_PROFILE || 'bellwether';
@@ -178,6 +206,7 @@ function main() {
   if (!run('/usr/bin/xcrun', ['stapler', 'validate', APP]).ok) fail('stapler validate failed');
   if (!run('/usr/sbin/spctl', ['-a', '-vvv', '-t', 'exec', APP]).ok) fail('spctl rejected the app');
   say(`notarized and stapled: ${APP}`);
+  say(kind);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

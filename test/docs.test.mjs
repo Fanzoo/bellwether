@@ -73,3 +73,46 @@ describe('the hook commands the README shows', () => {
     for (const s of ['hooks install', 'hooks install --write', 'hooks uninstall --write', 'hooks print']) assert.ok(readme.includes(s), s);
   });
 });
+
+describe('Markdown code fences', () => {
+  /**
+   * A closing fence is the backticks alone, and an opening one carries at most a one-word
+   * language: text after a closing fence turns the rest of the file into one code block (the
+   * README's signed-app section did, milestone 5).
+   */
+  test('no fence line carries text: a closing fence is bare, an opening one names one language at most', () => {
+    const files = ['README.md', 'NOTICE', 'THIRD-PARTY.md', path.join('docs', 'DISTRIBUTION-PLAN.md'), path.join('test', 'DIVERGENCES.md')].filter((f) => fs.existsSync(path.join(AGENT_DIR, f)));
+    const bad = [];
+    for (const f of files) {
+      let open = false;
+      read(f).split('\n').forEach((line, i) => {
+        const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+        if (!m) return;
+        const rest = m[2].trim();
+        if (open) {
+          if (rest !== '') bad.push(`${f}:${i + 1}: a closing fence with text after it: ${line}`);
+        } else if (/\s/.test(rest) || rest.includes('`')) {
+          bad.push(`${f}:${i + 1}: an opening fence with more than a language: ${line}`);
+        }
+        open = !open;
+      });
+      if (open) bad.push(`${f}: a code fence is never closed`);
+    }
+    assert.deepEqual(bad, []);
+  });
+});
+
+describe('scripts/build-app.mjs', () => {
+  test('a build is checked against its own flags: a release build may not carry a test port or home', async () => {
+    const { testFlags, bundleMatches } = await import('../scripts/build-app.mjs');
+    const release = read('shell', 'src-tauri', 'macos', 'com.fanzootechnology.bellwether.brain.plist');
+    assert.deepEqual(testFlags(release), { port: null, home: null });
+    const test = release.replace('<string>serve</string>', '<string>serve</string>\n    <string>--port</string>\n    <string>47418</string>').replace('  <key>RunAtLoad</key>', '  <key>EnvironmentVariables</key>\n  <dict>\n    <key>BELLWETHER_HOME</key>\n    <string>/tmp/a&amp;b</string>\n  </dict>\n  <key>RunAtLoad</key>');
+    assert.deepEqual(testFlags(test), { port: 47418, home: '/tmp/a&b' });
+    assert.ok(bundleMatches(release, { testPort: null, testHome: null }));
+    assert.ok(!bundleMatches(test, { testPort: null, testHome: null }), 'a leftover test bundle is not a release build');
+    assert.ok(bundleMatches(test, { testPort: 47418, testHome: '/tmp/a&b' }));
+    const src = read('scripts', 'build-app.mjs');
+    assert.ok(src.indexOf('fs.rmSync(APP, { recursive: true, force: true })') < src.indexOf("spawnSync(TAURI_CLI, ['build'"), 'the old app is deleted before the build');
+  });
+});
