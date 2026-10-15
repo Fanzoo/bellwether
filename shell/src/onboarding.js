@@ -12,6 +12,8 @@ let status = null;
 let steps = [];
 let at = 0;
 let plan = null; // the current hook preview
+let move = null; // the current migration preview (step 1)
+let moved = false; // step 1 ran in this window: steps 2–3 stay replaced
 
 // ---------------------------------------------------------------- helpers
 
@@ -35,7 +37,7 @@ async function act(resultId, fn) {
   const section = document.querySelector(`section[data-step="${steps[at]}"]`);
   const buttons = [...section.querySelectorAll('button')];
   buttons.forEach((b) => { b.disabled = true; });
-  const enabled = buttons.filter((b) => b.id !== 'hooks-apply');
+  const enabled = buttons.filter((b) => b.id !== 'hooks-apply' && b.id !== 'earlier-apply');
   say(resultId, 'Working…');
   try {
     await fn();
@@ -55,10 +57,9 @@ async function refresh() {
 // ---------------------------------------------------------------- steps
 
 function stepList() {
-  const list = [];
-  if (status.migration?.found) list.push('earlier');
-  list.push('login', 'hooks', 'dock', 'focus', 'pet', 'cli', 'done');
-  return list;
+  // Step 1 (moving an earlier install) replaces steps 2–3 (plan D6).
+  if (status.migration?.found || moved) return ['earlier', 'dock', 'focus', 'pet', 'cli', 'done'];
+  return ['login', 'hooks', 'dock', 'focus', 'pet', 'cli', 'done'];
 }
 
 const LOGIN_WORDS = { enabled: 'on', notRegistered: 'off', notFound: 'off', requiresApproval: 'waiting for your approval', unavailable: 'not available here', unknown: 'unknown' };
@@ -82,7 +83,11 @@ function render() {
   $('finish').hidden = at !== steps.length - 1;
 
   const earlier = status.migration?.found;
-  $('earlier-text').textContent = earlier ? `Found: ${status.migration.agents.join(', ')}.` : '';
+  const agents = status.migration?.agents ?? [];
+  $('earlier-text').textContent = moved && !earlier ? 'Moved into the app.' : earlier ? (agents.length ? `Found: ${agents.join(', ')}.` : 'Found: Bellwether hook entries from an earlier install.') : '';
+  $('earlier-plan').hidden = !move?.text;
+  $('earlier-plan').textContent = move?.text ?? '';
+  $('earlier-apply').disabled = !move?.planId;
 
   // Start at login.
   const login = status.login;
@@ -241,6 +246,30 @@ $('login-approve').addEventListener('click', () => act('login-result', async () 
   say('login-result', (await invoke('permission_request', { kind: 'login-items' })).message);
 }));
 
+async function showMove() {
+  await act('earlier-result', async () => {
+    move = await invoke('migration_preview');
+    say('earlier-result', move.planId ? '' : move.message);
+  });
+}
+$('earlier-preview').addEventListener('click', () => showMove());
+$('earlier-apply').addEventListener('click', () => act('earlier-result', async () => {
+  // A preview is used once, as with the hooks.
+  const id = move?.planId;
+  move = null;
+  render();
+  if (!id) return;
+  const r = await invoke('migration_apply', { planId: id });
+  if (r.outcome === 'changed') {
+    move = r.preview?.planId ? r.preview : null;
+    say('earlier-result', r.message, true);
+    return;
+  }
+  if (r.outcome === 'applied') moved = true;
+  say('earlier-result', r.text, r.outcome !== 'applied');
+  await refresh();
+}));
+
 async function preview(action) {
   await act('hooks-result', async () => {
     plan = await invoke('hooks_preview', { action });
@@ -304,6 +333,7 @@ $('cli-install').addEventListener('click', () => act('cli-result', async () => {
   try {
     await refresh();
     render();
+    if (status.migration?.found) await showMove();
   } catch (e) {
     document.body.textContent = `Bellwether couldn't read its setup: ${e?.message ?? e}`;
   }

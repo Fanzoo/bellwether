@@ -556,7 +556,7 @@ pub fn legacy_check(agents: &[crate::legacy::Agent], user_home: &Path) -> Option
         "legacy agents",
         "WARN",
         format!(
-            "{}: the repository version's login items ({}). {}; `bellwether migrate` (the app's migration, milestone 8) moves them aside. The app never stops or removes them itself",
+            "{}: the repository version's login items ({}). {}; `bellwether migrate --to-app` (or the setup window's first step) moves them into the app. The app never stops or removes them by itself",
             crate::legacy::summary(agents),
             user_home.join("Library").join("LaunchAgents").display(),
             if loaded { "A legacy brain and this app's brain fight over one port" } else { "At your next login they start again, and a legacy brain would fight this app's brain over one port" }

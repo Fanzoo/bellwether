@@ -564,11 +564,12 @@ The token is never shown, and nothing changes without `--write`.
 The distribution plan in `docs/` turns Bellwether into one signed, notarized
 `Bellwether.app`. Milestones 1 (a skeleton), 3 (the brain's state), 4 (the hook
 installer, doctor, `pets import` and `migrate`) and 5 (the strip on the Rust brain, with
-the app's own files), 6 (login items) and 7 (the setup window) are in the repository. The
-app runs without Node. It doesn't replace
-the setup above by itself: moving a repository install into the app is milestone 8, and
-until then the plan's milestone 5 status lists the steps to do it by hand. Building it
-never touches the repository strip or its LaunchAgents.
+the app's own files), 6 (login items), 7 (the setup window) and 8 (moving a repository
+install into the app) are in the repository. The app runs without Node. It doesn't replace
+the setup above by itself: `bellwether migrate --to-app` (or the setup window's first
+step) moves a repository install into it, when you choose to (see "Moving a repository
+install into the app" below). Building it never touches the repository strip or its
+LaunchAgents.
 
 **The repository's strip is unchanged.** A strip built from this checkout (`bellwether
 shell build --release`, `shell --dev`) is not inside an app bundle, so it keeps the
@@ -601,7 +602,8 @@ opens a file panel; the file is checked as `pets import` checks it), the `bellwe
 command in `~/.local/bin` (optional), and a last page with doctor's results in plain words.
 A new user's hook token is made on the way (with start at login, or with the first
 Install). While a repository install's LaunchAgents are still on the Mac, it names them and
-won't turn on start at login or install hooks (moving that install is milestone 8). It
+won't turn on start at login or install hooks; instead its first page shows what moving
+that install into the app would change, and does it on Move it into the app. It
 finishes with Done, which it remembers in `shell-state.json`; closing it otherwise brings
 it back at the next launch. A strip built from the repository never opens it (a debug
 build does with `--onboarding`, for testing).
@@ -657,8 +659,36 @@ fails a bellwether hook entry that sets `"onFailure": "block"`.
 ```
 bellwether pets import ~/Downloads/mypet/animations.xml   # check, copy and pin a desktopPet file (16 MiB, UTF-8, no DOCTYPE, tiles up to 64)
 bellwether migrate --from <repository>                    # preview: what a repository install's token, config, colours and hooks would become
-bellwether migrate --from <repository> --write            # do it; its LaunchAgents are listed and left alone (the app's swap is milestone 8)
+bellwether migrate --from <repository> --write            # do it; its LaunchAgents are listed and left alone
+bellwether migrate --to-app                               # preview the whole move into the app (D9): token, files, LaunchAgents, hooks
+bellwether migrate --to-app --write                       # do it (Bellwether.app's own executable; refuses a development binary)
+bellwether migrate --undo [--write]                       # put the LaunchAgents and the settings file back
 ```
+
+**Moving a repository install into the app** (`migrate --to-app`). It finds the old
+install from `~/Library/LaunchAgents/local.bellwether.brain.plist` (or
+`local.pasture.brain.plist`), or `--from <repository>`; hook entries alone are enough. With
+`--write`, in this order: the hook token running sessions carry into `hook-token` (an app
+token of its own that differs is replaced, so those sessions keep working, and kept in
+`legacy/`; the preview says so); config.json (without `brain.nodePath` and `autostart`), state.json (colours,
+slots, mute), shell-state.json, installs.json, `backups/` and fetched pets, each only if the
+app has none (`--force` replaces); a port check (anything but the old brain on the port
+stops it, saying what holds the port, with nothing changed); the old agents booted out,
+their plists moved to `legacy/` in the app's folder, the app's login items registered, and
+up to 10 s for the new brain to answer with the token (if it doesn't, all of that is undone
+and the old setup keeps running); the hook entries rewritten to the current headers (a
+backup first); then doctor. A file that can't be copied stops it before any agent is
+touched, and only one run (CLI or setup window) writes at a time. The repository itself is
+never changed. A second run says "Nothing to migrate"; a run that was interrupted (or whose
+login items or brain are gone since) is reported as unfinished, and the next run finishes
+it. `--undo --write` moves the plists back (all of them, or none), unregisters the login
+items, starts the agents that were running, and restores the settings file from that backup
+if it is still exactly what the migration wrote; if anything can't be put back it says what
+is left, keeps its record and exits non-zero, so it can run again. With your real HOME it
+runs only from an installed Bellwether.app (a release build); any other binary refuses before
+reading anything. Under a HOME that isn't your real home it
+calls launchctl and the login items only through test stand-ins
+(`BELLWETHER_LAUNCHCTL`, `BELLWETHER_LOGIN_ITEMS`), never the real ones.
 
 **What you need once:**
 1. The **Developer ID Application** certificate, with its private key, in your login
@@ -741,9 +771,9 @@ the app's for port 47417. Doctor's `legacy agents` line and a line at the top of
 strip's menu-bar menu name each one that is still there: its plist in
 `~/Library/LaunchAgents` (it loads again at the next login), or loaded in launchd for your
 user (with its pid), even with its plist deleted. The app only looks (`launchctl print`);
-it never stops, loads, moves or deletes them. Moving them aside is the migration's job
-(`bellwether migrate --to-app`, milestone 8; until then, the distribution plan's hand
-switch-over, milestone 5). launchd is asked only when HOME is your real home folder.
+it never stops, loads, moves or deletes them by itself. Moving them aside is the
+migration's job (`bellwether migrate --to-app`, or the setup window's first step), when you
+choose to. launchd is asked only when HOME is your real home folder.
 
 ## Licensing
 

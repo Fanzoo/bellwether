@@ -153,6 +153,10 @@ fn nothing_is_ever_written_to_launch_agents() {
             vec!["doctor", "--json", "--settings", &settings, "--port", &port],
             vec!["migrate", "--from", &repo, "--settings", &settings],
             vec!["migrate", "--from", &repo, "--settings", &settings, "--write"],
+            // Milestone 8's move into the app: its previews change nothing (the move itself
+            // moves the plists away by design; tests/migration_fixtures.rs covers it).
+            vec!["migrate", "--to-app", "--from", &repo, "--settings", &settings],
+            vec!["migrate", "--undo"],
             vec!["hooks", "uninstall", "--write", "--settings", &settings],
             vec!["shell", "stop"],
         ];

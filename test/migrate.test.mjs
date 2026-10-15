@@ -54,7 +54,8 @@ function world({ shellAgent = true, config = true } = {}) {
     path.join(old, 'data', 'state.json'),
     JSON.stringify({ version: 1, muted: true, identities: { 'herdr:w1:p1': { colourIndex: 2, slots: { main: 3 }, label: 'meadow', lastSeen: now }, 'herdr:w1:p2': { colourIndex: 5, slots: { main: 0 }, label: 'barn', lastSeen: now } } }),
   );
-  fs.writeFileSync(path.join(old, 'data', 'shell-state.json'), JSON.stringify({ hidden: false, labels: true }));
+  // As the strips write it (brain/privacy.mjs, privacy.rs).
+  fs.writeFileSync(path.join(old, 'data', 'shell-state.json'), JSON.stringify({ version: 1, hidden: false, showLabels: true }, null, 2));
   const home = path.join(root, 'home');
   fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
   fs.mkdirSync(path.join(home, '.claude'));
@@ -103,7 +104,7 @@ describe('bellwether migrate', () => {
     assert.equal(st.identities['herdr:w1:p1'].colourIndex, 2);
     assert.deepEqual(st.identities['herdr:w1:p1'].slots, { main: 3 });
     assert.equal(st.identities['herdr:w1:p2'].colourIndex, 5);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(w.repo, 'data', 'shell-state.json'), 'utf8')), { hidden: false, labels: true });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(w.repo, 'data', 'shell-state.json'), 'utf8')), { version: 1, hidden: false, showLabels: true });
     // 4. hooks: bellwether's entries with the same token; the other tool's hook and statusLine kept; a backup
     const s = JSON.parse(fs.readFileSync(w.settingsFile, 'utf8'));
     assert.doesNotMatch(JSON.stringify(s), /X-Pasture-/);
@@ -478,6 +479,30 @@ describe('the CLI moves an install, step by step (both brains; ported from the i
 });
 
 describe('the CLI moves an install, end to end (both brains; temp directories only)', () => {
+  // The maintainer's decision on the distribution plan's deviation 82: plain `migrate` used to
+  // keep only `hidden` and `labels`, while the strips write `showLabels`, so Show labels was lost.
+  test('Show labels and Hide everything survive, written the way the strip writes them (and an old `labels` key is read too)', () => {
+    for (const [given, want] of [
+      [{ version: 1, hidden: true, showLabels: true }, { hidden: true, showLabels: true }],
+      [{ version: 1, hidden: false, showLabels: false }, { hidden: false, showLabels: false }],
+      [{ hidden: false, labels: true }, { hidden: false, showLabels: true }],
+    ]) {
+      const w = world();
+      fs.writeFileSync(path.join(w.old, 'data', 'shell-state.json'), JSON.stringify(given, null, 2));
+      fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(w.repo, 'brain'), { recursive: true });
+      const data = path.join(w.root, 'cli-data');
+      const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: data, BELLWETHER_ENV: path.join(w.root, 'cli.env') };
+      const cli = (...a) => spawnBrainSync(['migrate', '--from', w.old, '--settings', w.settingsFile, ...a], { root: w.repo, cwd: w.repo, encoding: 'utf8', env, timeout: 30000 });
+      const p = cli();
+      assert.equal(p.status, 0, p.stderr);
+      assert.match(p.stdout, new RegExp(`shell-state\\.json: would copy ${JSON.stringify(want).replace(/[{}]/g, '\\$&')}`));
+      const r = cli('--write');
+      assert.equal(r.status, 0, r.stderr);
+      // Byte for byte what `bellwether show|hide` and the strip's tray write (DIVERGENCES 24: no `onboarded` added).
+      assert.equal(fs.readFileSync(path.join(data, 'shell-state.json'), 'utf8'), JSON.stringify({ version: 1, ...want }, null, 2), JSON.stringify(given));
+    }
+  });
+
   test('--write: the token, config, colours and slots, tray settings and hook entries move over, the token is never printed, and a second run changes nothing', () => {
     const w = world();
     // The Node CLI runs from a copy of the checkout in the temp tree (its target is that
@@ -503,7 +528,7 @@ describe('the CLI moves an install, end to end (both brains; temp directories on
     assert.equal(st.muted, true);
     assert.equal(st.identities['herdr:w1:p1'].colourIndex, 2);
     assert.deepEqual(st.identities['herdr:w1:p2'].slots, { main: 0 });
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'shell-state.json'), 'utf8')), { hidden: false, labels: true });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'shell-state.json'), 'utf8')), { version: 1, hidden: false, showLabels: true });
     // 4. hook entries: bellwether's, with the same token; the other tool's and statusLine kept; a backup
     const s = JSON.parse(fs.readFileSync(w.settingsFile, 'utf8'));
     assert.doesNotMatch(JSON.stringify(s), /X-Pasture-/);
@@ -513,10 +538,10 @@ describe('the CLI moves an install, end to end (both brains; temp directories on
     assert.equal(s.hooks.Stop.at(-1).hooks[0].headers['X-Bellwether-Token'], OLD_TOKEN);
     assert.equal(fs.readdirSync(path.join(data, 'backups')).filter((f) => f.endsWith('.json')).length, 1);
     // 5. LaunchAgents: the repository's CLI swaps them (not loaded under a temp HOME); the app
-    //    names them and leaves them (plan D5; the swap is milestone 8)
+    //    names them and leaves them (plan D5; the swap is `migrate --to-app`, milestone 8)
     if (IMPL === 'rust') {
       for (const l of OLD_LABELS) assert.ok(fs.existsSync(plistPath(w.home, l)), `${l} was touched`);
-      assert.match(r.stdout, /local\.pasture\.brain[\s\S]*left as it is[\s\S]*milestone 8/);
+      assert.match(r.stdout, /local\.pasture\.brain[\s\S]*left as it is[\s\S]*migrate --to-app/);
     } else for (const l of OLD_LABELS) assert.ok(!fs.existsSync(plistPath(w.home, l)), l);
     // A second run has nothing left to do.
     const before = snapshot(w.root);

@@ -205,6 +205,12 @@ const inBundle = (bin) => {
 };
 /** Why the Rust binary `bin` must not run `args` here, or null (exported for its test). */
 export function rustRefusal(args, bin = rustBin()) {
+  // The move into the app (plan D9) calls launchctl and the login items; from the suite only
+  // a development binary may run it (under the temp HOME rustEnv gives, where the binary
+  // reaches them only through stand-ins, and refuses the real HOME in a test process).
+  if (args[0] === 'migrate' && args.some((a) => a === '--to-app' || a === '--undo')) {
+    return inBundle(bin) ? `the Rust \`migrate ${args.find((a) => a === '--to-app' || a === '--undo')}\` of an app bundle (${bin}) moves login items on this Mac; tests run it only from a development binary` : null;
+  }
   if (args[0] !== 'autostart') return null;
   if (args.includes('settings')) return '`autostart settings` opens System Settings on this screen';
   if (inBundle(bin)) return `the Rust \`autostart\` of an app bundle (${bin}) registers SMAppService login items on this Mac; tests run it only from a development binary, which can't`;

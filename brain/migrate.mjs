@@ -5,6 +5,7 @@ import path from 'node:path';
 import { SHELL_LABEL, agentBackupDir, findOldAgents, isRealHome, plistPath, shellBinary, swapAgents } from './autostart.mjs';
 import { portHolder as realPortHolder } from './porthold.mjs';
 import { withDefaults } from './defaults.mjs';
+import { writeShellState } from './privacy.mjs';
 import { envAssignments } from './envfile.mjs';
 import { envFilePath } from './envpath.mjs';
 import { Flock } from './flock.mjs';
@@ -146,12 +147,13 @@ export function migrate({
           say(`${name}: not valid JSON; skipped`);
           continue;
         }
-        const keep = { ...(typeof v.hidden === 'boolean' ? { hidden: v.hidden } : {}), ...(typeof v.labels === 'boolean' ? { labels: v.labels } : {}) };
+        // The strips write `showLabels` (privacy.mjs); `labels` is read too, in case a file
+        // ever had it. Written the way the strip writes it (the maintainer's decision on the
+        // distribution plan's deviation 82: this used to keep only `hidden` and `labels`, so a
+        // real file's Show labels was lost).
+        const keep = { hidden: v.hidden === true, showLabels: v.showLabels === true || v.labels === true };
         say(`${name}: ${write ? 'copied' : 'would copy'} ${JSON.stringify(keep)}`);
-        if (write) {
-          fs.mkdirSync(dataDir, { recursive: true });
-          fs.writeFileSync(b, JSON.stringify(keep) + '\n', { mode: 0o600 });
-        }
+        if (write) writeShellState(dataDir, keep);
       }
     }
   }

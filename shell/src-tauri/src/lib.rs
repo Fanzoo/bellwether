@@ -14,6 +14,7 @@ mod conformance_session;
 pub mod dispatch;
 pub mod identity;
 pub mod login_items;
+pub mod migration;
 pub mod onboarding;
 mod ax;
 mod dock;
@@ -400,6 +401,7 @@ pub fn run() {
         child_env: settings.brain_env.clone(),
         child_gets_token: settings.brain_gets_token,
         check_version: app_layout && !flags.selftest,
+        home: settings.data_dir.clone(),
     };
     let shared = Shared {
         pets: if app_layout { PetPlace::App { resources: settings.resources.clone(), home: settings.data_dir.clone() } } else { PetPlace::Repository { data_dir: settings.data_dir.clone() } },

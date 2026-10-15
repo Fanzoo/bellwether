@@ -232,7 +232,7 @@ does, what Rust does and why, and names the test.
   reads, `state.json` through the brain's load checks, `shell-state.json`. The repository's
   LaunchAgents (`local.bellwether.*` as well as pasture's, found by what they run) are named
   and left alone: the app never writes or boots out a LaunchAgent (plan D5), and moving them
-  to its login items is milestone 8. When HOME is the real home, the hook entries are
+  to its login items is `migrate --to-app` (entry 25). When HOME is the real home, the hook entries are
   rewritten only after a brain on the port accepts the token under `X-Bellwether-Token` (a
   doctor ping); under any other HOME (a test's) there is no ping and they are rewritten
   directly, as the Node CLI does under a temp HOME. Without `--from`, the old install is the WorkingDirectory of
@@ -328,7 +328,7 @@ does, what Rust does and why, and names the test.
   hook token. `requiresApproval` makes `install --write` exit 2 and offers System
   Settings' Login Items pane (default no) (`autostart settings` opens it). The repository's LaunchAgents are
   found and named (doctor's `legacy agents`, the tray), never written, loaded or removed; that
-  is the migration's (plan D9, milestone 8).
+  is the migration's (plan D9, milestone 8; entry 25).
 - **Tests retired with the Node CLI** (skipped under rust with this reason): `test/tester-m3.test.mjs`
   "autostart", `test/tester-m10.test.mjs` "autostart: both LaunchAgents", `test/rename.test.mjs`'s
   repository-agent tests.
@@ -353,6 +353,24 @@ does, what Rust does and why, and names the test.
 - **Pinned by:** `crates/core/src/shellstate.rs`,
   `the_onboarded_flag_survives_show_and_hide_and_is_never_added_by_them`;
   `shell/src-tauri/src/privacy.rs`, `kept_switches_round_trip_and_default_when_missing_or_bad`.
+
+### 25. `migrate --to-app` and `migrate --undo` exist only in the app
+
+- **Node:** `bellwether migrate` moves a pasture install into a bellwether repository and
+  swaps its LaunchAgents for the repository's own (entry 17). There is no `--to-app` or
+  `--undo`; Node's argument parser refuses them as unknown options.
+- **Rust:** `migrate --to-app` moves a repository install (renamed or pasture), or hook
+  entries alone, into the app (plan D9, milestone 8): the token, the files, a port check, the
+  old agents booted out and their plists moved to `legacy/`, the app's login items
+  registered and the new brain verified (undone on failure), the hook entries rewritten,
+  doctor. `--undo` puts the agents and the settings file back. `migrate` without either
+  flag is entry 17's, unchanged. Under a HOME that isn't the real home, launchctl and the
+  login items are reached only through test stand-ins (`BELLWETHER_LAUNCHCTL`,
+  `BELLWETHER_LOGIN_ITEMS`), and port 47417 is never asked.
+- **Pinned by:** `crates/brain/src/toapp.rs` (a recording host), `shell/src-tauri/tests/migration_fixtures.rs`
+  (the three fixture HOMEs through the binary, the held port, the undone swap),
+  `shell/src-tauri/src/migration.rs` (which host, and the refusals), and onboarding.rs's
+  step-1 test. Nothing to run against Node, so not a parity row.
 
 ## Turned out not to differ
 

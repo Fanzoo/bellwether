@@ -181,13 +181,29 @@ pub fn launchd_lookup(label: &str) -> Loaded {
 
 /// Runs `cmd` (stdin closed, output captured) for at most `limit`; a command that takes
 /// longer is stopped, by its own handle only, and the answer is unknown.
-pub fn run_bounded(mut cmd: std::process::Command, limit: std::time::Duration, read: impl Fn(bool, &str, &str) -> Loaded) -> Loaded {
+pub fn run_bounded(cmd: std::process::Command, limit: std::time::Duration, read: impl Fn(bool, &str, &str) -> Loaded) -> Loaded {
+    match run_output(cmd, limit) {
+        Ok((ok, out, err)) => read(ok, &out, &err),
+        Err(Bounded::Spawn(e)) => Loaded::Unknown(format!("couldn't run launchctl: {e}")),
+        Err(Bounded::Timeout) => Loaded::Unknown(format!("launchctl print didn't answer within {} s", limit.as_secs_f64())),
+        Err(Bounded::Wait(e)) => Loaded::Unknown(format!("launchctl: {e}")),
+    }
+}
+
+/// Why a bounded command gave no answer.
+#[derive(Debug)]
+pub enum Bounded {
+    Spawn(std::io::Error),
+    Timeout,
+    Wait(std::io::Error),
+}
+
+/// Runs `cmd` (stdin closed) for at most `limit`: (success, stdout, stderr). One that takes
+/// longer is stopped, by its own handle only.
+pub fn run_output(mut cmd: std::process::Command, limit: std::time::Duration) -> Result<(bool, String, String), Bounded> {
     use std::io::Read;
     use std::process::Stdio;
-    let mut child = match cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
-        Ok(c) => c,
-        Err(e) => return Loaded::Unknown(format!("couldn't run launchctl: {e}")),
-    };
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(Bounded::Spawn)?;
     // The answer is small; read both pipes on threads so a full pipe can't stall the wait.
     let mut out_pipe = child.stdout.take().unwrap();
     let mut err_pipe = child.stderr.take().unwrap();
@@ -209,14 +225,14 @@ pub fn run_bounded(mut cmd: std::process::Command, limit: std::time::Duration, r
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Loaded::Unknown(format!("launchctl print didn't answer within {} s", limit.as_secs_f64()));
+                return Err(Bounded::Timeout);
             }
-            Err(e) => return Loaded::Unknown(format!("launchctl: {e}")),
+            Err(e) => return Err(Bounded::Wait(e)),
         }
     };
     let out = out_t.join().unwrap_or_default();
     let err = err_t.join().unwrap_or_default();
-    read(status.success(), &String::from_utf8_lossy(&out), &String::from_utf8_lossy(&err))
+    Ok((status.success(), String::from_utf8_lossy(&out).into_owned(), String::from_utf8_lossy(&err).into_owned()))
 }
 
 /// Why ~/Library/LaunchAgents can't be looked into, when it exists but can't be listed or
@@ -242,8 +258,12 @@ pub fn launchd_lookup(_label: &str) -> Loaded {
 mod tests {
     use super::*;
 
+    /// A fresh temp HOME per call. (The name used to be made of the plists alone, so two
+    /// tests running at once with the same list, `home_with(&[])`, shared one folder and one
+    /// removed it while the other wrote into it: the EINVAL seen once in M7.)
     fn home_with(plists: &[&str]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("bw-legacy-{}-{}", std::process::id(), plists.join("+")));
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!("bw-legacy-{}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst), plists.join("+")));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("Library").join("LaunchAgents")).unwrap();
         for p in plists {
@@ -351,8 +371,11 @@ mod tests {
             std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
             assert!(why.as_deref().is_some_and(|w| w.starts_with("can't read ") && w.contains("LaunchAgents")), "mode {mode:o}: {why:?}");
         }
-        assert_eq!(unreadable(&home_with(&[]).join("nothing")), None, "no folder at all is not a problem");
-        let _ = std::fs::remove_dir_all(home);
+        let empty = home_with(&[]);
+        assert_eq!(unreadable(&empty.join("nothing")), None, "no folder at all is not a problem");
+        for d in [home, empty] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 
     #[test]

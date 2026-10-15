@@ -151,12 +151,59 @@ describe('the onboarding page (plan D6)', () => {
     assert.equal(w.el('hooks-warn-login').hidden, false);
     w = await load(() => status({ login: { stale: false, brain: 'enabled', app: 'enabled', waiting: false, lines: [] } }));
     assert.equal(w.el('hooks-warn-login').hidden, true);
-    w = await load(() => status({ migration: { found: true, agents: ['local.bellwether.brain (running)'] } }));
+    w = await load((cmd) => (cmd === 'setup_status' ? status({ migration: { found: true, agents: ['local.bellwether.brain (running)'] } }) : { found: true, planId: null, text: '' }));
     assert.deepEqual(w.visible(), ['earlier']);
-    assert.equal(w.el('progress').textContent, 'Step 1 of 8');
+    // Step 1 replaces steps 2–3 (plan D6): six steps, no login or hooks page.
+    assert.equal(w.el('progress').textContent, 'Step 1 of 6');
     assert.match(w.el('earlier-text').textContent, /local\.bellwether\.brain \(running\)/);
     assert.equal(w.el('login-on').disabled, true);
     assert.equal(w.el('hooks-preview-install').disabled, true);
+    const seen = [];
+    for (let i = 0; i < 5; i++) {
+      seen.push(w.visible()[0]);
+      await w.click('next');
+    }
+    seen.push(w.visible()[0]);
+    assert.deepEqual(seen, ['earlier', 'dock', 'focus', 'pet', 'cli', 'done']);
+  });
+
+  test('step 1 shows the move, Confirm runs that preview once, and a change re-previews', async () => {
+    let found = true;
+    let n = 0;
+    const answers = [];
+    const w = await load((cmd, args) => {
+      if (cmd === 'setup_status') return status({ migration: { found, agents: found ? ['local.bellwether.brain (running)'] : [] } });
+      if (cmd === 'migration_preview') return { found: true, planId: `move-${++n}`, text: `1. The hook token\n   - copy the token (preview ${n})` };
+      if (cmd === 'migration_apply') return answers.shift()(args);
+      return {};
+    });
+    assert.deepEqual(w.calls.map((c) => c[0]), ['setup_status', 'migration_preview'], 'the preview is shown at once');
+    assert.equal(w.el('earlier-plan').hidden, false);
+    assert.match(w.el('earlier-plan').textContent, /preview 1/);
+    assert.equal(w.el('earlier-apply').disabled, false);
+    // Something changed: nothing done, the fresh preview shown, Confirm on it again.
+    answers.push(() => ({ outcome: 'changed', message: 'something changed since the preview', preview: { found: true, planId: 'move-9', text: 'fresh' } }));
+    await w.click('earlier-apply');
+    assert.deepEqual(w.calls.at(-1), ['migration_apply', { planId: 'move-1' }]);
+    assert.match(w.el('earlier-result').textContent, /changed since the preview/);
+    assert.equal(w.el('earlier-plan').textContent, 'fresh');
+    // Applied: the result shown, the steps stay without login and hooks.
+    answers.push(() => {
+      found = false;
+      return { outcome: 'applied', text: '4. Start at login\n   the new brain answers on port 47431' };
+    });
+    await w.click('earlier-apply');
+    assert.deepEqual(w.calls.at(-2), ['migration_apply', { planId: 'move-9' }]);
+    assert.match(w.el('earlier-result').textContent, /the new brain answers/);
+    assert.equal(w.el('earlier-result').classList.contains('error'), false);
+    assert.equal(w.el('earlier-apply').disabled, true, 'a used preview is gone');
+    assert.equal(w.el('earlier-text').textContent, 'Moved into the app.');
+    assert.equal(w.el('progress').textContent, 'Step 1 of 6');
+    // A failed move (undone) is shown as an error.
+    const w2 = await load((cmd) => (cmd === 'setup_status' ? status({ migration: { found: true, agents: [] } }) : cmd === 'migration_preview' ? { found: true, planId: 'm', text: 't' } : { outcome: 'failed', text: 'the move to the app\'s login items didn\'t work: …' }));
+    assert.match(w2.el('earlier-text').textContent, /hook entries/);
+    await w2.click('earlier-apply');
+    assert.equal(w2.el('earlier-result').classList.contains('error'), true);
   });
 
   test('Install applies the previewed plan by its id; a file changed since the preview shows the refusal and the fresh preview', async () => {

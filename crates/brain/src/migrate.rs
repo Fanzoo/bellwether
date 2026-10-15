@@ -15,7 +15,7 @@
 //!    has none;
 //! 4. the repository's LaunchAgents are found by what they run and listed, never touched:
 //!    the app never writes LaunchAgents (plan D5), and moving them to the app's login items
-//!    is the app migration (`--to-app`, milestone 8);
+//!    is the app migration (`--to-app`, crates/brain/src/toapp.rs);
 //! 5. only then, the hook entries pasture wrote (`X-Pasture-*` headers), rewritten as
 //!    bellwether's with the token (a backup first), and only once a brain on the port
 //!    accepts that token under the current header name.
@@ -176,7 +176,7 @@ pub fn discover(user_home: &Path) -> Option<PathBuf> {
 }
 
 /// The .env an old install read: its own, or (at agents/<name> in a hub) the hub's.
-fn legacy_env_file(root: &Path) -> PathBuf {
+pub(crate) fn legacy_env_file(root: &Path) -> PathBuf {
     let own = root.join(".env");
     if own.exists() {
         return own;
@@ -192,7 +192,7 @@ fn legacy_env_file(root: &Path) -> PathBuf {
     own
 }
 
-fn same(a: &Path, b: &Path) -> bool {
+pub(crate) fn same(a: &Path, b: &Path) -> bool {
     match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
         (Ok(x), Ok(y)) => x == y,
         _ => installer::resolve(a) == installer::resolve(b),
@@ -200,7 +200,7 @@ fn same(a: &Path, b: &Path) -> bool {
 }
 
 /// Entries pasture wrote on the port (exact URL, X-Pasture-Token, no X-Bellwether-Token).
-fn count_legacy(file: &Path, port: u16) -> usize {
+pub(crate) fn count_legacy(file: &Path, port: u16) -> usize {
     let Ok(bytes) = std::fs::read(file) else { return 0 };
     let Ok(s) = lossless::parse(&String::from_utf8_lossy(&bytes)) else { return 0 };
     let mut n = 0;
@@ -219,7 +219,7 @@ fn count_legacy(file: &Path, port: u16) -> usize {
 }
 
 /// A usable token in the hook entries on the port (D9: hooks alone are enough to start).
-fn token_in_hooks(file: &Path, port: u16) -> Option<String> {
+pub(crate) fn token_in_hooks(file: &Path, port: u16) -> Option<String> {
     let s = lossless::parse(&String::from_utf8_lossy(&std::fs::read(file).ok()?)).ok()?;
     for (_, groups) in s.get("hooks")?.as_obj()?.iter() {
         for g in groups.as_arr().map(Vec::as_slice).unwrap_or(&[]) {
@@ -407,15 +407,11 @@ pub fn migrate(o: &Options) -> Result<Outcome, BrainError> {
             }
             if name == "state.json" {
                 // Through the same checks the brain applies on load, so a bad file can't get in.
-                let (persisted, warnings) = persist::load_state(&a);
+                let (clean, warnings) = clean_state(&a);
                 for w in warnings {
                     say(&mut lines, format!("warning: {w}"));
                 }
-                if matches!(persisted, Js::Null) {
-                    continue;
-                }
-                let merged = cfg::Config::defaults().merged;
-                let clean = flock::Flock::new(flock::FlockConfig::from_merged(&merged), &persisted, crate::now_ms() as f64).persistable();
+                let Some(clean) = clean else { continue };
                 let count = clean.get("identities").as_obj().map(|o| o.len()).unwrap_or(0);
                 say(&mut lines, format!("{name}: {} {count} session colour(s) and slot(s){}", would("copied", "would copy"), if clean.get("muted").truthy() { ", and mute" } else { "" }));
                 if o.write {
@@ -428,24 +424,22 @@ pub fn migrate(o: &Options) -> Result<Outcome, BrainError> {
                     say(&mut lines, format!("{name}: not valid JSON; skipped"));
                     continue;
                 };
-                let mut keep = Obj::new();
-                for k in ["hidden", "labels"] {
-                    if let Some(Js::Bool(x)) = v.get(k) {
-                        keep.set(k, *x);
-                    }
-                }
-                let text = json::stringify(&Js::Obj(keep));
+                // The strips write `showLabels` (privacy.rs, brain/privacy.mjs); `labels` is read
+                // too, in case a file ever had it. Written by the strip's own writer, as Node now
+                // writes it with privacy.mjs (the maintainer's decision on deviation 82).
+                let on = |k: &str| matches!(v.get(k), Some(Js::Bool(true)));
+                let (hidden, show_labels) = (on("hidden"), on("showLabels") || on("labels"));
+                let text = json::stringify(&Js::Obj(Obj::new().with("hidden", hidden).with("showLabels", show_labels)));
                 say(&mut lines, format!("{name}: {} {text}", would("copied", "would copy")));
                 if o.write {
-                    home::create_private_dir(home).map_err(|e| BrainError::new(format!("can't create {} ({e})", home.display()), exit::UNEXPECTED))?;
-                    installer::write_replace(&b, (text + "\n").as_bytes(), 0o600).map_err(|e| BrainError::new(format!("can't write {} ({e})", b.display()), exit::UNEXPECTED))?;
+                    bellwether_core::shellstate::write(home, hidden, show_labels).map_err(|e| BrainError::new(format!("can't write {} ({e})", b.display()), exit::UNEXPECTED))?;
                     did.push("shell-state");
                 }
             }
         }
     }
 
-    // 4. LaunchAgents: found and listed, never touched (plan D5; the swap is milestone 8).
+    // 4. LaunchAgents: found and listed, never touched (plan D5; the swap is `--to-app`).
     step(&mut lines, 4, "start at login (LaunchAgents)");
     let agents_dir = o.user_home.join("Library").join("LaunchAgents");
     let found = find_old_agents(&o.user_home, src.root.as_deref());
@@ -455,7 +449,7 @@ pub fn migrate(o: &Options) -> Result<Outcome, BrainError> {
         for a in &found {
             say(&mut lines, format!("the repository's LaunchAgent {} ({}, {}) is left as it is", a.label, a.kind, a.file.display()));
         }
-        say(&mut lines, "the app doesn't write or remove LaunchAgents: moving them to the app's login items is `bellwether migrate --to-app` (milestone 8). Until then the old brain keeps its port".into());
+        say(&mut lines, "the app doesn't write or remove LaunchAgents: moving them to the app's login items is `bellwether migrate --to-app`. Until then the old brain keeps its port".into());
     }
 
     // 5. Hook entries, last: only once a brain that reads them is answering.
@@ -494,9 +488,20 @@ pub fn migrate(o: &Options) -> Result<Outcome, BrainError> {
     Ok(Outcome { lines, wrote: o.write && !did.is_empty() })
 }
 
+/// An old state.json through the checks the brain applies on load (each session's colour,
+/// slots and label, and mute): None when there is nothing usable in it; and the warnings.
+pub(crate) fn clean_state(file: &Path) -> (Option<Js>, Vec<String>) {
+    let (persisted, warnings) = persist::load_state(file);
+    if matches!(persisted, Js::Null) {
+        return (None, warnings);
+    }
+    let merged = cfg::Config::defaults().merged;
+    (Some(flock::Flock::new(flock::FlockConfig::from_merged(&merged), &persisted, crate::now_ms() as f64).persistable()), warnings)
+}
+
 /// The config without the keys the app no longer reads (`brain.nodePath`, `autostart`),
 /// in its own layout; and which were dropped.
-fn drop_obsolete(text: &str) -> (String, Vec<&'static str>) {
+pub(crate) fn drop_obsolete(text: &str) -> (String, Vec<&'static str>) {
     let Ok(mut v) = lossless::parse(text) else { return (text.to_string(), Vec::new()) };
     let mut dropped = Vec::new();
     if let Some(o) = v.as_obj_mut() {
@@ -516,7 +521,7 @@ fn drop_obsolete(text: &str) -> (String, Vec<&'static str>) {
 }
 
 /// `fs.accessSync(f, W_OK)`, by asking the file system.
-fn writable(f: &Path) -> Result<(), String> {
+pub(crate) fn writable(f: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;

@@ -17,10 +17,18 @@
         <h2>An earlier Bellwether is on this Mac</h2>
         <p id="earlier-text"></p>
         <p>
-          Moving it into the app from this window comes with a later version. Until then, this
-          window won't turn on start at login or install hooks, because the two would fight over
-          one port. Everything else here works.
+          Bellwether can move it into the app in one step: the same hook token (so running
+          sessions keep working), your sheep's colours and places, and start at login. Below is
+          exactly what changes; nothing changes until you choose Move it. The repository itself
+          is never changed. If the new brain doesn't answer within 10 seconds, everything is put
+          back as it was.
         </p>
+        <div class="actions">
+          <button id="earlier-preview">Show what moves</button>
+          <button id="earlier-apply" class="primary">Move it into the app</button>
+        </div>
+        <pre id="earlier-plan" hidden></pre>
+        <p id="earlier-result" class="result"></p>
       </section>
 
       <section data-step="login" hidden>

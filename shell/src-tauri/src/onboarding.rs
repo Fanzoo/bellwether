@@ -9,11 +9,12 @@
 //! Arguments are enums or opaque ids: never paths, file contents or tokens. The token is
 //! masked in everything returned.
 //!
-//! Steps 2–8 of D6 are built here; step 1 (the guided move of an earlier install) is
-//! milestone 8. Until then an earlier install found on this Mac is named, and start at
-//! login and installing hooks are refused while it is there (deviation 63): two brains
-//! would fight over one port, and the app's hooks would carry a token the old brain
-//! refuses.
+//! Step 1 (milestone 8) is the guided move of an earlier install (D9): the same preview
+//! `bellwether migrate --to-app` prints, then the move on Confirm, through
+//! `bellwether_brain::toapp` on this app's host (`migration.rs`). For those users it
+//! replaces steps 2–3, and while an earlier install's LaunchAgents are there, start at
+//! login and installing hooks stay refused (deviation 63): two brains would fight over one
+//! port, and the app's hooks would carry a token the old brain refuses.
 //!
 //! Bellwether.app only. A repository debug build opens it only when asked (`--onboarding`),
 //! to test the window; a repository release build (the strip a repository LaunchAgent
@@ -109,8 +110,14 @@ struct Stored {
     token: PlanToken,
 }
 
+/// Makes the host the migration runs on (the app's own; tests give a recorder).
+pub type HostFactory = Box<dyn Fn(&Ctx) -> Result<Box<dyn bellwether_brain::toapp::Host + Send>, String> + Send + Sync>;
+
 pub struct Onboarding {
     pub ctx: Ctx,
+    host: HostFactory,
+    /// The current migration preview: its id, and what it was worked out from.
+    migration_plan: Mutex<Option<(String, String)>>,
     /// The one current preview: a new preview replaces it, and applying takes it.
     plans: Mutex<HashMap<String, Stored>>,
     next: AtomicU64,
@@ -121,7 +128,11 @@ pub struct Onboarding {
 
 impl Onboarding {
     pub fn new(ctx: Ctx) -> Onboarding {
-        Onboarding { ctx, plans: Mutex::new(HashMap::new()), next: AtomicU64::new(1), prompted_ax: AtomicBool::new(false) }
+        Onboarding::with_host(ctx, Box::new(|c: &Ctx| crate::migration::host_for(&c.user_home)))
+    }
+
+    pub fn with_host(ctx: Ctx, host: HostFactory) -> Onboarding {
+        Onboarding { ctx, host, migration_plan: Mutex::new(None), plans: Mutex::new(HashMap::new()), next: AtomicU64::new(1), prompted_ax: AtomicBool::new(false) }
     }
 
     // ------------------------------------------------------------ the token
@@ -176,6 +187,93 @@ impl Onboarding {
             "refused: {what} waits until the earlier Bellwether on this Mac ({}) is moved into the app. Its brain uses the same port, so two brains would fight over it, and its hooks would get a token it refuses. Run `bellwether doctor` in a terminal for the details",
             bellwether_brain::legacy::summary(&found)
         ))
+    }
+
+    // ------------------------------------------------------------ step 1: the move (D9)
+
+    fn migration_options(&self, write: bool) -> bellwether_brain::toapp::Options {
+        bellwether_brain::toapp::Options { from: None, env_from: None, settings: self.ctx.settings_file(), write, force: false, home: self.ctx.home.clone(), user_home: self.ctx.user_home.clone() }
+    }
+
+    /// What a preview was worked out from: if any of it differs at Confirm, the user sees a
+    /// fresh preview instead (as with the hooks).
+    fn migration_fingerprint(&self, s: &bellwether_brain::toapp::Survey) -> String {
+        let settings = std::fs::read(self.ctx.settings_file()).map(|b| installer::sha256_hex(&b)).unwrap_or_default();
+        let agents: Vec<String> = s.agents.iter().map(|a| format!("{}:{}:{:?}", a.label, a.plist.is_some(), a.loaded)).collect();
+        let copy: Vec<String> = s.copy.iter().map(|c| format!("{c:?}").chars().take(200).collect()).collect();
+        format!("{settings}|{}|{:?}|{}|{:?}|{}", agents.join(","), s.token.as_ref().map(|(_, f)| f), copy.join(","), s.source.as_ref().map(|x| &x.data_dir), s.port)
+    }
+
+    /// D6 step 1's preview: `bellwether migrate --to-app`'s, token masked. Kept on the Rust
+    /// side under a one-use id.
+    pub fn migration_preview(&self) -> Result<Value, String> {
+        if self.ctx.layout != Layout::App {
+            return Err("moving an earlier install needs Bellwether.app (this is a repository build)".into());
+        }
+        let host = (self.host)(&self.ctx)?;
+        let o = self.migration_options(false);
+        let s = bellwether_brain::toapp::survey(&o, host.as_ref()).map_err(|e| e.message)?;
+        let lines = bellwether_brain::toapp::preview(&o, &s, host.as_ref());
+        let token = s.token.as_ref().map(|(t, _)| t.clone());
+        let text = bellwether_core::mask::mask_alone(&lines.join("\n"), token.as_deref());
+        if s.nothing() {
+            *self.migration_plan.lock().unwrap() = None;
+            return Ok(json!({ "found": false, "planId": Value::Null, "text": text, "message": "nothing to migrate: no earlier Bellwether on this Mac" }));
+        }
+        let id = format!("move-{}-{}", self.next.fetch_add(1, Ordering::SeqCst), &tok::generate().map_err(|e| e.message)?[..8]);
+        *self.migration_plan.lock().unwrap() = Some((id.clone(), self.migration_fingerprint(&s)));
+        log(&format!("onboarding: migration preview: {} agent(s), {} file(s) to copy", s.agents.len(), s.copy.len()));
+        Ok(json!({ "found": true, "planId": id, "text": text, "agents": s.agents.iter().map(|a| a.label.clone()).collect::<Vec<_>>() }))
+    }
+
+    /// D6 step 1's Confirm: runs the previewed migration, only if nothing it was worked out
+    /// from changed since (otherwise a fresh preview comes back, and nothing is done).
+    pub fn migration_apply(&self, id: &str) -> Result<Value, String> {
+        // Only the current preview's id takes it; a stale id leaves the current one in place.
+        let fingerprint = {
+            let mut plan = self.migration_plan.lock().unwrap();
+            match plan.as_ref() {
+                Some((current, _)) if current == id => plan.take().unwrap().1,
+                _ => return Err("that preview is no longer the current one; show what moves again".into()),
+            }
+        };
+        if bellwether_brain::migrate::is_real_home(&self.ctx.user_home) {
+            if let Some(why) = crate::migration::real_write_refusal() {
+                return Err(why);
+            }
+        }
+        let mut host = (self.host)(&self.ctx)?;
+        let o = self.migration_options(true);
+        let s = bellwether_brain::toapp::survey(&o, host.as_ref()).map_err(|e| e.message)?;
+        if self.migration_fingerprint(&s) != fingerprint {
+            log("onboarding: migration: refused, something changed since the preview");
+            return Ok(json!({ "outcome": "changed", "message": "something changed since the preview (the settings file, the old agents or the files to copy), so nothing was done. Here is a fresh preview; check it and confirm again.", "preview": self.migration_preview()? }));
+        }
+        let token = s.token.as_ref().map(|(t, _)| t.clone());
+        let mask = |t: &str| bellwether_core::mask::mask_alone(t, token.as_deref());
+        match bellwether_brain::toapp::to_app(&o, host.as_mut()) {
+            Ok(out) => {
+                log("onboarding: migration: done");
+                Ok(json!({ "outcome": "applied", "text": mask(&out.lines.join("\n")) }))
+            }
+            Err(e) => {
+                log(&format!("onboarding: migration: stopped: {}", e.message.lines().next().unwrap_or("")));
+                Ok(json!({ "outcome": "failed", "text": mask(&e.message) }))
+            }
+        }
+    }
+
+    /// Whether step 1 has anything to offer: the old LaunchAgents, or anything else of an
+    /// earlier install the migration would move (hook entries alone, D9).
+    fn migration_found(&self, earlier: &[bellwether_brain::legacy::Agent]) -> bool {
+        if !earlier.is_empty() {
+            return true;
+        }
+        if self.ctx.layout != Layout::App {
+            return false;
+        }
+        let Ok(host) = (self.host)(&self.ctx) else { return false };
+        bellwether_brain::toapp::survey(&self.migration_options(false), host.as_ref()).is_ok_and(|s| s.found())
     }
 
     // ------------------------------------------------------------ hooks
@@ -483,7 +581,7 @@ impl Onboarding {
             "accessibility": crate::ax::trusted(),
             "automation": { "iterm2": automation_state("com.googlecode.iterm2"), "terminal": automation_state("com.apple.Terminal") },
             "pets": self.pets(config),
-            "migration": { "found": !earlier.is_empty(), "agents": earlier.iter().map(|a| a.short()).collect::<Vec<_>>() },
+            "migration": { "found": self.migration_found(&earlier), "agents": earlier.iter().map(|a| a.short()).collect::<Vec<_>>() },
             "cliTool": self.cli_tool_state(),
         })
     }
@@ -908,23 +1006,13 @@ pub async fn pet_import(window: tauri::WebviewWindow, app: AppHandle) -> Out {
 #[tauri::command]
 pub async fn migration_preview(window: tauri::WebviewWindow, app: AppHandle) -> Out {
     guard(window.label())?;
-    blocking(move || {
-        let found = app.state::<Onboarding>().earlier_install();
-        json!({
-            "found": !found.is_empty(),
-            "agents": found.iter().map(|a| a.short()).collect::<Vec<_>>(),
-            "planId": Value::Null,
-            "message": if found.is_empty() { "nothing to migrate: no earlier Bellwether on this Mac".to_string() } else { format!("an earlier Bellwether is set up on this Mac ({}). Moving it into the app from here comes with a later version (milestone 8). Until then, start at login and installing hooks stay off here, so the two don't fight over one port", bellwether_brain::legacy::summary(&found)) },
-        })
-    })
-    .await
+    blocking(move || app.state::<Onboarding>().migration_preview()).await?
 }
 
 #[tauri::command]
-pub async fn migration_apply(window: tauri::WebviewWindow, plan_id: String) -> Out {
+pub async fn migration_apply(window: tauri::WebviewWindow, app: AppHandle, plan_id: String) -> Out {
     guard(window.label())?;
-    let _ = plan_id;
-    Err("the move of an earlier install into the app isn't built yet (milestone 8); nothing was changed".into())
+    blocking(move || app.state::<Onboarding>().migration_apply(&plan_id)).await?
 }
 
 #[tauri::command]
@@ -1079,6 +1167,111 @@ mod tests {
         assert!(ob.login_items_set(true).unwrap_err().contains("Bellwether.app"));
         assert!(ob.pet_import_file(Path::new("/nonexistent")).unwrap_err().contains("repository"));
         assert!(ob.pet_select("esheep64", &Value::Null).is_err());
+    }
+
+    /// A migration host that records what it is asked and never runs launchctl or
+    /// SMAppService (plan D9 in the window, milestone 8).
+    struct Rec {
+        calls: std::sync::Arc<Mutex<Vec<String>>>,
+        app_agent: Option<i32>,
+    }
+
+    impl bellwether_brain::toapp::Host for Rec {
+        fn acts(&self) -> bool {
+            true
+        }
+        fn domain(&self) -> String {
+            "gui/501".into()
+        }
+        fn loaded(&self, label: &str) -> bellwether_brain::legacy::Loaded {
+            let booted = self.calls.lock().unwrap().iter().any(|c| c.ends_with(&format!("/{label}")));
+            if label == "local.bellwether.brain" && !booted { bellwether_brain::legacy::Loaded::Running(4242) } else { bellwether_brain::legacy::Loaded::No }
+        }
+        fn app_agent(&self) -> Option<i32> {
+            self.app_agent
+        }
+        fn launchctl(&mut self, args: &[String]) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("launchctl {}", args.join(" ")));
+            Ok(())
+        }
+        fn register(&mut self) -> Result<Vec<String>, String> {
+            self.calls.lock().unwrap().push("register".into());
+            Ok(vec!["brain agent: enabled".into(), "app at login: enabled".into()])
+        }
+        fn unregister(&mut self) -> Result<Vec<String>, String> {
+            self.calls.lock().unwrap().push("unregister".into());
+            Ok(vec![])
+        }
+        fn port_holder(&self, port: u16) -> bellwether_brain::toapp::Holder {
+            bellwether_brain::toapp::port_holder(port)
+        }
+        fn process_path(&self, _: i32) -> Option<PathBuf> {
+            None
+        }
+        fn terminate(&mut self, _: i32) -> bool {
+            false
+        }
+        fn doctor(&self, _: &Path, _: &Path, _: u16) -> Vec<String> {
+            vec!["PASS  brain".into()]
+        }
+        fn verify_limit(&self) -> Duration {
+            Duration::from_secs(3)
+        }
+    }
+
+    #[test]
+    fn step_one_previews_the_move_and_confirm_runs_exactly_it() {
+        let base = temp("move");
+        // A brain already answering, playing this app's own agent (a recorder never starts one).
+        let bound = bellwether_brain::bind(0).unwrap();
+        let port = bound.port;
+        let opts = bellwether_brain::Options::new(T.into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+        // (No stop handle without tokio here: it ends with the test process.)
+        std::thread::spawn(move || {
+            let _ = bellwether_brain::serve(bound, opts, None);
+        });
+        let mut c = ctx(&base, None);
+        c.port = port;
+        let repo = base.join("repo");
+        std::fs::create_dir_all(repo.join("data")).unwrap();
+        std::fs::create_dir_all(repo.join("brain")).unwrap();
+        std::fs::write(repo.join(".env"), format!("BELLWETHER_HOOK_TOKEN={T}\n")).unwrap();
+        std::fs::write(repo.join("config.json"), format!("{{\"port\": {port}}}\n")).unwrap();
+        let agents = c.user_home.join("Library").join("LaunchAgents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(agents.join("local.bellwether.brain.plist"), format!("<plist><dict><key>Label</key><string>local.bellwether.brain</string><key>WorkingDirectory</key><string>{}</string></dict></plist>", repo.display())).unwrap();
+        let settings = c.settings_file();
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let pasture = (bellwether_core::lossless::stringify(&installer::hook_block(port, T), "  ") + "\n").replace("X-Bellwether-", "X-Pasture-");
+        std::fs::write(&settings, &pasture).unwrap();
+        let calls = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let shared = calls.clone();
+        let me = std::process::id() as i32;
+        let ob = Onboarding::with_host(c, Box::new(move |_| Ok(Box::new(Rec { calls: shared.clone(), app_agent: Some(me) }))));
+        assert_eq!(ob.status(&Value::Null)["migration"]["found"], true);
+        let p = ob.migration_preview().unwrap();
+        assert_eq!(p["found"], true);
+        let text = p["text"].as_str().unwrap();
+        assert!(text.contains("- copy the token from") && text.contains("- rewrite 16 pasture entries") && text.contains("local.bellwether.brain.plist to"), "{text}");
+        assert!(!text.contains(T), "masked");
+        assert!(calls.lock().unwrap().is_empty(), "a preview calls nothing");
+        // The settings file changes after the preview: a fresh preview, nothing done.
+        std::fs::write(&settings, pasture.replacen("{", "{ ", 1)).unwrap();
+        let r = ob.migration_apply(p["planId"].as_str().unwrap()).unwrap();
+        assert_eq!(r["outcome"], "changed");
+        assert!(calls.lock().unwrap().is_empty() && !tok::file(&ob.ctx.home).exists());
+        assert!(ob.migration_apply(p["planId"].as_str().unwrap()).is_err(), "a preview is used once");
+        let fresh = r["preview"]["planId"].as_str().unwrap().to_string();
+        let done = ob.migration_apply(&fresh).unwrap();
+        assert_eq!(done["outcome"], "applied", "{done}");
+        assert_eq!(*calls.lock().unwrap(), ["launchctl bootout gui/501/local.bellwether.brain", "register"]);
+        let text = done["text"].as_str().unwrap();
+        assert!(text.contains("the new brain answers on port") && !text.contains(T), "{text}");
+        assert!(!agents.join("local.bellwether.brain.plist").exists() && ob.ctx.home.join("legacy").join("local.bellwether.brain.plist").exists());
+        assert!(!std::fs::read_to_string(&settings).unwrap().contains("X-Pasture-"));
+        assert_eq!(ob.migration_preview().unwrap()["found"], false, "a second look: nothing to migrate");
+        assert_eq!(ob.status(&Value::Null)["migration"]["found"], false);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

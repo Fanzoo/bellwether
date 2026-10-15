@@ -2253,6 +2253,9 @@ Terminal.app.
 
 #### M5 switch-over: moving the live repository install to the app by hand (not run)
 
+Since M8, `bellwether migrate --to-app` does steps 3–6 and `--undo` step 9: use M8's by-hand
+checks instead. Kept for reference.
+
 For the maintainer, when he chooses to, before M8 automates it. It keeps the same token and
 URL, so running sessions keep working; the only gap is the second between steps 5.2 and 5.3,
 where a hook may print one "hook error" (decision 11).
@@ -2735,6 +2738,289 @@ legacy discovery for both `local.bellwether.*` and `local.pasture.*`.
   alerts after it;
 - a forced failure (port held by a dummy listener) leaves the old setup running and
   says what holds the port.
+
+#### M8 status (developer, 2026-10-15): built and tested on fixture HOMEs; the real repository install is the maintainer's; CI not yet run
+
+Built:
+- **The engine** (`crates/brain/src/toapp.rs`, platform-neutral): `survey` (read only: the old
+  agents, the repository, the port, the token, the files to copy, the planned hook edit, a
+  strip `shell start` left), `preview`, `to_app` (D9's seven steps in order) and `undo`.
+  Everything that touches launchd, SMAppService or a process goes through a `Host` trait.
+  The old agents are D5's four labels (plist present or loaded) plus any LaunchAgent that runs
+  that checkout's brain or strip (a hub's own label, as M4's `migrate` finds them). A record,
+  `<home>/legacy/migration.json` (0600), says what steps 4 and 5 did, for `--undo`.
+- **The app's hosts** (`shell/src-tauri/src/migration.rs`): `Real` (`/bin/launchctl`, both
+  login items through `login_items`, signals by exact pid) only for the real HOME; `Stubbed`
+  for any other HOME (deviation 76). `bellwether migrate --to-app …` and `migrate --undo
+  [--write]` (cli.rs routes them here; plain `migrate` is M4's, unchanged).
+- **Onboarding step 1** (`onboarding.rs`, `onboarding.{html,js}`): `migration_preview` returns
+  the CLI's preview (token masked) under a one-use id with a fingerprint of what it was worked
+  out from; `migration_apply(planId)` runs exactly that, or returns a fresh preview if anything
+  changed (as the hooks step does). The page shows the preview at once, Move it into the app
+  runs it, and the step list without steps 2–3 (D6) (deviation 81).
+- **The swap marker** (deviation 77): the running app's strip starts no brain of its own while
+  a migration swaps the brains.
+- **Docs**: README (the command lines, "Moving a repository install into the app"), doctor's
+  `legacy agents` advice names `migrate --to-app`, test/DIVERGENCES.md 25.
+- **legacy.rs**: the flaky `plists_and_launchd_each_count_alone` was a real race: `home_with(&[])`
+  named its temp folder after the plist list only, so it and `an_unsearchable_folder_is_reported`
+  shared one folder, each removing and recreating it while the other wrote in it (the EINVAL of
+  M7). Each call now gets its own folder. The bounded runner became generic (`run_output`).
+
+How nothing here can touch the live install (tests and code):
+- the real host is chosen only when HOME is the passwd home, and refused there when
+  `BELLWETHER_TEST_ROOT` is set (every Node test process and every cargo fixture run sets it)
+  or a stand-in is named; the choice is made before any file is read (`choose`, unit-tested
+  with every combination; a source check pins the order in `command`);
+- in a test build the real host's `launchctl`, `register` and `unregister` begin with a panic
+  (checked by reading the source, never by calling them);
+- under any other HOME, launchctl and the login items are reached only through
+  `BELLWETHER_LAUNCHCTL` and `BELLWETHER_LOGIN_ITEMS`, which must be absolute paths to existing
+  files and are refused when they resolve to `/bin/launchctl` or any file named `launchctl`;
+  without them neither is called, and port 47417 is never asked under a temp HOME;
+- the Node harness refuses `migrate --to-app|--undo` from a binary inside an app bundle
+  (`rustRefusal`, isolation.test), on top of the temp HOME `rustEnv` already forces;
+- `--write` with the real HOME refuses up front outside Bellwether.app, from a stale session,
+  for a test build, or with `BELLWETHER_HOME` set (`real_write_refusal`).
+
+Proved here (temp HOMEs only; `shell/src-tauri/tests/migration_fixtures.rs` runs the real binary
+with the two stand-in scripts it writes; "launchd's" agents are a Rust brain on a free port
+above 47417 playing the old Node brain, and a `sleep` playing the old strip, all tracked by pid
+and stopped at the end after checking what they run):
+- **The three fixtures** (renamed repository install, pasture install, hook entries alone): the
+  preview lists exactly the expected actions (compared line for line) and changes nothing; `--write`
+  boots out exactly the loaded agents, registers once, the new brain answers with the same token
+  (a `SessionStart` with the old token gets 204), Application Support holds exactly the expected
+  files (hook-token 0600 with the same value, config.json without `autostart` and
+  `brain.nodePath`, state.json with both sessions' colours and slots and mute, shell-state.json
+  with Show labels, installs.json with the old record's realpath key unchanged, the old backup
+  0600, the pet imported and pinned, `legacy/` with the plists byte for byte and the record), no
+  legacy plist is left in `~/Library/LaunchAgents` (another of the user's agents untouched), and
+  the settings bytes are unchanged (renamed, hooks only) or exactly the installer's rewrite
+  (pasture);
+- **a second run** (preview and `--write`) says "Nothing to migrate" and registers nothing;
+- **`--undo --write`** unregisters, moves both plists back byte for byte, bootstraps the ones that
+  were loaded, restores the original settings bytes, and the app's brain is gone; a second
+  `--undo` says "Nothing to undo"; the old install can then be previewed again;
+- **the forced failure**: a dummy listener (this test process) holds the port; the preview says
+  `STOP: port N is held by pid P (migration_fixtures-…)`, `--write` exits 2 with `port N is held
+  by pid P (migration_fixtures-…), which isn't a bellwether or pasture brain. Nothing was
+  changed: the old setup keeps running. …`; no launchctl or login-item call, the old strip still
+  runs, plists, settings and Application Support untouched;
+- **a new brain that never answers** (the stand-in registers but starts nothing): after 4 s the
+  swap is undone (unregister, plists back, both agents bootstrapped), exit 1, hooks untouched.
+
+Output of the pasture fixture, abridged (temp paths shortened to `…`):
+
+```
+3. Port 60068
+   port 60068 is held by the old brain (local.pasture.brain, pid 50671); it is stopped in step 4
+4. Start at login
+   stopped local.pasture.brain (launchctl bootout)
+   stopped local.pasture.shell (launchctl bootout)
+   moved …/LaunchAgents/local.pasture.brain.plist to …/Bellwether/legacy/local.pasture.brain.plist
+   moved …/LaunchAgents/local.pasture.shell.plist to …/Bellwether/legacy/local.pasture.shell.plist
+   brain agent: enabled
+   app at login: enabled
+   the new brain answers on port 60068 (pid 50724) and takes the hook token (18 ms)
+5. Hook entries in …/home/.claude/settings.json
+   rewrote Bellwether's entries with the current header names
+   backup of the previous file: …/Bellwether/backups/settings-2026-10-15T19-29-23-718Z.json
+```
+
+Progress against **Done when**:
+- [x] For each of the three fixture HOMEs, the preview lists exactly the expected actions, and
+  `--write` gives the expected Application Support contents, settings bytes and no legacy plists
+  in `~/Library/LaunchAgents` (the fixture tests above; launchctl and the login items stubbed).
+- [x] A second run says "nothing to migrate".
+- [x] `--undo` restores the original settings bytes and plists.
+- [ ] A real repository install: colours and slots kept, a session started before keeps alerting.
+  The maintainer's, by hand (below). The fixtures show the colours, slots and token carried and a
+  hook with the old token accepted by the new brain; the real launchd, SMAppService and a live
+  Claude Code session were not used.
+- [x] A forced failure (port held by a dummy listener) leaves the old setup running and says what
+  holds the port.
+
+Counts and checks (this Mac, 2026-10-15, every run under `caffeinate -dims`):
+- `npm test`: 1007 tests, 1005 pass, 0 fail, 2 skipped (1006 after M7's review: onboarding.test's
+  step-1 test).
+- `npm run test:cargo`: 202 passed, 0 failed, three runs in a row (187 after M7's review: toapp.rs 6,
+  migration.rs 3, onboarding.rs 1, migration_fixtures.rs 5); with `--features
+  bellwether-shell/conformance`: 204.
+- `npm run test:rust` (conformance binary rebuilt first): exit 0, node 29 of 29 files green, rust 29
+  of 29 (no new parity row: `--to-app` has nothing to run against Node, DIVERGENCES 25).
+- `npm run differential` (seed 1): env, redact, normalise, diff 0 differences in 10⁵ each; json 0
+  unexplained (22 336 explained); fixture 0 (21); `node --env-file` 0 unexplained.
+- `npm run test:vectors`: all 60 files match. `third-party.mjs --check`: up to date (no new crate).
+- The cross-target check of core and brain (Linux, Windows): clean, no warnings.
+- Release check (`--target-dir shell/src-tauri/target-dev/release-check`): `__fixture`, `__json`,
+  `__diff`, `__session` print `unknown command`, exit 1.
+  `shell/src-tauri/target/release/bellwether-shell` kept sha256 `35ceb697…`.
+
+Not done or not proved:
+- anything against the real launchd, SMAppService, the real `~/Library/LaunchAgents` or the live
+  install: by design, the maintainer's by-hand run below;
+- the setup window's step 1 clicked in a real window (the page is tested against a stand-in DOM,
+  the commands with a recording host and an in-process brain);
+- `requiresApproval` during a real migration (unit-tested as "undone at once", deviation 78);
+- CI.
+
+#### M8 by-hand checks (maintainer): moving the live repository install to the app
+
+This replaces the M5 switch-over's steps 3–6 and 9. It changes the install your sheep run on.
+Do it when a few minutes of hook errors wouldn't matter, from a terminal opened after your
+last login (not a herdr pane from before it).
+
+1. **A release build** (as M5 switch-over step 1): `node scripts/build-app.mjs --notarize`; its last
+   line must be `release build: no test port or home in the bundle`. `ditto` it to
+   `/Applications/Bellwether.app`; `A=/Applications/Bellwether.app`, `B="$A/Contents/MacOS/Bellwether"`.
+   Don't set `BELLWETHER_HOME` (the command refuses it).
+2. **Backups**: `cp ~/.claude/settings.json ~/.claude/settings.json.before-m8`;
+   `cp ~/Library/LaunchAgents/local.bellwether.*.plist ~/Desktop/`; note `launchctl list | grep local.bellwether`
+   and `curl -s http://127.0.0.1:47417/health` (the Node brain's pid). Note two running sessions'
+   sheep colours and positions (a screenshot).
+3. **Preview**: `"$B" migrate --to-app`. Expect: the token copied from the repository's `.env`
+   (or, if the app already has a token of its own from your M5–M7 testing, `replace the app's
+   own hook token … with the token from …/.env`: that is right, it keeps running sessions working);
+   config.json without `brain.nodePath`; state.json with your sessions; shell-state.json; installs.json;
+   your backups; esheep64 imported; `port 47417 is held by the old brain (local.bellwether.brain,
+   pid <Node brain>)`; both agents stopped and moved to `legacy/`; and hook entries **already
+   current** (no diff). If it shows a hook diff or a STOP, stop here and compare.
+4. **Move**: `"$B" migrate --to-app --write`. Expect exit 0, step 4 ending `the new brain answers on
+   port 47417 (pid N) and takes the hook token (… ms)`, step 5 `already current: unchanged`, and
+   doctor at the end. If it says an item is **waiting for your approval**, everything was undone
+   (the Node brain is back): turn Bellwether on in System Settings > General > Login Items &
+   Extensions, then run step 4 again. If the run is interrupted (terminal closed, Ctrl-C), run
+   step 3 again: it says the migration is unfinished and step 4 finishes it (or `--undo
+   --write` puts the old setup back).
+5. **Check**:
+   1. `ps -o ppid,args -p N`: `1 /Applications/Bellwether.app/Contents/MacOS/Bellwether serve`;
+      `ls ~/Library/LaunchAgents | grep -c local.bellwether` prints 0.
+   2. The strip: if no sheep appear, `"$B" shell start`. The two sessions from step 2 show
+      **the same colours and slots** (screenshot to compare).
+   3. In a session started **before** step 4, ask for something that needs permission: its sheep
+      alerts with a bubble.
+   4. `"$B" doctor`: brain (the Rust brain), brain token, hooks, `login: brain` and `login: app`
+      PASS, no `legacy agents` line.
+   5. launchd names the app's brain under the label the migration expects: `launchctl print
+      gui/$(id -u)/com.fanzootechnology.bellwether.brain | grep -E '^\s+pid ='` shows the same pid
+      as step 5.1's `/health`. (Recovering an interrupted run depends on it: BR-3K's re-check
+      drove it only through a stand-in.) Note it either way.
+   6. A second `"$B" migrate --to-app` says `Nothing to migrate`.
+6. **Accessibility**: as M5 switch-over step 8.
+7. **Rollback, if anything is wrong**: `"$B" migrate --undo` (preview), then `--undo --write`: the
+   login items go, the two plists come back and are started, and the settings file is restored
+   only if nothing else changed it (here it wasn't changed at all). Check `curl -s
+   http://127.0.0.1:47417/health` shows a Node brain again. If the plists aren't back, step 2's
+   copies on the Desktop and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.bellwether.brain.plist`
+   (and `.shell`) do it by hand.
+8. **The window instead (optional, on a spare account or after a rollback)**: open Bellwether;
+   the first page shows the same preview; Move it into the app does step 4. Note how it looks.
+
+#### M8 review fixes (BR-3K: "ship with fixes", 2026-10-15)
+
+BR-3K's repros are in `test/m8-tester/` (left in place); each defect now has a regression test.
+Re-run against the fixed dev binary, `test/m8-tester/repro.sh` gives: D1 `killed exit=137`, then
+the rerun's preview `Earlier install: already moved by a migration that didn't finish …`; D2 the
+undo stops with `STOP: …/LaunchAgents can't be written (EACCES) …` and `Nothing was changed …
+the record is kept`, and the next `--undo` still finds the record; D3 `a running session's old
+token -> 204 (want 204)`.
+- **D3, a different app token** (deviation 86). Step 1 now carries the token running sessions
+  hold (the old `.env`'s, else the hook entries') into `hook-token`, replacing an app token that
+  differs; the app's own is kept as `legacy/hook-token.before-migration` (0600), and if this
+  app's own brain agent already holds the port it is told to reload. The preview's first action
+  says it: `replace the app's own hook token (…) with the token from …/.env: running sessions
+  carry that one, and with the app's they would be refused (403)`. Tests:
+  migration_fixtures `a_different_app_token_is_replaced_so_running_sessions_keep_working` (old
+  token 204, app token 403, settings keep the sessions' token) and toapp
+  `the_app_token_gives_way_to_the_one_running_sessions_carry`. There is no case left where the
+  app's differing token is kept: the old install's token is what its brain accepts now.
+- **D1, killed during step 4** (deviation 87). Step 4 records `"swap": "started"` before the first
+  bootout and `"done"` (or `"undone"`) at the end. `survey` reports a migration as unfinished,
+  so never "Nothing to migrate", when its record says started, or (a finished one, with a host
+  that acts) when the app's login items aren't registered or no brain takes the token; the
+  preview says why and that `--undo --write` is the other way out, and `--write` finishes it.
+  The swap marker now carries the run's pid and counts only while that run is alive (and under
+  a minute), so a crash never blocks the app's own brain. The hosts gained `registered()`
+  (SMAppService's status; a stand-in's `status`). Test:
+  `a_run_killed_during_step_4_is_finished_by_the_next_run` (SIGKILL from the stand-in while it
+  registers; nothing answers, the marker doesn't count, the rerun finishes, the old token 204,
+  then a missing login item shows as unfinished, then undo works).
+- **D2, a failed undo said Done** (deviation 88). Undo now checks first that every plist can go
+  back (none lost, LaunchAgents writable), moves them all or none, and only then unregisters,
+  bootstraps (skipping one already running) and restores the settings file. Anything left keeps
+  the record, is listed, and exits 1; a rerun picks up (plists already back are skipped). Plists
+  are found with `symlink_metadata`, so a dangling symlink moves and comes back as the link it
+  was. Tests: `an_undo_that_cannot_put_the_plists_back_changes_nothing_and_can_run_again`
+  (chmod 500: exit 1, no unregister, record kept, brain still answers; after chmod 700 the same
+  command restores the bytes) and toapp `a_dangling_symlink_plist_moves_and_comes_back`.
+- **The real host only from a release app** (deviation 89). `choose` now also needs, for the real
+  HOME, this executable to be Bellwether.app's own (`…/Bellwether.app/Contents/MacOS/Bellwether`
+  by its resolved path), with the permanent id and no test port or home in its bundle; anything
+  else (a development or release-check binary, a test build, an ad-hoc bundle) refuses, preview
+  included, before any file is read: `refused: the move into the app runs only from an installed
+  Bellwether.app (a release build), and … Nothing was read or changed`, exit 3. Tested with
+  spoofed builds only (`classify`, and `choose` given each kind); the test binary itself
+  classifies as not the app.
+- **Observations fixed** (deviation 90): a copy that fails in step 2 stops the run (exit 1) before
+  any agent, login item or hook entry is touched (toapp `a_failed_copy_stops_before_any_agent_is_touched`);
+  `legacy/migrate.lock` lets one `--write` or undo run at a time (`one_migration_at_a_time`;
+  since the re-check an `flock`, below); undo validates the record first, refusing any label
+  but the four of D5 or a hub's `*.pasture.brain|shell`, any move other than
+  `~/Library/LaunchAgents/<name>` ↔ `<home>/legacy/<same name>`, a `..` in either path, and a
+  settings entry for another file or a backup outside `<home>/backups/`
+  (`undo_puts_back_only_what_the_migration_moved`, seven shapes, none touches anything).
+- **Deviation 82** (plain `migrate` dropped Show labels): left at first, then fixed in both brains
+  on the maintainer's decision (see deviation 82). After it: `npm test` 1008 tests, 1006 pass, 0
+  fail, 2 skipped (migrate.test's new test); `npm run test:cargo` 212 passed, 0 failed; with
+  `--features bellwether-shell/conformance` 214; `npm run test:rust` exit 0, node 29 of 29, rust 29
+  of 29 (migrate.test 27/27 and 8/8 + 19 skipped); `npm run differential` (seed 1) 0 differences
+  in env, redact, normalise, diff, json 0 unexplained, fixture 0, `node --env-file` 0 unexplained.
+
+Re-check (BR-3K: "ship", two small leftovers; fixed 2026-10-15):
+- **R1, a kill between the first plist rename and the record** (deviation 91). The record now
+  names each move before its rename (a recorded plist still in LaunchAgents is "back already"
+  to undo), and step 5's rewrite (its backup path and the sha256 of the bytes it will write)
+  before the file is touched, cleared again if the write fails. Plists of known labels already
+  sitting in `legacy/` that the record doesn't list count as moved: the survey finds the
+  repository through a moved brain plist (so its token and port), calls the migration
+  unfinished, the rerun records them, and undo puts them back even with no record at all. Test:
+  toapp `a_run_killed_between_the_plist_moves_is_recovered_by_a_rerun_or_an_undo` (BR-3K's sim2
+  state on a non-default port: the rerun finds the repository and port, finishes, records both
+  plists, and undo restores both; undo run straight from that state also restores both; plus
+  source checks of the two orders). BR-3K's `recheck.sh sim`, run once against the fixed binary
+  before the folder was deleted: sim1 and sim2 all PASS (rerun and undo exit 0, both plists back
+  byte for byte, the old brain agent bootstrapped).
+- **R2, the stale-lock takeover** (deviation 92). `Lock` is now an exclusive `flock` (non-blocking)
+  on `legacy/migrate.lock`, which holds the pid only for the refusal message. The kernel releases
+  it when the run ends however it ends, so there is nothing to take over and no remove-then-create
+  window; the file is never removed. Test: `one_migration_at_a_time` (held: refused with the pid;
+  released on drop; a leftover file with a dead pid or garbage isn't a lock; a source check that
+  `take` uses `flock` and never `remove_file`).
+- `test/m8-tester/` is deleted (its D1–D3 and sim2 cases are cargo tests now).
+- By-hand check 5.5 added: confirm launchd reports the app's brain under
+  `com.fanzootechnology.bellwether.brain`, which the D1 recovery relies on.
+
+After the re-check fixes (this Mac, 2026-10-15, under `caffeinate -dims`): `npm test` 1007 tests,
+1005 pass, 0 fail, 2 skipped; `npm run test:cargo` 212 passed, 0 failed, three runs in a row (211
+before: toapp's R1 test); with `--features bellwether-shell/conformance` 214; `npm run test:rust`
+(conformance binary built) exit 0, node 29 of 29, rust 29 of 29; `npm run differential` (seed 1)
+env, redact, normalise, diff 0 differences in 10⁵ each, json 0 unexplained (22 336 explained),
+fixture 0 (21), `node --env-file` 0 unexplained; `npm run test:vectors` all 60 match; the Linux
+and Windows check of core and brain clean; `shell/src-tauri/target/release/bellwether-shell` kept
+sha256 `35ceb697…`.
+
+After the fixes (this Mac, 2026-10-15, every run under `caffeinate -dims`):
+- `npm test`: 1007 tests, 1005 pass, 0 fail, 2 skipped (unchanged: the new tests are cargo tests).
+- `npm run test:cargo`: 211 passed, 0 failed, three runs in a row (202 before: toapp 5, migration.rs
+  1, migration_fixtures 3); with `--features bellwether-shell/conformance`: 213.
+- `npm run test:rust` (conformance binary built): exit 0, node 29 of 29 files green, rust 29 of 29.
+- `npm run differential` (seed 1): env, redact, normalise, diff 0 differences in 10⁵ each; json 0
+  unexplained (22 336 explained); fixture 0 (21); `node --env-file` 0 unexplained.
+- `npm run test:vectors`: all 60 files match. `third-party.mjs --check`: up to date.
+- The cross-target check of core and brain (Linux, Windows): clean, no warnings.
+- Release check: `__fixture`, `__json`, `__diff`, `__session` exit 1.
+  `shell/src-tauri/target/release/bellwether-shell` kept sha256 `35ceb697…`.
 
 ### M9. Release pipeline, updater, Homebrew
 
@@ -3551,3 +3837,113 @@ Recorded by the developer while building M7 (2026-10-15).
     command and step, the IPC refusal and the window proved live with a debug build and an ad-hoc
     test bundle under a scratch HOME (no clicks), and the walk-through left as the maintainer's
     by-hand check (M7 status). A new user also needs a pet file to import until M10 (deviation 47).
+
+Recorded by the developer while building M8 (2026-10-15).
+
+75. **The port is checked before anything is written, as well as at step 3.**
+    - Plan (D9): copy the token and data (steps 1–2), then check the port (step 3).
+    - Done: the same check also runs first, so a held port stops a run that has changed nothing
+      at all (the forced-failure Done-when item); it runs again at step 3, as D9 orders it. What
+      counts as the old brain: a bellwether or pasture `/health` whose pid is a loaded old brain
+      agent's (launchd's pid), or this app's own agent's. Anything else stops the run, named by
+      its pid and program (`lsof`, `ps`).
+76. **Two hosts, and test stand-ins for launchctl and the login items.**
+    - Plan (test plan, M8): launchctl calls stubbed when HOME isn't the real home.
+    - Done: the real host only for the passwd home, never in a test process
+      (`BELLWETHER_TEST_ROOT`); any other HOME gets the stubbed host, which reaches launchctl and
+      the login items only through `BELLWETHER_LAUNCHCTL` and `BELLWETHER_LOGIN_ITEMS` (absolute
+      paths, never launchctl itself) and never asks port 47417. Without the stand-ins it calls
+      neither and waits for no brain (the plists still move), as the Node CLI does under a temp
+      HOME. `BELLWETHER_TEST_VERIFY_MS` shortens the 10 s wait, in the stubbed host only. The
+      SMAppService side needed a seam too: it ignores HOME, so a fixture run from a bundle would
+      otherwise register real login items.
+77. **A swap marker keeps the running app from taking the port.**
+    - True: the setup window runs inside the app, whose strip starts a brain child as soon as no
+      brain answers (M5). Between the old brain's bootout and the agent's start it would take
+      the port, and the agent would exit and be restarted every 10 s.
+    - Done: step 4 writes `<home>/legacy/swapping` (its start time) and removes it on success or
+      failure; while it is under 60 s old the strip starts no child (`brain.rs`; one log line).
+78. **"Waiting for approval" undoes the swap at once.** D9 waits up to 10 s for the new brain. An
+    item left `requiresApproval` won't start until the user acts, so registering counts as failed
+    there and step 4 is undone straight away (the old setup back), with the advice to approve and
+    run again, rather than waiting out the 10 s with no brain.
+79. **What `--undo` puts back.**
+    - Plan (D9): unregister, plists back and bootstrapped, settings restored after the sha256
+      check; Application Support stays.
+    - Done: only the agents that were loaded before are bootstrapped (a plist-only agent is just
+      moved back, as it was); a plist whose original place is taken is left alone; the settings
+      file is restored only while it is byte for byte what step 5 wrote, and removed if step 5
+      created it; nothing to restore when step 5 changed nothing. The record becomes
+      `legacy/migration-undone-<stamp>.json`, so a second `--undo` says "Nothing to undo". From
+      the CLI, a real undo also stops this bundle's running strip (as `autostart uninstall`).
+80. **Hook entries are rewritten, never added; the app's token wins.** Step 5 rewrites
+    Bellwether's entries on the port (current or pasture's); with none there it adds none and
+    says `hooks install --write` does. If the app already has a usable `hook-token` it is kept
+    and the entries get it (M4's rule); one that is there but unusable stops the migration with
+    the fix (`token init --force`). An earlier install with no token anywhere stops with what to
+    pass (`--env`) or run.
+81. **The window: no folder panel; step 1 replaces steps 2–3; hook entries alone count.**
+    - Plan (D9 finding step 3, D6): onboarding offers a folder panel when the old install isn't
+      found.
+    - Done: the window takes the old install from the plists (or the hook entries alone); without
+      a repository the token comes from the hooks and the colours stay behind. Naming another
+      checkout is the CLI's `--from`. `setup_status`'s `migration.found` is now the legacy scan
+      or anything the migration would move (hook entries alone included). The page lists
+      earlier, dock, focus, pet, cli, done for those users, shows the preview at once, and keeps
+      that list after a successful move.
+82. **shell-state.json: `--to-app` keeps Show labels; M4's `migrate` doesn't.**
+    - True: the strips write `{version, hidden, showLabels}` (brain/privacy.mjs, privacy.rs). M4's
+      `migrate` (and Node's migrate.mjs, which it mirrors) copies `hidden` and `labels`, so a
+      real file's Show labels is dropped.
+    - Done: `--to-app` reads `showLabels` (or an older `labels`) and writes through the strip's own
+      writer (`shellstate::write`, which keeps an `onboarded` flag).
+    - **Resolved (the maintainer's decision, 2026-10-15: fix it now in both brains).** Plain
+      `migrate` in both brains (brain/migrate.mjs, crates/brain/src/migrate.rs) now reads
+      `showLabels` (and `labels`, if a file ever had it) and writes the file the way the strips
+      do (`writeShellState` / `shellstate::write`: `{version, hidden, showLabels}`, the same
+      bytes). migrate.test's fixture uses the strip's real format, and its new test "Show labels
+      and Hide everything survive…" pins it under both brains. No DIVERGENCES row covered it (it
+      was a bug in both, not a difference).
+83. **The three fixture HOMEs are built by the cargo test, not a separate script.** The test plan
+    says "built by a script". `migration_fixtures.rs` builds them itself (plists, `.env`, `data/`,
+    settings, the stand-ins), so each run starts clean and nothing outside a temp folder exists
+    to drift.
+84. **A strip `shell start` left is stopped only by its own pid file.** D9 says the legacy shell
+    is stopped by the pid in `data/shell.pid`. It is signalled only while that pid runs a file
+    named `bellwether-shell` or `pasture-shell` inside that very checkout (so never a reused pid,
+    and never another checkout's strip), and never pid 1 or below.
+85. **Hub-labelled agents move too.** D9 names `local.bellwether.*` and `local.pasture.*`; an install
+    inside a hub had its own label prefix (M4's `find_old_agents`, by what the agent runs). Those
+    are moved and restored the same way.
+
+Recorded by the developer while fixing BR-3K's M8 review (2026-10-15).
+
+86. **Step 1 replaces a different app token with the one running sessions carry** (supersedes
+    deviation 80's "the app's token wins"). Plan D9 step 1 says to use the old `.env`'s value so
+    running sessions keep working; keeping the app's own broke them (BR-3K D3). The replaced token
+    is kept in `legacy/hook-token.before-migration`; undo leaves Application Support as it is (D9),
+    so it isn't put back. An app token that is unusable is replaced the same way when the old
+    install has one, and stops the run only when it has none.
+87. **An unfinished migration is detected, not hidden** (BR-3K D1). The record carries the swap's
+    stage; a started-but-not-ended swap, or a finished one whose login items or brain are gone,
+    is "unfinished" rather than "Nothing to migrate", and a run finishes it. The swap marker holds
+    the run's pid as well as its time.
+88. **Undo is all-or-nothing for the plists and keeps its record until everything is back** (BR-3K
+    D2). The order changed from D9's (unregister first) to: plists back, then unregister, then
+    bootstrap. Moving a plist file loads nothing, so the port is still freed (by unregistering)
+    before the old agents start.
+89. **The real host needs an installed release Bellwether.app**, for the preview too (BR-3K's
+    incident: a stale development binary previewed against the real home). A development binary
+    under the real HOME can no longer read the real install at all through `--to-app`.
+90. **A failed copy stops the run; one run at a time; undo trusts only records of its own
+    shape.** BR-3K's O5, O6 and O3.
+
+Recorded by the developer while fixing BR-3K's M8 re-check (2026-10-15).
+
+91. **The record names a move before making it.** D9's record was written after the fact; a kill
+    in between left a plist (or the settings rewrite) undo couldn't see. Now the intent goes
+    first, and plists of known labels found in `legacy/` without a record entry are treated as
+    moved by the migration (validated like the record: `<label>.plist`, a file or a link, a
+    known label, restored only into `~/Library/LaunchAgents`).
+92. **The run lock is an `flock`, and its file stays.** Deviation 90's lock removed a stale file
+    and created a new one; that is now the kernel's job, so the takeover can't race.

@@ -22,6 +22,7 @@ pub mod home;
 pub mod legacy;
 pub mod migrate;
 pub mod pets;
+pub mod toapp;
 mod state;
 
 pub use actor::Timings;

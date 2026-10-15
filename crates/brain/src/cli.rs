@@ -67,7 +67,7 @@ fn bad(m: impl Into<String>) -> BrainError {
     BrainError::new(m, exit::BAD_CONFIG)
 }
 
-pub(crate) fn config(home: &Path) -> Result<Config, BrainError> {
+pub fn config(home: &Path) -> Result<Config, BrainError> {
     Ok(bellwether_core::config::load(home, std::env::var("BELLWETHER_CONFIG").ok().as_deref())?)
 }
 
@@ -84,7 +84,7 @@ fn read_token(home: &Path) -> Result<(String, tok::Source), BrainError> {
 
 /// A path the user typed: relative to the directory they ran the command from, with `.`
 /// and `..` folded (`path.resolve`).
-pub(crate) fn user_path(p: &str) -> PathBuf {
+pub fn user_path(p: &str) -> PathBuf {
     bellwether_core::hooks::resolve(Path::new(p))
 }
 
@@ -622,7 +622,7 @@ fn rotate(home: &Path, args: &[String]) -> CmdResult {
 }
 
 /// What the brain on the port did with `reload-token`.
-enum Switch {
+pub enum Switch {
     Switched,
     /// Nothing listens on the port.
     NoBrain,
@@ -631,7 +631,7 @@ enum Switch {
 }
 
 /// Posts `reload-token` with `token`, and says what came of it.
-fn tell_brain(port: u16, token: &str) -> Switch {
+pub fn tell_brain(port: u16, token: &str) -> Switch {
     let body = json::stringify(&Js::Obj(Obj::new().with("action", "reload-token")));
     match client::request(port, "POST", "/control", &[("X-Bellwether-Token", token), ("Content-Type", "application/json")], Some(body.as_bytes()), Duration::from_secs(5)) {
         Err(Failure::Refused) => Switch::NoBrain,

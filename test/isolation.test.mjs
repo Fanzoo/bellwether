@@ -219,6 +219,12 @@ describe('the harness never lets an app bundle run `autostart` (plan deviation 5
     assert.doesNotThrow(() => refuseRust(['autostart', 'install', '--write'], dev));
     assert.throws(() => refuseRust(['autostart', 'settings'], dev), /System Settings/);
     assert.doesNotThrow(() => refuseRust(['doctor'], link));
+    // Milestone 8: the move into the app, the same way.
+    for (const args of [['migrate', '--to-app', '--write'], ['migrate', '--undo', '--write'], ['migrate', '--to-app']]) {
+      assert.throws(() => refuseRust(args, link), /app bundle/, args.join(' '));
+      assert.doesNotThrow(() => refuseRust(args, dev), args.join(' '));
+    }
+    assert.doesNotThrow(() => refuseRust(['migrate', '--from', dir], link), 'the repository migration writes no login items');
     // A path that doesn't resolve is refused rather than guessed at.
     assert.throws(() => refuseRust(['autostart', 'status'], path.join(dir, 'missing')), /app bundle/);
   });

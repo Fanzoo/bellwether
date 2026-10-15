@@ -187,6 +187,9 @@ pub struct BrainConfig {
     /// App layout: compare the answering brain's version with this app's, and restart
     /// this app's own login agent when they differ (plan D5).
     pub check_version: bool,
+    /// The strip's home: while a migration swaps the brains there (`legacy/swapping`), no
+    /// brain is started here, so the new login agent gets the port (plan D9).
+    pub home: std::path::PathBuf,
 }
 
 /// Runs forever on its own thread.
@@ -246,7 +249,12 @@ pub fn run(brain: Arc<Brain>, cfg: BrainConfig) {
                 if failures == 1 {
                     log(&format!("brain not answering on {base} ({e})"));
                 }
-                if cfg.spawn && !spawned_once && !healthy(&agent, &base) {
+                let swapping = cfg.spawn && bellwether_brain::toapp::swapping(&cfg.home);
+                if swapping {
+                    if failures == 1 {
+                        log("a migration is moving the brain to the app's login agent; not starting one here");
+                    }
+                } else if cfg.spawn && !spawned_once && !healthy(&agent, &base) {
                     spawned_once = true;
                     spawn(&brain, &cfg, &token);
                 } else if cfg.spawn && spawned_once {
@@ -475,7 +483,7 @@ mod tests {
 
     #[test]
     fn the_child_is_this_executable_as_serve_marked_with_the_parent() {
-        let cfg = BrainConfig { port: 47999, token: None, spawn: true, child_env: vec![("BELLWETHER_HOME".into(), "/tmp/bw-home".into())], child_gets_token: false, check_version: true };
+        let cfg = BrainConfig { port: 47999, token: None, spawn: true, child_env: vec![("BELLWETHER_HOME".into(), "/tmp/bw-home".into())], child_gets_token: false, check_version: true, home: "/tmp/bw-home".into() };
         let cmd = child_command(std::path::Path::new("/x/Bellwether.app/Contents/MacOS/Bellwether"), &cfg, "tokenNotPassed_0123456789", 4242);
         assert_eq!(cmd.get_program(), "/x/Bellwether.app/Contents/MacOS/Bellwether");
         assert_eq!(cmd.get_args().collect::<Vec<_>>(), ["serve", "--port", "47999"]);

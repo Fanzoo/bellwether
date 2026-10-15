@@ -12,7 +12,7 @@ import { AGENT_DIR, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs'
 // The repository-to-repository migration in process, launchd injected. The app's
 // `migrate` (its own files, LaunchAgents named and left alone) runs in the CLI test of D1
 // and in migrate.test.mjs, against both brains.
-const REPO_MIGRATE = notUnderRust("brain/migrate.mjs and autostart.mjs in process (LaunchAgents swapped, launchctl injected); the app never writes or boots out a LaunchAgent (plan D5; its swap is milestone 8)");
+const REPO_MIGRATE = notUnderRust("brain/migrate.mjs and autostart.mjs in process (LaunchAgents swapped, launchctl injected); the app never writes or boots out a LaunchAgent (plan D5; its swap is `migrate --to-app`, milestone 8, cargo-tested)");
 
 /**
  * Re-check of `migrate` after the fixes, laid out like the maintainer's real install:

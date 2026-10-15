@@ -32,6 +32,10 @@ const USAGE: &str = "usage (the app's built-in CLI; milestones 1, 3, 4 and 5 of 
   bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]
                                                          move a repository install's token, config, colours and hooks
                                                          into the app's files (preview unless --write)
+  bellwether migrate --to-app [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]
+                                                         the same, and its LaunchAgents replaced by the app's login
+                                                         items, the new brain checked, the hooks updated (D9)
+  bellwether migrate --undo [--write]                    put the LaunchAgents and the settings file back as they were
   bellwether shell start | stop | restart                Bellwether.app's strip (stop leaves a launchd brain running)
   bellwether autostart status                            the two login items (brain agent, app at login)
   bellwether autostart install [--write] [--brain-only] [--via-app]
@@ -74,6 +78,8 @@ fn command_result(command: &str, tail: &[String]) -> CliResult {
             println!("bellwether {} (rust)", bellwether_brain::VERSION);
             Ok(exit::OK)
         }
+        // The move into the app (D9) needs the login items, so it is the app's own command.
+        "migrate" if tail.iter().any(|a| a == "--to-app" || a == "--undo") => crate::migration::command(tail),
         "serve" | "record" | "status" | "mute" | "unmute" | "show" | "hide" | "replay" | "token" | "hooks" | "pets" | "migrate" => Ok(bellwether_brain::cli::run(command, tail)),
         "doctor" => Ok(doctor(tail)),
         "shell" => shell(tail),
@@ -315,7 +321,7 @@ fn stop_strips(strips: &[i32]) -> Vec<(i32, bool)> {
 /// After `uninstall --write`: SIGTERM to this bundle's running strip (when the app item
 /// was removed), then report anything of this bundle still running. Only processes whose
 /// executable is this exact bundle's, never this process or the ones that started it.
-fn stop_own_instances(app_removed: bool) {
+pub(crate) fn stop_own_instances(app_removed: bool) {
     let me = std::process::id() as i32;
     let parent = unsafe { libc::getppid() };
     if app_removed {
