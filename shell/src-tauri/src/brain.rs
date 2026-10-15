@@ -153,7 +153,7 @@ fn with_view(snap: &Value, view: &ShellView) -> Value {
     s
 }
 
-/// POST /control {action} (the tray's Mute), on the caller's thread.
+/// POST /control {action} (the tray's Quiet (alerts only)), on the caller's thread.
 pub fn control(port: u16, token: Option<&str>, action: &str) -> Result<(), String> {
     control_json(port, token, &serde_json::json!({ "action": action }))
 }

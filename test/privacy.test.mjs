@@ -72,7 +72,7 @@ describe('the way back for a hidden strip (D1)', () => {
   test('the shell watches the file, names the way back when hidden, and fails open without a tray', () => {
     const lib = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'lib.rs'), 'utf8');
     assert.match(lib, /privacy::kept_stamp\(&data_dir\)/);
-    assert.match(lib, /to show it again: the tray's Hide the strip, or `bellwether show`/);
+    assert.match(lib, /to show it again: the tray's Hide everything \(for screen sharing\), or `bellwether show`/);
     assert.match(lib, /if kept\.hidden \{\s*\/\/ Fail open[\s\S]*?kept\.hidden = false;/);
     // The strip is opened only after the tray decides, so a failed tray never leaves it hidden.
     assert.ok(lib.indexOf('tray::build(&handle') < lib.indexOf('strips::open(&handle'));

@@ -1,0 +1,310 @@
+// The onboarding window (distribution plan D6, milestone 7). It calls only its own eleven
+// commands (capabilities/onboarding.json): setup_status, hooks_preview, hooks_apply,
+// login_items_set, permission_request, pet_select, pet_import, migration_preview,
+// migration_apply, cli_tool_install, setup_close. Arguments are enums or opaque ids; the
+// Rust side does every read and write, and masks the hook token in what it returns.
+// Text from files (pet titles, paths) only ever goes in through textContent.
+
+const invoke = window.__TAURI__.core.invoke;
+const $ = (id) => document.getElementById(id);
+
+let status = null;
+let steps = [];
+let at = 0;
+let plan = null; // the current hook preview
+
+// ---------------------------------------------------------------- helpers
+
+function say(id, text, error = false) {
+  const el = $(id);
+  el.textContent = text ?? '';
+  el.classList.toggle('error', Boolean(error));
+}
+
+function lines(id, items) {
+  const ul = $(id);
+  ul.replaceChildren(...items.map((t) => {
+    const li = document.createElement('li');
+    li.textContent = t;
+    return li;
+  }));
+}
+
+/** Runs a command with the buttons of its step disabled; errors go to `resultId`. */
+async function act(resultId, fn) {
+  const section = document.querySelector(`section[data-step="${steps[at]}"]`);
+  const buttons = [...section.querySelectorAll('button')];
+  buttons.forEach((b) => { b.disabled = true; });
+  const enabled = buttons.filter((b) => b.id !== 'hooks-apply');
+  say(resultId, 'Working…');
+  try {
+    await fn();
+  } catch (e) {
+    say(resultId, String(e?.message ?? e), true);
+  } finally {
+    // render() decides Install (enabled only with a current plan).
+    enabled.forEach((b) => { b.disabled = false; });
+    render();
+  }
+}
+
+async function refresh() {
+  status = await invoke('setup_status');
+}
+
+// ---------------------------------------------------------------- steps
+
+function stepList() {
+  const list = [];
+  if (status.migration?.found) list.push('earlier');
+  list.push('login', 'hooks', 'dock', 'focus', 'pet', 'cli', 'done');
+  return list;
+}
+
+const LOGIN_WORDS = { enabled: 'on', notRegistered: 'off', notFound: 'off', requiresApproval: 'waiting for your approval', unavailable: 'not available here', unknown: 'unknown' };
+const AUTOMATION_WORDS = {
+  allowed: 'allowed',
+  denied: 'refused (System Settings > Privacy & Security > Automation can change it)',
+  notAsked: 'not asked yet',
+  notRunning: 'not running (start it, then ask)',
+  unknown: 'unknown',
+};
+const DOCTOR_WORDS = { PASS: 'OK', INFO: 'Note', WARN: 'Worth a look', FAIL: 'Needs fixing' };
+
+function render() {
+  if (!status) return;
+  steps = stepList();
+  at = Math.min(at, steps.length - 1);
+  for (const s of document.querySelectorAll('section[data-step]')) s.hidden = s.dataset.step !== steps[at];
+  $('progress').textContent = `Step ${at + 1} of ${steps.length}`;
+  $('back').disabled = at === 0;
+  $('next').hidden = at === steps.length - 1;
+  $('finish').hidden = at !== steps.length - 1;
+
+  const earlier = status.migration?.found;
+  $('earlier-text').textContent = earlier ? `Found: ${status.migration.agents.join(', ')}.` : '';
+
+  // Start at login.
+  const login = status.login;
+  if (!login) {
+    lines('login-lines', ['This is a repository build: start at login is set up with ./bellwether autostart.']);
+  } else {
+    lines('login-lines', [`Brain at login: ${LOGIN_WORDS[login.brain] ?? login.brain}`, `Strip at login: ${LOGIN_WORDS[login.app] ?? login.app}`, ...(login.waiting || login.stale ? login.lines : [])]);
+  }
+  $('login-on').disabled = !login || earlier;
+  $('login-off').disabled = !login;
+  $('login-approve').hidden = !login?.waiting;
+
+  // Hooks.
+  const h = status.hooks;
+  $('hooks-warn-login').hidden = !(login && login.brain !== 'enabled');
+  $('hooks-state').textContent = h.problem
+    ? `${h.file}: ${h.problem}`
+    : h.upToDate
+      ? `Installed: Bellwether's hooks are in ${h.file} (${h.groups} of ${h.events} events).`
+      : h.groups > 0
+        ? `Partly installed or out of date in ${h.file} (${h.groups} of ${h.events} events): show the changes to bring it up to date.`
+        : `Not installed in ${h.file} yet.`;
+  $('hooks-preview-install').disabled = Boolean(earlier);
+  $('hooks-plan').hidden = !plan?.planId;
+  $('hooks-apply').disabled = !plan?.planId;
+  if (plan) {
+    $('hooks-summary').textContent = `${plan.summary ?? ''} Other tools' hooks left untouched: ${plan.othersUntouched}.${plan.newToken ? ' A new hook token is made with the install (shown masked).' : ''}`;
+    lines('hooks-warnings', plan.warnings ?? []);
+    $('hooks-diff').textContent = plan.diffText;
+    $('hooks-apply').textContent = plan.action === 'uninstall' ? 'Uninstall' : 'Install';
+  }
+
+  // Dock.
+  $('dock-state').textContent = status.accessibility ? 'Allowed: sheep stand on the Dock.' : 'Not allowed: sheep use the full width above the Dock.';
+  $('dock-ask').disabled = status.accessibility;
+
+  // Click to focus.
+  lines('focus-state', [`iTerm2: ${AUTOMATION_WORDS[status.automation.iterm2]}`, `Terminal: ${AUTOMATION_WORDS[status.automation.terminal]}`]);
+
+  // Pet.
+  renderPets();
+
+  // CLI tool.
+  const c = status.cliTool;
+  $('cli-state').textContent = {
+    installed: `Installed: ${c.path}.`,
+    homebrew: c.detail,
+    otherApp: `${c.path} points at another copy of Bellwether.app; installing points it at this one.`,
+    foreign: `${c.path} is already there and isn't Bellwether's; it is left alone.`,
+    absent: 'Not installed.',
+    unavailable: c.detail,
+  }[c.state] ?? c.state;
+  $('cli-install').disabled = ['installed', 'homebrew', 'foreign', 'unavailable'].includes(c.state);
+
+  // Done: doctor in plain words.
+  const checks = status.doctor ?? [];
+  const fails = checks.filter((x) => x.status === 'FAIL');
+  $('done-summary').textContent = fails.length
+    ? `Almost there: ${fails.length === 1 ? 'one thing needs' : `${fails.length} things need`} fixing before sheep appear (below).`
+    : 'Everything needed is in place. Start a new Claude Code session: its sheep appears above the Dock.';
+  const shown = checks.filter((x) => x.name !== 'next' || fails.length);
+  $('doctor').replaceChildren(...shown.map((x) => {
+    const li = document.createElement('li');
+    const word = document.createElement('span');
+    word.className = 'word';
+    word.textContent = DOCTOR_WORDS[x.status] ?? x.status;
+    li.append(word, `${x.name}: ${x.detail}`);
+    return li;
+  }));
+}
+
+function renderPets() {
+  const pets = status.pets;
+  $('pet-intro').textContent = pets.list.length
+    ? 'Choose the pet the strip draws. Every session gets its own colour.'
+    : 'No pet is installed yet. Bellwether\'s own sheep comes with a later version; until then, use Import… with a desktopPet pet file (animations.xml) you have.';
+  $('pet-import').disabled = !pets.editable;
+  $('pet-list').replaceChildren(...pets.list.map((p) => {
+    const li = document.createElement('li');
+    li.classList.toggle('current', p.name === pets.current);
+    const title = document.createElement('div');
+    title.textContent = p.title ? `${p.title} (${p.name})` : p.name;
+    if (p.still) li.append(still(p.still));
+    li.append(title);
+    if (p.problem) {
+      const why = document.createElement('div');
+      why.className = 'result error';
+      why.textContent = p.problem;
+      li.append(why);
+    } else if (p.name === pets.current) {
+      const now = document.createElement('div');
+      now.className = 'quiet';
+      now.textContent = 'in use';
+      li.append(now);
+    } else {
+      const b = document.createElement('button');
+      b.textContent = 'Use this pet';
+      b.disabled = !pets.editable;
+      b.addEventListener('click', () => act('pet-result', async () => {
+        const r = await invoke('pet_select', { name: p.name });
+        status.pets = r.pets;
+        say('pet-result', `The strip now draws ${p.name}.`);
+      }));
+      li.append(b);
+    }
+    return li;
+  }));
+}
+
+/** A canvas showing one tile of a pet sheet, its transparency colour keyed out. */
+function still(s) {
+  const c = document.createElement('canvas');
+  const img = new Image();
+  img.addEventListener('load', () => {
+    const w = Math.floor(img.width / s.tilesx);
+    const h = Math.floor(img.height / s.tilesy);
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d');
+    g.drawImage(img, (s.frame % s.tilesx) * w, Math.floor(s.frame / s.tilesx) * h, w, h, 0, 0, w, h);
+    if (/^magenta$/i.test(s.transparency)) {
+      const d = g.getImageData(0, 0, w, h);
+      for (let i = 0; i < d.data.length; i += 4) {
+        if (d.data[i] === 255 && d.data[i + 1] === 0 && d.data[i + 2] === 255) d.data[i + 3] = 0;
+      }
+      g.putImageData(d, 0, 0);
+    }
+  });
+  img.src = `data:image/png;base64,${s.png}`;
+  return c;
+}
+
+// ---------------------------------------------------------------- actions
+
+$('back').addEventListener('click', () => { at = Math.max(0, at - 1); render(); });
+$('next').addEventListener('click', async () => {
+  at = Math.min(steps.length - 1, at + 1);
+  if (steps[at] === 'done') {
+    say('done-summary', 'Checking…');
+    await refresh().catch(() => {});
+  }
+  render();
+});
+$('finish').addEventListener('click', () => invoke('setup_close').catch((e) => say('done-summary', String(e), true)));
+
+async function loginSet(enabled) {
+  await act('login-result', async () => {
+    const r = await invoke('login_items_set', { enabled });
+    say('login-result', r.lines.join('\n'));
+    await refresh();
+  });
+}
+$('login-on').addEventListener('click', () => loginSet(true));
+$('login-off').addEventListener('click', () => loginSet(false));
+$('login-approve').addEventListener('click', () => act('login-result', async () => {
+  say('login-result', (await invoke('permission_request', { kind: 'login-items' })).message);
+}));
+
+async function preview(action) {
+  await act('hooks-result', async () => {
+    plan = await invoke('hooks_preview', { action });
+    say('hooks-result', plan.planId ? '' : plan.message);
+  });
+}
+$('hooks-preview-install').addEventListener('click', () => preview('install'));
+$('hooks-preview-uninstall').addEventListener('click', () => preview('uninstall'));
+$('hooks-apply').addEventListener('click', () => act('hooks-result', async () => {
+  // A plan is used once: whatever the answer, this one is gone. Until a fresh preview
+  // arrives (with a refusal, or from Show the changes) there is nothing to Install.
+  const id = plan?.planId;
+  plan = null;
+  render();
+  if (!id) return;
+  const r = await invoke('hooks_apply', { planId: id });
+  if (r.outcome === 'changed') {
+    plan = r.preview?.planId ? r.preview : null;
+    say('hooks-result', r.message, true);
+    return;
+  }
+  plan = null;
+  say('hooks-result', [r.summary, r.backup ? `Backup of the previous file: ${r.backup}` : '', ...(r.warnings ?? [])].filter(Boolean).join('\n'));
+  await refresh();
+}));
+
+$('dock-ask').addEventListener('click', () => act('dock-result', async () => {
+  say('dock-result', (await invoke('permission_request', { kind: 'accessibility' })).message);
+  await refresh();
+}));
+
+function automation(kind) {
+  return () => act('focus-result', async () => {
+    const r = await invoke('permission_request', { kind });
+    say('focus-result', r.message, !r.ok);
+    await refresh();
+  });
+}
+$('focus-iterm2').addEventListener('click', automation('automation-iterm2'));
+$('focus-terminal').addEventListener('click', automation('automation-terminal'));
+
+$('pet-import').addEventListener('click', () => act('pet-result', async () => {
+  const r = await invoke('pet_import');
+  if (r.cancelled) {
+    say('pet-result', '');
+    return;
+  }
+  say('pet-result', `Imported ${r.name} (${r.animations} animations). Choose it below to use it.`);
+  await refresh();
+}));
+
+$('cli-install').addEventListener('click', () => act('cli-result', async () => {
+  const r = await invoke('cli_tool_install');
+  say('cli-result', r.detail ?? r.state);
+  await refresh();
+}));
+
+// ---------------------------------------------------------------- start
+
+(async () => {
+  try {
+    await refresh();
+    render();
+  } catch (e) {
+    document.body.textContent = `Bellwether couldn't read its setup: ${e?.message ?? e}`;
+  }
+})();

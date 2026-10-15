@@ -11,26 +11,31 @@ import { AGENT_DIR } from './helpers.mjs';
 
 const TAURI = path.join(AGENT_DIR, 'shell', 'src-tauri');
 const ALLOWED = ['allow-get-pet', 'allow-get-snapshot', 'allow-report-hitboxes', 'allow-sprite-clicked', 'allow-shell-log', 'allow-debug-snapshot'];
+// Milestone 7 (plan D6): the onboarding window's eleven, in their own capability.
+const ONBOARDING = ['allow-setup-status', 'allow-hooks-preview', 'allow-hooks-apply', 'allow-login-items-set', 'allow-permission-request', 'allow-pet-select', 'allow-pet-import', 'allow-migration-preview', 'allow-migration-apply', 'allow-cli-tool-install', 'allow-setup-close'];
+const WINDOWS = { 'strip.json': [['strip-*'], ALLOWED], 'onboarding.json': [['onboarding'], ONBOARDING] };
 
-test('capabilities grant only bellwether\'s own commands, to strip windows only', () => {
-  const files = fs.readdirSync(path.join(TAURI, 'capabilities')).filter((f) => f.endsWith('.json'));
-  assert.deepEqual(files, ['strip.json']);
+test('capabilities grant only bellwether\'s own commands: the strip\'s six to strip windows, the onboarding eleven to the onboarding window', () => {
+  const files = fs.readdirSync(path.join(TAURI, 'capabilities')).filter((f) => f.endsWith('.json')).sort();
+  assert.deepEqual(files, ['onboarding.json', 'strip.json']);
   for (const f of files) {
     const cap = JSON.parse(fs.readFileSync(path.join(TAURI, 'capabilities', f), 'utf8'));
-    assert.deepEqual(cap.windows, ['strip-*']);
+    const [windows, allowed] = WINDOWS[f];
+    assert.deepEqual(cap.windows, windows);
+    assert.deepEqual(cap.permissions, allowed, `${f}: exactly its own list`);
     for (const p of cap.permissions) {
       const name = typeof p === 'string' ? p : p.identifier;
-      assert.ok(ALLOWED.includes(name), `${f}: ${name} is not one of bellwether's own commands`);
       assert.doesNotMatch(name, /^(core|fs|shell|http|opener|clipboard|dialog|process|os|notification|global-shortcut|updater):/);
     }
     assert.equal(cap.remote, undefined, 'no remote URLs may use these permissions');
   }
+  assert.ok(!ALLOWED.some((p) => ONBOARDING.includes(p)), 'no permission in both');
 });
 
-test('build.rs declares exactly the commands the capability grants', () => {
+test('build.rs declares exactly the commands the capabilities grant', () => {
   const build = fs.readFileSync(path.join(TAURI, 'build.rs'), 'utf8');
   const commands = [...build.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(commands.map((c) => `allow-${c.replace(/_/g, '-')}`).sort(), [...ALLOWED].sort());
+  assert.deepEqual(commands.map((c) => `allow-${c.replace(/_/g, '-')}`).sort(), [...ALLOWED, ...ONBOARDING].sort());
 });
 
 test('the CSP allows only self, inline images and Tauri IPC: no network, no unsafe-eval', () => {
@@ -41,7 +46,7 @@ test('the CSP allows only self, inline images and Tauri IPC: no network, no unsa
   assert.deepEqual(conf.app.windows, [], 'windows are created by the shell, per monitor');
   assert.equal(conf.app.security.dangerousDisableAssetCspModification, undefined);
   assert.equal(conf.app.macOSPrivateApi, undefined, 'not needed since Tauri 2.12.1');
-  assert.deepEqual(conf.app.security.capabilities, ['strip']);
+  assert.deepEqual(conf.app.security.capabilities, ['strip', 'onboarding']);
 });
 
 test('the shell has no Tauri plugin that reaches files, processes or the network from the webview', () => {

@@ -1,0 +1,152 @@
+/* The onboarding window (plan D6): a plain, readable page in the system's colours. */
+:root {
+  color-scheme: light dark;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 18px 22px 14px;
+}
+
+header h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 14px 0 6px;
+}
+
+section {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.quiet {
+  color: GrayText;
+}
+
+.warn {
+  color: #b35c00;
+}
+
+@media (prefers-color-scheme: dark) {
+  .warn {
+    color: #ffb35c;
+  }
+}
+
+.lines {
+  padding-left: 18px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+button {
+  font: inherit;
+  padding: 4px 12px;
+}
+
+button.primary {
+  font-weight: 600;
+}
+
+.result {
+  min-height: 1.4em;
+  white-space: pre-wrap;
+}
+
+.result.error {
+  color: #c62828;
+}
+
+@media (prefers-color-scheme: dark) {
+  .result.error {
+    color: #ff6b6b;
+  }
+}
+
+pre {
+  max-height: 220px;
+  overflow: auto;
+  font: 11px/1.35 ui-monospace, Menlo, monospace;
+  padding: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 4px;
+  white-space: pre;
+}
+
+.pets {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pets li {
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 6px;
+  padding: 8px;
+  width: 132px;
+  text-align: center;
+}
+
+.pets li.current {
+  border-color: Highlight;
+  border-width: 2px;
+}
+
+.pets canvas {
+  width: 96px;
+  height: 96px;
+  image-rendering: pixelated;
+}
+
+.checks {
+  list-style: none;
+  padding: 0;
+}
+
+.checks li {
+  margin: 4px 0;
+}
+
+.checks .word {
+  display: inline-block;
+  min-width: 92px;
+  font-weight: 600;
+}
+
+footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.spacer {
+  flex: 1;
+}
+
+code {
+  font: 12px ui-monospace, Menlo, monospace;
+}

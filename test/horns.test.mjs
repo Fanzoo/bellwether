@@ -68,7 +68,9 @@ describe('the tint mode', () => {
     withDefaults({ pets: { tint: 'whole' } });
     assert.equal(JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8')).pets.tint, 'horns');
     const rs = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'lib.rs'), 'utf8');
-    assert.match(rs, /"tint": match shared\.config\.pointer\("\/pets\/tint"\)\.and_then\(Value::as_str\) \{ Some\("whole"\) => "whole", _ => "horns" \}/);
+    // (M7: get_pet reads a copy of the config the onboarding window's pet choice can change.)
+    assert.match(rs, /let config = shared\.config\.read\(\)\.unwrap\(\)\.clone\(\);/);
+    assert.match(rs, /"tint": match config\.pointer\("\/pets\/tint"\)\.and_then\(Value::as_str\) \{ Some\("whole"\) => "whole", _ => "horns" \}/);
     const main = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src', 'main.js'), 'utf8');
     assert.match(main, /if \(mode === 'whole'\) tintWhole\(img\.data, hex\);\s*else tintHorns\(img\.data, hex\);/);
     // Once per palette entry at load, never per frame.

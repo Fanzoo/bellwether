@@ -166,7 +166,14 @@ describe('Accessibility and the Dock: unsafe code and the permission prompt', ()
     assert.equal(callers.length, 1);
     const at = lib.indexOf('ax::prompt()');
     assert.match(lib.slice(Math.max(0, at - 400), at), /"--ax-prompt"/);
-    for (const f of fs.readdirSync(SRC).filter((x) => x.endsWith('.rs') && x !== 'ax.rs' && x !== 'lib.rs')) assert.doesNotMatch(strip(rs(f)), /ax::prompt|AXIsProcessTrustedWithOptions/, f);
+    // M7: the onboarding window's "Allow…" (plan D6 step 4) is the one other caller, on the
+    // user's click: once per run, only when not yet trusted (a second click opens the pane).
+    const ob = strip(rs('onboarding.rs'));
+    assert.equal([...ob.matchAll(/ax::prompt\(\)/g)].length, 1);
+    const arm = ob.slice(ob.indexOf('"accessibility" => {'), ob.indexOf('crate::ax::prompt()'));
+    assert.match(arm, /if crate::ax::trusted\(\) \{[\s\S]*\} else if !self\.prompted_ax\.swap\(true, Ordering::SeqCst\) \{\s*$/);
+    assert.ok(ob.indexOf('pub fn permission_request(&self, kind: &str)') < ob.indexOf('crate::ax::prompt()'));
+    for (const f of fs.readdirSync(SRC).filter((x) => x.endsWith('.rs') && x !== 'ax.rs' && x !== 'lib.rs' && x !== 'onboarding.rs')) assert.doesNotMatch(strip(rs(f)), /ax::prompt|AXIsProcessTrustedWithOptions/, f);
     assert.match(ax, /pub fn trusted\(\) -> bool \{\s*unsafe \{ AXIsProcessTrusted\(\) \}/);
   });
   test('the AX read only happens when already trusted, and only for a bottom, shown Dock', () => {

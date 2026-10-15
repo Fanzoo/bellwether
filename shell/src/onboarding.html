@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Set up Bellwether</title>
+    <link rel="stylesheet" href="onboarding.css" />
+    <script type="module" src="onboarding.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Set up Bellwether</h1>
+        <p id="progress" class="quiet"></p>
+      </header>
+
+      <section data-step="earlier" hidden>
+        <h2>An earlier Bellwether is on this Mac</h2>
+        <p id="earlier-text"></p>
+        <p>
+          Moving it into the app from this window comes with a later version. Until then, this
+          window won't turn on start at login or install hooks, because the two would fight over
+          one port. Everything else here works.
+        </p>
+      </section>
+
+      <section data-step="login" hidden>
+        <h2>Start at login</h2>
+        <p>
+          Bellwether has two parts: a small background brain that Claude Code's hooks talk to,
+          and the strip of sheep. Starting both at login (recommended) means the hooks always
+          find a brain to talk to.
+        </p>
+        <ul id="login-lines" class="lines"></ul>
+        <div class="actions">
+          <button id="login-on" class="primary">Turn on start at login</button>
+          <button id="login-off">Turn it off</button>
+          <button id="login-approve" hidden>Open Login Items settings</button>
+        </div>
+        <p id="login-result" class="result"></p>
+      </section>
+
+      <section data-step="hooks" hidden>
+        <h2>Hooks</h2>
+        <p>
+          Claude Code tells Bellwether what each session is doing through hooks in your
+          settings file. Below is exactly what installing changes in it; nothing is written
+          until you choose Install. Other tools' hooks are left exactly as they are, and a
+          backup of the file is kept.
+        </p>
+        <p id="hooks-warn-login" class="warn" hidden>
+          Start at login is off. Hooks still work while Bellwether is running, but whenever it
+          isn't, every Claude Code session prints a hook error on each prompt and tool call.
+        </p>
+        <p id="hooks-state"></p>
+        <div class="actions">
+          <button id="hooks-preview-install" class="primary">Show the changes</button>
+          <button id="hooks-preview-uninstall">Show what Uninstall removes</button>
+        </div>
+        <div id="hooks-plan" hidden>
+          <p id="hooks-summary"></p>
+          <ul id="hooks-warnings" class="lines warn"></ul>
+          <pre id="hooks-diff"></pre>
+          <div class="actions">
+            <button id="hooks-apply" class="primary">Install</button>
+          </div>
+        </div>
+        <p id="hooks-result" class="result"></p>
+      </section>
+
+      <section data-step="dock" hidden>
+        <h2>Optional: sheep on the Dock</h2>
+        <p>
+          With the Accessibility permission, sheep stand on the Dock's top edge, within its
+          width. Without it they walk the full width of the screen just above the Dock.
+          Bellwether only reads where the Dock is; it never clicks or types for you.
+        </p>
+        <p id="dock-state"></p>
+        <div class="actions">
+          <button id="dock-ask" class="primary">Allow…</button>
+        </div>
+        <p id="dock-result" class="result"></p>
+      </section>
+
+      <section data-step="focus" hidden>
+        <h2>Optional: click a sheep to jump to its tab</h2>
+        <p>
+          Clicking a sheep brings its session's terminal forward. In iTerm2 and Terminal it can
+          also pick the exact tab, which needs the Automation permission for that app.
+          Bellwether asks the app how many windows it has, once, so that macOS asks you.
+          Refusing is fine: a click still brings the app forward.
+        </p>
+        <ul id="focus-state" class="lines"></ul>
+        <div class="actions">
+          <button id="focus-iterm2">Ask iTerm2</button>
+          <button id="focus-terminal">Ask Terminal</button>
+        </div>
+        <p id="focus-result" class="result"></p>
+      </section>
+
+      <section data-step="pet" hidden>
+        <h2>Pet</h2>
+        <p id="pet-intro"></p>
+        <ul id="pet-list" class="pets"></ul>
+        <div class="actions">
+          <button id="pet-import">Import…</button>
+        </div>
+        <p id="pet-result" class="result"></p>
+      </section>
+
+      <section data-step="cli" hidden>
+        <h2>Optional: the bellwether command</h2>
+        <p>
+          For a terminal: <code>bellwether status</code>, <code>bellwether doctor</code> and the
+          rest. This makes a link at <code>~/.local/bin/bellwether</code>; no administrator
+          password is needed.
+        </p>
+        <p id="cli-state"></p>
+        <div class="actions">
+          <button id="cli-install" class="primary">Install the command</button>
+        </div>
+        <p id="cli-result" class="result"></p>
+      </section>
+
+      <section data-step="done" hidden>
+        <h2>Done</h2>
+        <p id="done-summary"></p>
+        <ul id="doctor" class="checks"></ul>
+        <p class="quiet">
+          The menu-bar sheep has <em>Set up Bellwether…</em> to come back here,
+          <em>Quiet (alerts only)</em> to keep only the "!" of a session that needs you, and
+          <em>Hide everything (for screen sharing)</em>.
+        </p>
+      </section>
+
+      <footer>
+        <button id="back">Back</button>
+        <span class="spacer"></span>
+        <button id="next" class="primary">Next</button>
+        <button id="finish" class="primary" hidden>Done</button>
+      </footer>
+    </main>
+  </body>
+</html>

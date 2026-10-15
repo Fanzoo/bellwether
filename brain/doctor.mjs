@@ -123,7 +123,7 @@ export async function runDoctor({ settingsFile = USER_SETTINGS, env = process.en
     const sharing = sharingProcessWarnings(config);
     if (sharing.length) add('sharing names', 'WARN', `${sharing.join('; ')}. The strip won't hide for these while you share`);
     else add('sharing names', 'PASS', `${(config.privacy?.sharingProcesses?.[process.platform] ?? []).length} process name(s) that hide the strip while sharing`);
-    if (readShellState(dataDir).hidden) add('strip', 'INFO', 'the strip is hidden (the tray\'s "Hide the strip", or `bellwether hide`); `bellwether show` brings it back');
+    if (readShellState(dataDir).hidden) add('strip', 'INFO', 'the strip is hidden (the tray\'s "Hide everything (for screen sharing)", or `bellwether hide`); `bellwether show` brings it back');
 
     // Milestone 8: what the shell's locator ran into since it last started.
     for (const c of checkLocatorLog(dataDir)) add(c.name, c.status, c.detail);

@@ -13,8 +13,8 @@ const USAGE: &str = "usage (the app's built-in CLI; milestones 1, 3, 4 and 5 of 
   bellwether serve [--port <n>] [--hang | --slow=<ms>]   run the brain in the foreground
   bellwether record [--out <file>]                       serve, and record event shapes (no content) to recordings/
   bellwether status [--watch] [--json]                   the flock as text (long-polls /state with --watch)
-  bellwether mute | unmute                               do-not-disturb (the tray's Mute; kept across restarts)
-  bellwether show | hide                                 show or hide the strip (the tray's Hide; kept across restarts)
+  bellwether mute | unmute                               do-not-disturb (the tray's Quiet (alerts only); kept across restarts)
+  bellwether show | hide                                 show or hide the strip (the tray's Hide everything; kept across restarts)
   bellwether replay <file.jsonl> [--speed N] [--port P] [--tag <pane>]
   bellwether replay --burst <events/s> [--seconds S] [--port P]
   bellwether token init [--from <.env>] [--force]        make the hook token file, only if there is none (never printed);
@@ -463,8 +463,7 @@ pub fn start_failure(bundle: &Path, quit: &[i32]) -> String {
 /// around them: which app this is and its signature first; then login items and
 /// Accessibility. Returns the exit code.
 fn doctor(args: &[String]) -> i32 {
-    use bellwether_brain::doctor::{self, Input};
-    use bellwether_core::settings_checks::Check;
+    use bellwether_brain::doctor;
     let a = match bellwether_core::cliargs::parse(args, &["json", "e2e"], &["settings", "port"], 0) {
         Ok(a) => a,
         Err(e) => {
@@ -484,7 +483,26 @@ fn doctor(args: &[String]) -> i32 {
     };
     let home = bellwether_brain::home::dir();
     bellwether_brain::cli::remember_token(&home);
-    let config = bellwether_core::config::load(&home, std::env::var("BELLWETHER_CONFIG").ok().as_deref());
+    let settings_file = a.value("settings").map(|s| bellwether_core::hooks::resolve(Path::new(s)));
+    if a.has("e2e") {
+        bellwether_brain::cli::err_line("doctor --e2e: running one `claude -p` with haiku (one small API call)…");
+    }
+    let report = doctor_report(&home, settings_file, port, a.has("e2e"));
+    if a.has("json") {
+        bellwether_brain::cli::out(&doctor::to_json(&report));
+    } else {
+        bellwether_brain::cli::out(&doctor::render(&report));
+    }
+    report.exit_code
+}
+
+/// Every doctor check, for `home` (the app's files), the settings file (default
+/// `~/.claude/settings.json`) and the port (default: the config's): what `bellwether
+/// doctor` prints, and what the onboarding window's last step shows in plain words.
+pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u16>, e2e: bool) -> bellwether_brain::doctor::Report {
+    use bellwether_brain::doctor::{self, Input};
+    use bellwether_core::settings_checks::Check;
+    let config = bellwether_core::config::load(home, std::env::var("BELLWETHER_CONFIG").ok().as_deref());
     let sharing = config.as_ref().ok().map(|c| {
         let v: serde_json::Value = serde_json::from_str(&bellwether_core::json::stringify(&c.merged)).unwrap_or(serde_json::Value::Null);
         let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(windows) { "win32" } else { "linux" };
@@ -492,8 +510,8 @@ fn doctor(args: &[String]) -> i32 {
         (crate::privacy::sharing_warnings_for(&v, os), count)
     });
     let input = Input {
-        settings_file: a.value("settings").map(|s| bellwether_core::hooks::resolve(Path::new(s))).unwrap_or_else(doctor::user_settings),
-        home: home.clone(),
+        settings_file: settings_file.unwrap_or_else(doctor::user_settings),
+        home: home.to_path_buf(),
         user_home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
         env_token: std::env::var("BELLWETHER_HOOK_TOKEN").ok(),
         config,
@@ -501,12 +519,9 @@ fn doctor(args: &[String]) -> i32 {
         probe_timeout: Duration::from_millis(1000),
         project_dir: std::env::current_dir().ok(),
         managed_file: doctor::managed_settings(),
-        e2e: a.has("e2e"),
+        e2e,
         sharing,
     };
-    if input.e2e {
-        bellwether_brain::cli::err_line("doctor --e2e: running one `claude -p` with haiku (one small API call)…");
-    }
     let session = crate::identity::session();
     let mut checks: Vec<Check> = Vec::new();
     let add = |checks: &mut Vec<Check>, status: &'static str, name: &str, detail: String| checks.push(Check::new(name, status, detail, exit::UNEXPECTED));
@@ -559,13 +574,7 @@ fn doctor(args: &[String]) -> i32 {
         let (status, detail) = agent_down_hint(agent_port(), checked_port);
         add(&mut checks, status, "login: brain", detail);
     }
-    let report = doctor::finish(&input, checks);
-    if a.has("json") {
-        bellwether_brain::cli::out(&doctor::to_json(&report));
-    } else {
-        bellwether_brain::cli::out(&doctor::render(&report));
-    }
-    report.exit_code
+    doctor::finish(&input, checks)
 }
 
 /// The port the bundled brain agent listens on: its plist's `--port`, else `port` in

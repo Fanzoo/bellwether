@@ -28,8 +28,9 @@
  * bellwether-shell/conformance), which must not be older than its sources. This script
  * never builds it.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AGENT_DIR, RUST_BIN, rustBin } from './helpers.mjs';
@@ -196,6 +197,21 @@ function nodeFailures(results) {
   return lines;
 }
 
+/**
+ * One `__json` call before any test file runs: a binary built without the `conformance`
+ * feature (`npm run test:cargo` rebuilds the dev binary without it) answers "unknown
+ * command", and every file would then wait out FILE_TIMEOUT_MS. Stop at once instead, with
+ * the differential's message.
+ */
+function probeConformance(bin) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bw-conformance-probe-'));
+  const r = spawnSync(bin, ['__json'], { argv0: 'bellwether', input: '', encoding: 'utf8', timeout: 20_000, env: { PATH: process.env.PATH, HOME: home, BELLWETHER_HOME: home } });
+  fs.rmSync(home, { recursive: true, force: true });
+  if (r.status === 0) return;
+  if (/unknown command/.test(r.stderr ?? '')) fail(`${bin} has no conformance commands ("unknown command"): it was built without the \`conformance\` feature (a release build never has it). Build with --features bellwether-shell/conformance`);
+  fail(`${bin} __json failed (${r.error ? r.error.message : `exit ${r.status}`}): ${(r.stderr ?? '').trim()}`);
+}
+
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   const manifest = JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'conformance.json'), 'utf8'));
@@ -206,6 +222,7 @@ async function main() {
     } catch (e) {
       fail(e.message);
     }
+    probeConformance(RUST_BIN);
   }
   const results = rows(manifest, o.files);
   process.stderr.write(`conformance: ${results.length} test files, ${impls.join(' and ')}${impls.includes('rust') ? ` (rust: ${path.relative(AGENT_DIR, RUST_BIN) || RUST_BIN})` : ''}\n`);

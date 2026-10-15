@@ -78,6 +78,12 @@ pub fn follow_dock<R: Runtime>(app: &AppHandle<R>, height_px: f64, dock: crate::
     }
 }
 
+/// Whether a window is a strip (`strip-<n>`), not the onboarding window: only strips are
+/// made click-through, hidden while sharing, and reloaded for a new pet.
+pub fn is_strip(label: &str) -> bool {
+    label.strip_prefix("strip-").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 pub fn monitor_name(m: &Monitor) -> String {
     m.name().cloned().unwrap_or_else(|| "primary".into())
 }

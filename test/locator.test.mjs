@@ -54,7 +54,10 @@ describe('per-monitor slots through the brain', () => {
 describe('the shell side, by its source', () => {
   test('still six commands; a click focuses through the locator on its own thread; each strip sees its own monitor', () => {
     const lib = read('lib.rs');
-    assert.match(lib, /generate_handler!\[get_pet, get_snapshot, report_hitboxes, sprite_clicked, shell_log, debug_snapshot\]/);
+    // The strip's six first; the rest are the onboarding window's (M7, onboarding.rs).
+    assert.match(lib, /generate_handler!\[\s*get_pet,\s*get_snapshot,\s*report_hitboxes,\s*sprite_clicked,\s*shell_log,\s*debug_snapshot,\s*onboarding::/);
+    const handler = /generate_handler!\[([^\]]+)\]/.exec(lib)[1].split(',').map((s) => s.trim()).filter(Boolean);
+    assert.equal(handler.filter((c) => !c.startsWith('onboarding::')).length, 6);
     assert.match(lib, /fn sprite_clicked\([^)]*locator: tauri::State<'_, Arc<locator::Locator>>\)/);
     assert.match(lib, /std::thread::spawn\(move \|\| \{\s*let _guard = guard;\s*let result = locator\.focus\(&terminal\);/);
     assert.match(lib, /placement::view_for\(&s, &mine, &p\.primary/);

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hooks-apply"
+description = "Enables the hooks_apply command without any pre-configured scope."
+commands.allow = ["hooks_apply"]
+
+[[permission]]
+identifier = "deny-hooks-apply"
+description = "Denies the hooks_apply command without any pre-configured scope."
+commands.deny = ["hooks_apply"]

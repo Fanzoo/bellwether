@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-migration-apply"
+description = "Enables the migration_apply command without any pre-configured scope."
+commands.allow = ["migration_apply"]
+
+[[permission]]
+identifier = "deny-migration-apply"
+description = "Denies the migration_apply command without any pre-configured scope."
+commands.deny = ["migration_apply"]

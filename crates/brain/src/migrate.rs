@@ -11,7 +11,7 @@
 //! 2. config.json, if the app has none (keys the app no longer reads are dropped, and the
 //!    preview says which);
 //! 3. state.json (each session's colour and slot, and mute; through the same checks the
-//!    brain applies on load) and shell-state.json (Hide the strip, Show labels), if the app
+//!    brain applies on load) and shell-state.json (Hide everything, Show labels), if the app
 //!    has none;
 //! 4. the repository's LaunchAgents are found by what they run and listed, never touched:
 //!    the app never writes LaunchAgents (plan D5), and moving them to the app's login items

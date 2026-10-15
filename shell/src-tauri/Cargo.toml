@@ -38,7 +38,10 @@ bellwether-core = { path = "../../crates/core" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSBundle"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSBundle", "NSURL", "NSArray"] }
+# The onboarding window's pet Import… panel (NSOpenPanel), from Rust only: the webviews get
+# no dialog permission (plan D6, milestone 7; in the lockfile already, through tao).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSPanel", "NSSavePanel", "NSOpenPanel", "NSApplication"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
 # Dev builds run the conformance suite and the differential: the regex engine, the

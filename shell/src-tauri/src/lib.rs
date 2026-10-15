@@ -14,6 +14,7 @@ mod conformance_session;
 pub mod dispatch;
 pub mod identity;
 pub mod login_items;
+pub mod onboarding;
 mod ax;
 mod dock;
 mod locator;
@@ -76,7 +77,8 @@ struct Places {
 
 struct Shared {
     pets: PetPlace,
-    config: Value,
+    /// The config the strip uses; the onboarding window's pet choice changes `pets` in it.
+    config: std::sync::RwLock<Value>,
     selftest: bool,
     /// Debug only: where `--snapshot` writes the strip's canvas. None in normal use,
     /// and then `debug_snapshot` refuses.
@@ -153,7 +155,8 @@ fn pet_xml(place: &PetPlace, name: &str) -> Result<String, String> {
 #[tauri::command]
 fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
     let fallback = if matches!(shared.pets, PetPlace::App { .. }) { "bellwether" } else { "esheep64" };
-    let folder = shared.config.pointer("/pets/default").and_then(Value::as_str).unwrap_or(fallback).to_string();
+    let config = shared.config.read().unwrap().clone();
+    let folder = config.pointer("/pets/default").and_then(Value::as_str).unwrap_or(fallback).to_string();
     if folder.is_empty() || !folder.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
         return Err(format!("pets.default {folder:?} must be a plain folder name"));
     }
@@ -161,18 +164,18 @@ fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
         log(&format!("error: refusing to load pet {folder}: {e}"));
         e
     })?;
-    let animation_map = shared.config.pointer(&format!("/pets/animationMap/{folder}")).cloned().unwrap_or(Value::Null);
-    let num = |p: &str, d: f64| shared.config.pointer(p).and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
-    let palette = sheep_palette(shared.config.pointer("/pets/palette"));
+    let animation_map = config.pointer(&format!("/pets/animationMap/{folder}")).cloned().unwrap_or(Value::Null);
+    let num = |p: &str, d: f64| config.pointer(p).and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
+    let palette = sheep_palette(config.pointer("/pets/palette"));
     let display = serde_json::json!({
         "palette": palette,
         "scale": num("/pets/scale", 1.5),
         "lambScale": num("/pets/lambScale", 0.6),
         // "horns" (default): only the horns take the session colour; "whole": the old tint.
-        "tint": match shared.config.pointer("/pets/tint").and_then(Value::as_str) { Some("whole") => "whole", _ => "horns" },
+        "tint": match config.pointer("/pets/tint").and_then(Value::as_str) { Some("whole") => "whole", _ => "horns" },
         "slotWidthPx": num("/strip/slotWidthPx", 110.0),
         "homeWanderPx": num("/strip/homeWanderPx", 120.0),
-        "fadeOpacity": shared.config.pointer("/fade/opacity").and_then(Value::as_f64).filter(|v| (0.0..=1.0).contains(v)).unwrap_or(0.25),
+        "fadeOpacity": config.pointer("/fade/opacity").and_then(Value::as_f64).filter(|v| (0.0..=1.0).contains(v)).unwrap_or(0.25),
         "selftest": shared.selftest,
         "trace": crate::settings::env_os("SHELL_TRACE").is_some(),
         "snapshotAfterMs": shared.snapshot.as_ref().map(|(_, secs)| secs * 1000.0),
@@ -332,6 +335,8 @@ struct Flags {
     spawn_brain: bool,
     selftest: bool,
     demo: bool,
+    /// Open the onboarding window now (`open -b <id> --args --onboarding`).
+    onboarding: bool,
     /// Debug: locate one terminal (the snapshot's `terminal` object as JSON), print
     /// the result and quit. Opens no window.
     locate: Option<String>,
@@ -348,6 +353,7 @@ fn flags() -> Flags {
         spawn_brain: !args.iter().any(|a| a == "--no-spawn-brain"),
         selftest: args.iter().any(|a| a == "--selftest"),
         demo: args.iter().any(|a| a == "--demo"),
+        onboarding: args.iter().any(|a| a == "--onboarding"),
         locate: value("--locate"),
     }
 }
@@ -397,7 +403,7 @@ pub fn run() {
     };
     let shared = Shared {
         pets: if app_layout { PetPlace::App { resources: settings.resources.clone(), home: settings.data_dir.clone() } } else { PetPlace::Repository { data_dir: settings.data_dir.clone() } },
-        config: settings.config.clone(),
+        config: std::sync::RwLock::new(settings.config.clone()),
         selftest: flags.selftest,
         snapshot: flags.snapshot.clone().map(|p| (p, flags.snapshot_after)),
         snapshot_every: flags.snapshot_every,
@@ -419,6 +425,21 @@ pub fn run() {
     let relocate = Duration::from_secs_f64(settings.f64_at("/strip/relocateSec", 60.0));
     let (data_dir, port, token) = (settings.data_dir.clone(), settings.port, settings.token.clone());
     let token_for_places = settings.token.clone();
+    // The onboarding window (plan D6): the app's, or a repository debug build's when asked.
+    let onboarding_ctx = onboarding::Ctx {
+        layout: settings.layout,
+        home: settings.data_dir.clone(),
+        port: settings.port,
+        resources: settings.resources.clone(),
+        user_home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
+        env_config: std::env::var("BELLWETHER_CONFIG").ok().filter(|c| !c.is_empty()),
+        env_token: std::env::var("BELLWETHER_HOOK_TOKEN").ok().filter(|t| !t.is_empty()),
+    };
+    let checks_only = flags.selftest || flags.demo || flags.locate.is_some();
+    let open_onboarding = !checks_only && onboarding::allowed(settings.layout) && (flags.onboarding || (app_layout && !bellwether_core::shellstate::onboarded(&settings.data_dir)));
+    if flags.onboarding && !onboarding::allowed(settings.layout) {
+        log("--onboarding: the setup window is Bellwether.app's; a repository install is set up with ./bellwether");
+    }
 
     let brain_for_setup = brain.clone();
     // The single-instance lock (/tmp/<identifier>_si.sock) is keyed by the port: one strip
@@ -433,8 +454,14 @@ pub fn run() {
     // after one lookup. `--selftest` keeps it, because it does open a window (the pet is
     // parsed by the webview's own XML parser), so it is refused while a strip runs.
     if flags.locate.is_none() {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
-            log("another bellwether shell tried to start; this one keeps running");
+        builder = builder.plugin(tauri_plugin_single_instance::init(move |app, argv, _cwd| {
+            // `open -b <id> --args --onboarding` while the app runs: the window, here.
+            if argv.iter().any(|a| a == "--onboarding") && !checks_only {
+                log("another launch asked for the setup window");
+                onboarding::open(app);
+            } else {
+                log("another bellwether shell tried to start; this one keeps running");
+            }
         }));
     }
     let app = builder
@@ -444,7 +471,26 @@ pub fn run() {
         .manage(locator.clone())
         .manage(Arc::new(std::sync::Mutex::new(Places { primary: String::new(), placed: Default::default(), book: Default::default() })))
         .manage(shared)
-        .invoke_handler(tauri::generate_handler![get_pet, get_snapshot, report_hitboxes, sprite_clicked, shell_log, debug_snapshot])
+        .manage(onboarding::Onboarding::new(onboarding_ctx))
+        .invoke_handler(tauri::generate_handler![
+            get_pet,
+            get_snapshot,
+            report_hitboxes,
+            sprite_clicked,
+            shell_log,
+            debug_snapshot,
+            onboarding::setup_status,
+            onboarding::hooks_preview,
+            onboarding::hooks_apply,
+            onboarding::login_items_set,
+            onboarding::permission_request,
+            onboarding::pet_select,
+            onboarding::pet_import,
+            onboarding::migration_preview,
+            onboarding::migration_apply,
+            onboarding::cli_tool_install,
+            onboarding::setup_close
+        ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -476,7 +522,7 @@ pub fn run() {
                 // own concern, so only in the app layout. The repository's strip is itself
                 // run by a legacy agent.
                 let notices = if app_layout && !flags.demo { tray::startup_notices() } else { Vec::new() };
-                if let Err(e) = tray::build(&handle, kept, false, &notices) {
+                if let Err(e) = tray::build(&handle, kept, false, &notices, app_layout && !flags.demo) {
                     log(&format!("warning: no tray icon ({e}); use `bellwether mute` / `bellwether show` instead"));
                     if kept.hidden {
                         // Fail open: with no tray, a strip saved hidden would be lost.
@@ -490,6 +536,9 @@ pub fn run() {
             brain_for_setup.update_view(|v| v.show_labels = kept.show_labels);
             let index = app.state::<strips::Strips>().next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             strips::open(&handle, &monitor, strip_height, index, capture_exclusion, kept.hidden)?;
+            if open_onboarding {
+                onboarding::open(&handle);
+            }
             if !flags.demo && !flags.selftest {
                 let (h, b, l) = (handle.clone(), brain_for_setup.clone(), locator.clone());
                 std::thread::spawn(move || placement_loop(h, b, l, relocate, strip_height, capture_exclusion, port, token_for_places));
@@ -554,9 +603,9 @@ pub fn run() {
 }
 
 /**
- * Every 250 ms: whether the strip should be hidden (the tray's Hide; a sharing process,
+ * Every 250 ms: whether the strip should be hidden (the tray's Hide everything; a sharing process,
  * read every 500 ms, debounced 2 s on the way back), applied to every strip window,
- * and the tray's Mute check kept in step with the brain.
+ * and the tray's Quiet check kept in step with the brain.
  */
 fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<String>, strip_height: f64) {
     use std::time::Instant;
@@ -665,14 +714,17 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
         let kept = *app.state::<tray::Switches>().kept.lock().unwrap();
         let hidden = debounce.update(sharing.is_some(), now) || kept.hidden;
         if shown != Some(!hidden) {
-            for (_, w) in tauri::Manager::webview_windows(&app) {
-                let _ = if hidden { w.hide() } else { w.show() };
+            for (label, w) in tauri::Manager::webview_windows(&app) {
+                // The strips only: the onboarding window isn't hidden while sharing.
+                if strips::is_strip(&label) {
+                    let _ = if hidden { w.hide() } else { w.show() };
+                }
             }
             log(&format!(
                 "strip {}{}",
                 if hidden { "hidden" } else { "shown" },
                 if kept.hidden {
-                    " (Hide the strip is on; to show it again: the tray's Hide the strip, or `bellwether show`)"
+                    " (Hide everything is on; to show it again: the tray's Hide everything (for screen sharing), or `bellwether show`)"
                 } else if hidden {
                     " (sharing)"
                 } else {
@@ -1030,37 +1082,46 @@ mod tests {
         assert!(reject_doctype("<animations><header/></animations>").is_ok());
     }
 
-    /// The strip's webview surface (plan D1, D6; milestone 5's "done when"): its one
-    /// capability grants exactly the six commands, to strip windows only; the handler list,
-    /// build.rs and the autogenerated permission files name the same six, and no other
-    /// capability exists.
+    /// The webview surface (plan D1, D6; milestone 5's and milestone 7's "done when"): two
+    /// capabilities, each granting an exact list to its own windows: the strip's six to
+    /// `strip-*`, the onboarding window's eleven to `onboarding`, none shared. The handler
+    /// list, build.rs and the autogenerated permission files name the same seventeen, and no
+    /// other capability exists.
     #[test]
-    fn the_strip_capability_lists_exactly_the_six_permissions() {
+    fn the_capabilities_list_exactly_their_permissions() {
         const SIX: [&str; 6] = ["get_pet", "get_snapshot", "report_hitboxes", "sprite_clicked", "shell_log", "debug_snapshot"];
-        let allow: Vec<String> = SIX.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).collect();
-        let cap: Value = serde_json::from_str(include_str!("../capabilities/strip.json")).unwrap();
-        let granted: Vec<&str> = cap["permissions"].as_array().unwrap().iter().map(|p| p.as_str().expect("a plain permission name, no scope object")).collect();
-        assert_eq!(granted, allow, "exactly the six, in this order");
-        assert_eq!(cap["windows"], serde_json::json!(["strip-*"]));
-        assert!(cap.get("remote").is_none() && cap.get("platforms").is_none());
+        let allow = |list: &[&str]| -> Vec<String> { list.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).collect() };
+        let granted = |cap: &Value| -> Vec<String> { cap["permissions"].as_array().unwrap().iter().map(|p| p.as_str().expect("a plain permission name, no scope object").to_string()).collect() };
+        let strip: Value = serde_json::from_str(include_str!("../capabilities/strip.json")).unwrap();
+        assert_eq!(granted(&strip), allow(&SIX), "the strip: exactly the six, in this order");
+        assert_eq!(strip["windows"], serde_json::json!(["strip-*"]));
+        let onboarding: Value = serde_json::from_str(include_str!("../capabilities/onboarding.json")).unwrap();
+        assert_eq!(granted(&onboarding), allow(&onboarding::COMMANDS), "the onboarding window: exactly the eleven of D6, in its order");
+        assert_eq!(onboarding["windows"], serde_json::json!([onboarding::LABEL]));
+        for cap in [&strip, &onboarding] {
+            assert!(cap.get("remote").is_none() && cap.get("platforms").is_none());
+        }
+        assert!(!SIX.iter().any(|c| onboarding::COMMANDS.contains(c)), "no command is in both");
+        assert!(!strips::is_strip(onboarding::LABEL), "the onboarding window never matches strip-*");
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let caps: Vec<String> = std::fs::read_dir(dir.join("capabilities")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
-        assert_eq!(caps, ["strip.json"]);
+        let mut caps: Vec<String> = std::fs::read_dir(dir.join("capabilities")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        caps.sort();
+        assert_eq!(caps, ["onboarding.json", "strip.json"]);
         let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        assert_eq!(conf["app"]["security"]["capabilities"], serde_json::json!(["strip"]));
+        assert_eq!(conf["app"]["security"]["capabilities"], serde_json::json!(["strip", "onboarding"]));
+        let mut all: Vec<&str> = SIX.iter().chain(onboarding::COMMANDS.iter()).copied().collect();
         let src = include_str!("lib.rs");
-        let handler: Vec<&str> = src.split(concat!("generate_", "handler![")).nth(1).unwrap().split(']').next().unwrap().split(',').map(str::trim).collect();
-        assert_eq!(handler, SIX);
+        let handler: Vec<&str> = src.split(concat!("generate_", "handler![")).nth(1).unwrap().split(']').next().unwrap().split(',').map(str::trim).filter(|c| !c.is_empty()).map(|c| c.trim_start_matches("onboarding::")).collect();
+        assert_eq!(handler, all);
         let build = include_str!("../build.rs");
         let list = build.split(".commands(&[").nth(1).unwrap().split(']').next().unwrap();
         let mut declared: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         declared.sort();
-        let mut six = SIX.to_vec();
-        six.sort();
-        assert_eq!(declared, six);
+        all.sort();
+        assert_eq!(declared, all);
         let mut generated: Vec<String> = std::fs::read_dir(dir.join("permissions").join("autogenerated")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         generated.sort();
-        assert_eq!(generated, six.iter().map(|c| format!("{c}.toml")).collect::<Vec<_>>());
+        assert_eq!(generated, all.iter().map(|c| format!("{c}.toml")).collect::<Vec<_>>());
     }
 
     #[test]

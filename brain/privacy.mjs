@@ -7,7 +7,7 @@ import path from 'node:path';
  * - `privacy.sharingProcesses`: process names that mean "the screen is being shared".
  *   The shell compares whole names, ignoring case, against macOS's process names,
  *   which the kernel cuts at 31 bytes. An entry that can never match is reported.
- * - data/shell-state.json: the tray's "Hide the strip" and "Show labels". The shell
+ * - data/shell-state.json: the tray's "Hide everything (for screen sharing)" and "Show labels". The shell
  *   watches it, so `bellwether show` / `bellwether hide` work with or without a running shell.
  *
  * The same rules are in shell/src-tauri/src/privacy.rs; keep the two in step.

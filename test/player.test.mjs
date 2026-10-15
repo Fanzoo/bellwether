@@ -571,10 +571,16 @@ describe('resting sprites follow a moving home (Milestone 6, R1)', () => {
 
 describe('unobtrusiveness in the webview (Milestone 7)', () => {
   const main = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src', 'main.js'), 'utf8');
-  test('one long poll carries the shell view too; still only the six commands', () => {
+  test('one long poll carries the shell view too; still only the six commands (and the selftest\'s refused probe)', () => {
     assert.match(main, /invoke\('get_snapshot', \{ after: rev, shellAfter: view\.rev \}\)/);
     const commands = new Set([...main.matchAll(/invoke\('([a-z_]+)'/g)].map((m) => m[1]));
-    assert.deepEqual([...commands].sort(), ['debug_snapshot', 'get_pet', 'get_snapshot', 'report_hitboxes', 'shell_log', 'sprite_clicked']);
+    assert.deepEqual([...commands].sort(), ['debug_snapshot', 'get_pet', 'get_snapshot', 'report_hitboxes', 'setup_status', 'shell_log', 'sprite_clicked']);
+    // Milestone 7: setup_status (an onboarding command) is called only by --selftest, which
+    // passes only when the strip's capability refuses it.
+    assert.equal([...main.matchAll(/invoke\('setup_status'/g)].length, 1);
+    const selftest = main.slice(main.indexOf('if (display.selftest) {'), main.indexOf("log(`selftest: done ${missing.length ? 'FAIL' : 'PASS'}`);"));
+    assert.match(selftest, /const refused = await invoke\('setup_status'\)\.then\(\(\) => null, /);
+    assert.match(selftest, /if \(!refused\) missing\.push\(/);
   });
   test('muted or hidden: no ticking, nothing clickable, only badges (muted) or nothing (hidden)', () => {
     assert.match(main, /const quiet = \(\) => muted \|\| view\.hidden;/);

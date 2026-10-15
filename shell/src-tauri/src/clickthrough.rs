@@ -66,6 +66,10 @@ pub fn run<R: Runtime>(app: AppHandle<R>, fade_radius: f64) {
         let mut close: Vec<String> = Vec::new();
         fast = false;
         for (label, window) in app.webview_windows() {
+            // Only strips are click-through; the onboarding window is a normal window.
+            if !crate::strips::is_strip(&label) {
+                continue;
+            }
             let Ok(pos) = window.outer_position() else { continue };
             let Ok(scale) = window.scale_factor() else { continue };
             // Physical screen pixels -> the window's logical pixels.

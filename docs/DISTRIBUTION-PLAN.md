@@ -97,7 +97,7 @@ Files are written under `~/Library/Application Support/Bellwether/` and
 | Token randomness | `getrandom` 0.3 (already in the lockfile) | 24 random bytes, base64url, as today |
 | macOS APIs | `objc2` 0.6.5, `objc2-foundation` / `objc2-app-kit` / `objc2-core-foundation` / `objc2-core-graphics` 0.3.2 (all in the lockfile), plus `objc2-service-management` 0.3.2 (**new**) | SMAppService [11]; optionally replacing hand-written FFI in `ax.rs`, `dock.rs`, `locator.rs` and `strips.rs`. Not required: the existing FFI works |
 | Updates | `tauri-plugin-updater` 2.13.2 (**new**; brings reqwest 0.13 + rustls/ring) | signed updates from GitHub Releases [4] |
-| File picker | `tauri-plugin-dialog` 2.8.1 (**new**), called from Rust only | the pet-import panel; the webview gets no dialog permission |
+| File picker | `NSOpenPanel` through `objc2-app-kit` 0.3.2 (already in the lockfile, through tao), called from Rust on the main thread (deviation 67; was `tauri-plugin-dialog` 2.8.1) | the pet-import panel; no plugin is registered, so no dialog command exists for any webview |
 | CLI parsing | none (port of `parseArgs`) | the strict refusals (`--settings` without a value, unknown or `--__proto__` options, stray arguments) are a tested contract; a parser crate would change the messages |
 | Dev only | Node 22.14 (installed) | runs the player tests and the conformance suite against the Rust binary; never shipped |
 | Bundling | `@tauri-apps/cli` 2.12.1 (dev dependency) | `tauri build` for the `.app`, `.dmg` and updater artifacts |
@@ -2219,8 +2219,9 @@ Use a test build so nothing touches the live install: `node scripts/build-app.mj
 7. **Capture checks**, with a sheep waiting on a permission prompt: Cmd-Shift-3 and
    Cmd-Shift-5; a QuickTime screen recording; Zoom, Teams and Meet sharing as in the README.
    Note whether the strip is visible in each.
-8. **Tray** (the test strip's menu-bar sheep): Mute (sheep vanish, `"$B" status` shows MUTED,
-   survives a restart), Hide the strip (survives a restart), Show labels, Quit Bellwether (the
+8. **Tray** (the test strip's menu-bar sheep): Quiet (alerts only) (sheep vanish, a waiting one
+   keeps its "!", `"$B" status` shows MUTED, survives a restart), Hide everything (for screen
+   sharing) (the whole strip, "!" included; survives a restart), Show labels, Quit Bellwether (the
    strip quits and its brain child stops: `curl -s http://127.0.0.1:47418/health` gets nothing).
 9. **Full screen again** with Safari or Terminal: not on that Space; back when you swipe back.
 10. **Fade and clicks**: the cursor near a sheep fades it; clicking it still hops; clicking
@@ -2241,7 +2242,8 @@ check that was run passed:
 - 6: a permission prompt gave an alert with a bubble, and an Explore subagent showed a lamb;
 - 3: clicking a sheep brought its iTerm2 tab forward, after an Automation prompt naming
   Bellwether;
-- 8: the tray's Mute, Hide and Quit worked, and Quit stopped its brain child.
+- 8: the tray's Quiet (alerts only), Hide everything (for screen sharing) and Quit worked (then
+  labelled Mute and Hide the strip; deviation 61), and Quit stopped its brain child.
 
 The AppleEvents grant was reset afterwards (step 14).
 
@@ -2395,7 +2397,8 @@ and the real HOME, from a current login session (`launchctl managername`: Aqua):
   strip's) logged `warning: legacy agents: local.bellwether.brain (loaded, pid 25449),
   local.bellwether.shell (loaded, pid 32594); …`, `tray: notice: Legacy agents:
   local.bellwether.brain (running), local.bellwether.shell (running) (see bellwether doctor)` and
-  `tray: 1 notice(s), Mute, Hide the strip, Show labels, Quit` (no "no tray icon" warning); then
+  `tray: 1 notice(s), Quiet (alerts only), Hide everything (for screen sharing), Show labels, Quit`
+  (as the line reads since deviation 61; it then named the old labels) (no "no tray icon" warning); then
   `brain on port 47431: … (this app's login agent)`. `shell stop` → `stopped the strip`; the
   launchd brain kept answering. The menu itself was not looked at (no screenshot, no
   Accessibility scripting on the maintainer's screen);
@@ -2562,6 +2565,157 @@ and the tray "Set up Bellwether…".
   fails;
 - refusing every optional permission leaves a working strip;
 - Import… with a DOCTYPE file shows the refusal.
+
+#### M7 status (developer, 2026-10-15): built and tested locally; the walk-through on a fresh account is the maintainer's; CI not yet run
+
+Built:
+- **The window** (`shell/src-tauri/src/onboarding.rs`, `shell/src/onboarding.{html,js,css}`): label
+  `onboarding`, 520×600, a normal window that brings the app forward. It opens on the app's first
+  launch until its Done is clicked (`"onboarded": true` in shell-state.json), from the tray's new
+  "Set up Bellwether…" (app layout only), and from `--onboarding`, also when forwarded to a
+  running app by the single-instance plugin (deviation 70). Steps, in order: an earlier install
+  (only when one is found; step 1 itself is M8, deviations 62–63), start at login (both items,
+  with the Q12 warning on the hooks page while the brain item is off), hooks (preview, Install,
+  Uninstall), sheep on the Dock, click to focus (iTerm2, Terminal; status read without asking,
+  deviation 68), pet (stills of each bundled or imported pet's first frame; Import…), the
+  `bellwether` command, Done (doctor in plain words, deviation 69).
+- **The capability** (`capabilities/onboarding.json`): the eleven commands of D6's table, to the
+  `onboarding` window only; the strip's is unchanged (the six, `strip-*`). No plugin permission in
+  either. Each command calls `guard(window.label())` first (a test checks every one). Arguments are
+  enums or opaque plan ids. The token is masked in everything returned.
+- **The hooks step** uses the CLI's own code: `plan_edit`, then `cli::hook_diff` and
+  `cli::hook_summary` (moved out of `hooks` so both print the same), masked as the CLI masks. The
+  plan is kept in Rust under a one-use id with the file's sha256; Install checks the file (and the
+  token) again and, if either changed, writes nothing and returns a fresh preview. The install
+  record and the backup are the CLI's.
+- **The tray**: Jeff's relabel (deviation 61), and "Set up Bellwether…" in the app.
+- **New-user token** (deviation 66), **pet choice** writing config.json (deviation 64), the
+  **Import… panel** through objc2-app-kit (deviation 67), the **CLI tool** link (deviation 73).
+- Strip-only window handling (deviation 71). Tests that pinned M5's surface updated (deviation 72).
+
+Proved here (this Mac, 2026-10-15):
+- **The strip can't call an onboarding command** (live, through Tauri's IPC check): a debug strip
+  with `--selftest` (repository layout, port 47421, scratch data dir and HOME, the token from the
+  environment) logged `selftest: onboarding command refused to the strip: setup_status not allowed
+  on window "strip-0", webview "strip-0", URL: localallowed on: [windows: "onboarding", URL:
+  local]referenced by: capability: onboarding, permission: allow-setup-status`, then `selftest:
+  done PASS`, exit 0. The `guard` is unit-tested for other labels.
+- **The window and its capability work** (live): the same debug build with `--onboarding`:
+  `onboarding: window opened`, `onboarding: setup_status`, `onboarding: setup_status answered:
+  hooks 0 of 16 events, 1 pet(s), earlier install false, doctor 14 check(s), 2 failing`.
+- **The app layout** (live, an ad-hoc test bundle: `node scripts/build-app.mjs --adhoc --test-port
+  47433 --test-home <scratch>/bw-m7`; codesign valid, entitlements only `automation.apple-events`;
+  run as its executable with a scratch HOME, never `open`ed): first launch with an empty home
+  logged `legacy agents: none`, `tray: Quiet (alerts only), Hide everything (for screen sharing),
+  Show labels, Set up Bellwether…, Quit`, `onboarding: window opened`, `setup_status answered: hooks
+  0 of 16 events, 0 pet(s), …`; nothing was written to the home but `logs/` (no token made by
+  looking). With `"onboarded": true` in shell-state.json the window didn't open; a second launch
+  with `--onboarding` handed over (`another launch asked for the setup window`, `onboarding: window
+  opened`) and exited 0. The window's buttons were not clicked (no Accessibility scripting on the
+  maintainer's screen), so nothing was registered.
+
+Progress against **Done when**:
+- [ ] A fresh user account, first launch to a sheep without a terminal: the maintainer's (no spare
+  account here, as deviation 57). It needs a notarized release build (a test build refuses the
+  app's login item, F10) and, until M10's sheep, a pet file to Import in step 6 (deviation 47). By-hand
+  step 1 below.
+- [x] The diff shown equals `bellwether hooks install`'s output for the same file, token masked:
+  `shell/src-tauri/tests/onboarding_preview.rs` runs the real binary's dry run for all eleven
+  installer vectors under a temp HOME and compares its stdout with the window's diff byte for byte,
+  for install and then for uninstall.
+- [x] Editing settings.json between preview and Install makes Install refuse and re-preview:
+  `the_preview_is_the_clis_diff_masked_and_install_applies_exactly_it` (onboarding.rs: nothing
+  written, the fresh preview has the edit, a used plan id is refused, the fresh one applies); the
+  page shows the refusal and the fresh diff (test/onboarding.test.mjs). Also a token made in
+  between (`a_new_user_gets_a_token_with_the_first_install_and_not_before`).
+- [x] The capability test asserts both capabilities' exact lists: lib.rs's
+  `the_capabilities_list_exactly_their_permissions` (and shell-config.test, tester-m3).
+- [x] An onboarding command from the strip webview fails: proved live by `--selftest` (above), and
+  by `guard`. Not tried by hand from devtools (by-hand step 3).
+- [ ] Refusing every optional permission leaves a working strip: the strip's code doesn't depend on
+  them (Accessibility only confines the sheep to the Dock; Automation only picks the tab), and a
+  refused Automation answer is shown (onboarding.test). Seeing it is by-hand step 2.
+- [x] Import… with a DOCTYPE file shows the refusal:
+  `importing_a_doctype_pet_is_refused_and_nothing_is_written` (pets import's message, nothing
+  written) and onboarding.test (the page shows it as an error). The panel itself: by-hand step 1.
+
+Counts and checks (this Mac, 2026-10-15, every run under `caffeinate -dims`):
+- `npm test`: 1005 tests, 1003 pass, 0 fail, 2 skipped (999 after M6's review: test/onboarding.test.mjs
+  adds 6).
+- `npm run test:cargo`: 176 passed, 0 failed (162 after M6's review: onboarding.rs 11, lib.rs's
+  capability test replaces the strip-only one, tray 1, shellstate 1, onboarding_preview.rs 1); with
+  `--features bellwether-shell/conformance`: 178.
+- `npm run test:rust` (conformance binary rebuilt first): exit 0, node 29 of 29 files green, rust 29
+  of 29 (onboarding.test.mjs starts no brain, so it is not a parity row).
+- `npm run differential` (seed 1): env, redact, normalise, diff 0 differences in 10⁵ each; json 0
+  unexplained (22 336 explained); fixture 0 (21); `node --env-file` 0 unexplained.
+- `npm run test:vectors`: all 60 files match. `third-party.mjs --check`: up to date.
+- The cross-target check of core and brain (Linux, Windows): clean, no warnings.
+- Release check: `__fixture`, `__json`, `__diff`, `__session` print `unknown command`, exit 1.
+  `shell/src-tauri/target/release/bellwether-shell` kept sha256 `35ceb697…` throughout.
+
+Not done or not proved:
+- any click in the window on this Mac (registering login items, the Accessibility and Automation
+  prompts, the file panel, the CLI link, pet choice and the strip's reload), and how it looks: the
+  logic under each is unit-tested, the page against a stand-in DOM;
+- the fresh-account walk-through; CI.
+
+#### M7 by-hand checks (maintainer)
+
+1. **A fresh user account** (System Settings > Users & Groups; a disposable one), with a notarized
+   release build copied to `/Applications` and a pet file to import (for example esheep64's
+   `animations.xml` from `bellwether pets fetch` in the repository), no terminal:
+   1. Open Bellwether from Finder. The setup window opens by itself; the menu-bar sheep's menu shows
+      Quiet (alerts only), Hide everything (for screen sharing), Show labels, Set up Bellwether…,
+      Quit Bellwether.
+   2. Start at login: Turn on. Both lines say on (or "waiting for your approval": use Open Login
+      Items settings, turn Bellwether on, come back).
+   3. Hooks: Show the changes. The diff adds Bellwether's 16 events, the token shown as four
+      characters and "…". In another window, edit `~/.claude/settings.json` (add a space in a
+      value) and choose Install: it refuses and shows a fresh diff. Install again: written, with
+      the backup's path.
+   4. Dock and click-to-focus: choose Allow… and Ask Terminal, and refuse both prompts. The page
+      says refused; the strip keeps working (step 2 below).
+   5. Pet: Import… a file with a DOCTYPE (a copy of a pet file with `<!DOCTYPE a>` added after the
+      first line): the refusal is shown and nothing is listed. Import… the real file, then Use this
+      pet.
+   6. The command: Install the command; note what it says about PATH.
+   7. Done: the doctor list; choose Done. Quit and reopen Bellwether: no window.
+   8. Open Terminal, start `claude`: a sheep appears above the Dock.
+2. **Every optional permission refused** (the same account): sheep walk the full width above the
+   Dock; clicking one brings Terminal forward (not the tab); Quiet and Hide everything work.
+3. **Devtools** (optional, a debug build from the repository; not tried here): `bellwether shell
+   --dev`, open the strip page's Web Inspector (Safari > Develop > this Mac), and run
+   `__TAURI__.core.invoke('setup_status')` in its console: it is refused as in the selftest line
+   above.
+
+#### M7 review fixes (BR-3K: "ship with fixes", 2026-10-15)
+
+BR-3K added `shell/src-tauri/tests/tester_m7.rs` (the preview/apply protocol and hostile inputs
+through the public `Onboarding` API, temp HOME only); it runs in `npm run test:cargo`.
+- **Old tray labels**: the M5 and M6 by-hand checks above, main.js's and privacy.rs's comments now
+  use "Quiet (alerts only)" and "Hide everything (for screen sharing)" (deviation 61). The M6
+  status's quoted `tray:` line is given as it reads now, with a note.
+- **`npm run test:rust` with a binary built without `conformance`** (as `npm run test:cargo`
+  leaves it) waited 300 s per file and left `node --test` children behind. test/conformance.mjs
+  now sends one `__json` first and stops at once, exit 3, with the differential's message
+  (`… has no conformance commands ("unknown command"): it was built without the \`conformance\`
+  feature …`); measured 0.8 s.
+- **A used plan stays on the page**: Install now drops the plan before it asks (the diff is hidden
+  and Install is off), and only a fresh preview (the refusal's, or Show the changes) turns it on
+  again; an error leaves none. test/onboarding.test.mjs, "a refused or failed Install drops the
+  used plan…".
+- **The Stack table** names NSOpenPanel through objc2-app-kit for the file picker (deviation 67).
+
+After the fixes (this Mac, 2026-10-15, under `caffeinate -dims`):
+- `npm test`: 1006 tests, 1004 pass, 0 fail, 2 skipped (1005 before: the page test above).
+- `npm run test:cargo`: 187 passed, 0 failed (176 before: tester_m7.rs). One run of three failed
+  once in `legacy::tests::plists_and_launchd_each_count_alone` (an `EINVAL` writing its temp
+  plist; M6 code, unchanged here); the two runs after it passed. With `--features
+  bellwether-shell/conformance`: 189 passed.
+- `npm run test:rust`: exit 0, node 29 of 29 files green, rust 29 of 29.
+- `npm run differential` (seed 1): env, redact, normalise, diff 0 differences in 10⁵ each; json 0
+  unexplained (22 336 explained); fixture 0 (21); `node --env-file` 0 unexplained.
 
 ### M8. Migration to the app
 
@@ -3298,3 +3452,102 @@ Recorded by the developer while building M6 (2026-10-15).
       it. It reads the agent's home as the agent will: the bundle plist's BELLWETHER_HOME, else
       `~/Library/Application Support/Bellwether` under HOME, never the environment's token. A
       dry-run `install` says the same, since it runs the preflight too.
+
+Recorded by the developer while building M7 (2026-10-15).
+
+61. **The tray's switches are relabelled** (the maintainer's request, 2026-10-15).
+    - Was: "Mute (do not disturb)" and "Hide the strip"; the difference between them wasn't
+      clear.
+    - Now: **"Quiet (alerts only)"** (id `mute`: still the brain's do-not-disturb, so a waiting
+      sheep still shows its "!") and **"Hide everything (for screen sharing)"** (id `hide`: the
+      whole strip, "!" included). Ids and behaviour are unchanged. Updated with them: tray.rs's
+      doc comment and its `tray:` log line, the strip's "strip hidden" log line, doctor's `strip`
+      INFO line (both brains, same words), both CLIs' usage lines for `mute`/`show`, the README
+      and comments. The onboarding window's last page names them. Pinned by tray.rs's
+      `the_switches_say_what_they_hide` and privacy.test.mjs.
+62. **Step 1's commands exist, step 1 doesn't.**
+    - Plan: M7 builds steps 2–8 and the 11 commands; step 1 (the migration) is M8.
+    - Done: `migration_preview` and `migration_apply` are registered and granted, so the
+      capability is already its final eleven. `migration_preview` names the earlier install it
+      finds (the four legacy labels, D5's scan) and returns no plan; `migration_apply` refuses
+      ("milestone 8; nothing was changed"). When an earlier install is found, the window shows
+      a first page naming it.
+63. **No start at login and no hook install while an earlier install is there.**
+    - Plan (D6): step 1 replaces steps 2–3 for those users.
+    - True: without step 1, steps 2–3 would register a second brain on the port the
+      repository's brain holds (it would exit and be restarted by launchd every 10 s), and
+      rewrite the hook entries with a token the repository's brain refuses.
+    - Done: while D5's scan finds a legacy agent, `login_items_set(true)` and an install's
+      `hooks_preview`/`hooks_apply` refuse in Rust, saying why; the page disables both buttons.
+      Turning start at login off and uninstalling hooks are never refused.
+64. **`pet_select` also writes an imported pet's animation map.**
+    - Plan (D6): `pet_select` writes `pets.default` in config.json.
+    - True: an imported pet's animations aren't named like esheep64's, so with `pets.default`
+      alone the strip finds no "walk" and draws nothing.
+    - Done: for an imported pet with no `pets.animationMap.<name>`, the map `pets import`
+      proposes is written with it. config.json is edited through the lossless JSON writer (the
+      installer's): every other key keeps its value and its lines, though an inline object is
+      laid out again, as the installer does. The result is checked as the brain reads config
+      before it replaces the file (0600, temp file and rename). Refused under
+      BELLWETHER_CONFIG (read only) and in a repository layout. The strip windows reload and
+      ask for their pet again.
+65. **`permission_request` has a fourth kind, and Accessibility asks once.**
+    - Plan (D6): kinds `accessibility`, `automation-iterm2`, `automation-terminal`; D5 says
+      onboarding offers `openSystemSettingsLoginItems` on `requiresApproval`.
+    - Done: `login-items` opens that pane (the page's "Open Login Items settings", shown only
+      while an item waits). `accessibility` shows macOS's prompt the first time in a run (macOS
+      shows it only once per app), and opens Privacy & Security > Accessibility on the next
+      request. The Automation kinds send M1's `count windows` event (deviation 7) through the
+      same code as the `--action` hand-off.
+66. **The window makes a new user's hook token.**
+    - Plan (D6): silent about the token; deviation 60 refuses the brain agent without one.
+    - Done: `login_items_set(true)` makes `hook-token` when there is none (as `token init`
+      would). An install preview with no token yet makes one in memory, shows it masked, and
+      writes it only on Install; if a token appeared in between, Install refuses with a fresh
+      preview. A token that is there but unusable is never replaced here (the error names
+      `token init --force`).
+67. **The Import… panel is NSOpenPanel through objc2-app-kit, not tauri-plugin-dialog.**
+    - Plan (Stack, D8): `tauri-plugin-dialog` 2.8.1, called from Rust only.
+    - True: `objc2-app-kit` 0.3.2 is already in the lockfile (through tao); the plugin would
+      add a crate tree and register plugin commands that only the capabilities would keep from
+      the webviews.
+    - Done: a direct `objc2-app-kit` dependency (features for NSOpenPanel only), the panel run
+      on the main thread. No new crate (third-party.mjs --check: up to date), no plugin, so no
+      dialog command exists at all. The file then goes through `pets import`'s checks, so a
+      DOCTYPE file shows that refusal ("Nothing was imported").
+68. **Automation status is read without asking.** Step 5 "shows the status": the window asks
+    `AEDeterminePermissionToAutomateTarget` with askUserIfNeeded false (allowed, refused, not
+    asked yet, not running). Only the button sends an event.
+69. **Doctor comes with `setup_status`.** The 11 commands have none for step 8; the page's last
+    step shows the `doctor` list `setup_status` returns (the same checks as `bellwether
+    doctor`, through `cli::doctor_report`, which `doctor` now calls too), masked, in plain
+    words (OK, Note, Worth a look, Needs fixing). About 70 ms here.
+70. **Where the window opens.** On first launch in the app layout only (until Done writes
+    `"onboarded": true` to shell-state.json; every writer of that file keeps the flag,
+    test/DIVERGENCES.md 24), from the tray item (app layout only), and from `--onboarding`
+    (also forwarded to a running app through the single-instance plugin). A repository
+    release build (the strip a repository LaunchAgent runs) never opens it; a repository debug
+    build opens it with `--onboarding`, for testing, and there refuses login items, pets, the
+    CLI tool and making a token. Never with `--selftest`, `--demo` or `--locate`.
+71. **Only strips are click-through, hidden while sharing, or reloaded.** The click-through
+    loop, the sharing/Hide loop and the pet reload went over every webview window; they now
+    act on `strip-<n>` windows only (`strips::is_strip`), so the onboarding window is a normal
+    window.
+72. **Tests that pinned M5's surface now pin M7's.** shell-config.test (both capabilities'
+    exact lists and windows, build.rs), tester-m3 (17 handlers, two capabilities, 17
+    autogenerated permission files, tray ids with `setup`, 6 commands in lib.rs and 11 in
+    onboarding.rs), player.test (main.js invokes the six, plus `setup_status` once, in
+    `--selftest`, which passes only when it is refused) and lib.rs's capability test. The
+    strip's `--selftest` now proves the IPC refusal live. privacy.rs's process-list test reads
+    again when the two counts differ: the new tests start processes (launchctl) at the same
+    time, and its one-shot comparison failed in the full run.
+73. **The CLI tool's PATH check** asks the user's login shell (`$SHELL -ilc`, 3 s at most, the
+    child stopped by its handle) for the PATH a new terminal gets; the app's own PATH is
+    launchd's. A file at `~/.local/bin/bellwether` that isn't a link to a Bellwether.app is
+    never replaced; a link to another copy is repointed; a Homebrew link
+    (`/opt/homebrew/bin` or `/usr/local/bin`) means nothing to do.
+74. **No spare user account (again).** The test plan puts M7 on a spare account, and "Done when"
+    starts from a fresh one. There is none here (deviation 57), so: unit and page tests for every
+    command and step, the IPC refusal and the window proved live with a debug build and an ad-hoc
+    test bundle under a scratch HOME (no clicks), and the walk-through left as the maintainer's
+    by-hand check (M7 status). A new user also needs a pet file to import until M10 (deviation 47).

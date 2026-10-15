@@ -23,7 +23,7 @@ import { AGENT_DIR, CliError, DATA_DIR, EXIT, USER_SETTINGS } from './util.mjs';
  *    in this repository's .env, with the same value, so nothing has to be re-trusted;
  * 2. config.json, if this repository has none;
  * 3. data/state.json (each session's colour and slot, and mute) and
- *    data/shell-state.json (Hide the strip, Show labels), if this one has none;
+ *    data/shell-state.json (Hide everything, Show labels), if this one has none;
  * 4. pasture's LaunchAgents, replaced by bellwether's (macOS): the port is checked,
  *    the old agents are backed up and booted out, the new ones loaded, and the new
  *    brain must answer with the token; if not, the old agents are restored. With the

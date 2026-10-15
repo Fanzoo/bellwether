@@ -1,7 +1,8 @@
 // The strip's webview: draws the sheep and reports where they are. It has no network
 // access (CSP connect-src is Tauri's IPC only) and calls only bellwether's own commands:
 // get_pet, get_snapshot, report_hitboxes, sprite_clicked, shell_log, and with --snapshot
-// (debug) debug_snapshot.
+// (debug) debug_snapshot. (--selftest also checks that the onboarding window's commands
+// are refused to it.)
 
 import { BUBBLE, layoutBubbles } from './player/bubbles.mjs';
 import { familyExtent, freePlace, lambX } from './player/lambs.mjs';
@@ -46,8 +47,9 @@ let display; // config the shell passed: palette, scale, slotWidthPx, homeWander
 const sprites = new Map();
 let hovered = null;
 let dirty = true;
-// Milestone 7. muted: the brain's do-not-disturb (tray Mute, `bellwether mute`).
-// view: the shell's part of each snapshot: hidden (sharing, or the tray's Hide),
+// Milestone 7. muted: the brain's do-not-disturb (the tray's "Quiet (alerts only)",
+// `bellwether mute`). view: the shell's part of each snapshot: hidden (sharing, or the tray's
+// "Hide everything (for screen sharing)"),
 // showLabels (tray), near (sprite keys within fade.radiusPx of the cursor).
 let muted = false;
 let view = { rev: -1, hidden: false, showLabels: false, near: new Set(), dock: null };
@@ -843,6 +845,11 @@ async function boot() {
     log(`selftest: ${pet.model.title}: ${Object.keys(pet.model.animations).length} animations, ${pet.tileW}x${pet.tileH} tiles, ${pet.sheets.length} tinted sheets`);
     log(`selftest: behaviours mapped: ${Object.entries(pet.map).map(([b, ids]) => `${b}=${ids.map((i) => pet.model.animations[i].name).join('+')}`).join(' ')}`);
     for (const m of missing) log(`selftest: missing: ${m}`);
+    // The strip's capability doesn't grant the onboarding window's commands (plan D6): a
+    // call from here must be refused before it reaches Rust.
+    const refused = await invoke('setup_status').then(() => null, (e) => String(e?.message ?? e));
+    log(refused ? `selftest: onboarding command refused to the strip: ${refused}` : 'selftest: FAIL the strip reached setup_status');
+    if (!refused) missing.push('the strip reached an onboarding command');
     log(`selftest: done ${missing.length ? 'FAIL' : 'PASS'}`);
     return;
   }

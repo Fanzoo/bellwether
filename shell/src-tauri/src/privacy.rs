@@ -2,7 +2,7 @@
 //! switches keep between runs.
 //!
 //! The strip hides, whole, while:
-//! - the tray's "Hide the strip" is on (kept in data/shell-state.json), or
+//! - the tray's "Hide everything (for screen sharing)" is on (kept in data/shell-state.json), or
 //! - a process named in `privacy.sharingProcesses` is running (Zoom's `CptHost` while
 //!   it shares, say), when `privacy.hideWhenSharing` is on.
 //! It hides at once and shows again only after the reason has been gone for 2 s, so a
@@ -95,8 +95,9 @@ impl Debounce {
     }
 }
 
-/// What the tray switches keep between runs (data/shell-state.json). Mute is the
-/// brain's (data/state.json), so `bellwether mute` and the tray agree.
+/// What the tray switches keep between runs (data/shell-state.json): "Hide everything (for
+/// screen sharing)" and "Show labels". "Quiet (alerts only)" is the brain's mute
+/// (data/state.json), so `bellwether mute` and the tray agree.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Kept {
     pub hidden: bool,
@@ -114,10 +115,15 @@ pub fn load_kept(data_dir: &Path) -> Kept {
     Kept { hidden: v.get("hidden") == Some(&Value::Bool(true)), show_labels: v.get("showLabels") == Some(&Value::Bool(true)) }
 }
 
+/// Keeps an `onboarded` flag the file already has (the app's onboarding, milestone 7).
 pub fn save_kept(data_dir: &Path, kept: Kept) -> std::io::Result<()> {
     std::fs::create_dir_all(data_dir)?;
     let tmp = data_dir.join("shell-state.json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(&json!({"version": 1, "hidden": kept.hidden, "showLabels": kept.show_labels}))?)?;
+    let mut v = json!({"version": 1, "hidden": kept.hidden, "showLabels": kept.show_labels});
+    if bellwether_core::shellstate::onboarded(data_dir) {
+        v["onboarded"] = Value::Bool(true);
+    }
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&v)?)?;
     std::fs::rename(tmp, kept_path(data_dir))
 }
 
@@ -236,6 +242,13 @@ mod tests {
         assert_eq!(load_kept(&dir), Kept { hidden: true, show_labels: true });
         std::fs::write(kept_path(&dir), "not json").unwrap();
         assert_eq!(load_kept(&dir), Kept::default());
+        // The onboarding window's Done is kept by the tray's switches, and never added by them.
+        save_kept(&dir, Kept::default()).unwrap();
+        assert!(!std::fs::read_to_string(kept_path(&dir)).unwrap().contains("onboarded"));
+        bellwether_core::shellstate::set_onboarded(&dir).unwrap();
+        save_kept(&dir, Kept { hidden: true, show_labels: false }).unwrap();
+        assert!(bellwether_core::shellstate::onboarded(&dir));
+        assert_eq!(load_kept(&dir), Kept { hidden: true, show_labels: false });
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -244,9 +257,14 @@ mod tests {
     fn the_process_list_includes_this_test() {
         let names = running_names();
         assert!(names.len() > 10);
-        let mut cached = ProcessNames::default();
-        let t = Instant::now();
-        assert_eq!(cached.read(t).len(), cached.read(t + Duration::from_millis(500)).len(), "the cache gives the same list");
+        // The same list from the cache as from a fresh read. Other tests running at the same
+        // time start processes (launchctl, codesign), so a pair that differs is read again.
+        let same = (0..20).any(|_| {
+            let mut cached = ProcessNames::default();
+            let t = Instant::now();
+            cached.read(t).len() == cached.read(t + Duration::from_millis(500)).len()
+        });
+        assert!(same, "the cache gives the same list");
         let me = std::env::current_exe().unwrap();
         let mine: String = me.file_name().unwrap().to_string_lossy().chars().take(31).collect();
         assert!(names.iter().any(|n| *n == mine), "{mine} not in the list: {:?}", names.iter().filter(|n| n.starts_with("bellwether")).collect::<Vec<_>>());

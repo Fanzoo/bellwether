@@ -305,7 +305,7 @@ fn status(args: &[String]) -> CmdResult {
     }
 }
 
-/// Do-not-disturb, the same switch as the tray's Mute; kept in state.json.
+/// Do-not-disturb, the same switch as the tray's Quiet (alerts only); kept in state.json.
 fn mute(command: &str, args: &[String]) -> CmdResult {
     cliargs::parse(args, &[], &[], 0)?;
     let home = home::dir();
@@ -316,7 +316,7 @@ fn mute(command: &str, args: &[String]) -> CmdResult {
     Ok(exit::OK)
 }
 
-/// The tray's "Hide the strip", from the terminal; a running strip follows within a second.
+/// The tray's "Hide everything (for screen sharing)", from the terminal; a running strip follows within a second.
 fn show(command: &str, args: &[String]) -> CmdResult {
     cliargs::parse(args, &[], &[], 0)?;
     let home = home::dir();
@@ -658,7 +658,7 @@ fn settings_arg(a: &cliargs::Args) -> PathBuf {
 /// `bellwether hooks print [--out <file> [--force]] | install | uninstall [--write]
 /// [--settings <path>] [--port <old port>]` (brain/cli.mjs `hooks`).
 fn hooks(args: &[String]) -> CmdResult {
-    use bellwether_core::hooks::{self as installer, Action, EVENTS};
+    use bellwether_core::hooks::{self as installer, Action};
     let a = cliargs::parse(args, &["write", "force"], &["settings", "out", "port"], 1)?;
     let sub = a.positional.first().map(String::as_str).unwrap_or("");
     let home = home::dir();
@@ -726,7 +726,6 @@ fn hooks(args: &[String]) -> CmdResult {
         err_line(&format!("warning: {w}"));
     }
     let shown = plan.warnings.len();
-    let before = installer::sum_groups(&installer::count_groups(&plan.before, port));
     let after = installer::sum_groups(&installer::count_groups(&plan.after, port));
     if !plan.changed {
         err_line(&match action {
@@ -735,17 +734,9 @@ fn hooks(args: &[String]) -> CmdResult {
         });
         return Ok(exit::OK);
     }
-    out(&bellwether_core::diff::unified_diff(&plan.old_text, &plan.new_text, &format!("{} (current)", file.display()), &format!("{} (after {sub})", file.display()), 3));
+    out(&hook_diff(&plan));
     let backups = home.join("backups");
-    let summary = format!(
-        "bellwether matcher groups {before} -> {after} ({} events subscribed); {}",
-        EVENTS.len(),
-        if plan.layout_kept {
-            "every other line of the file is unchanged.".to_string()
-        } else {
-            format!("every other entry keeps its value, BUT this file is not laid out the way bellwether writes JSON (spacing, inline arrays or mixed line endings), so the write also reformats existing lines, as the diff shows. An uninstall afterwards will not restore the original bytes; the backup in {}/ keeps them.", backups.display())
-        }
-    );
+    let summary = hook_summary(&plan, port, &backups);
     if !a.has("write") {
         err_line(&format!("\ndry run: {summary}\nNothing was written. Re-run with --write to apply."));
         return Ok(exit::OK);
@@ -756,6 +747,31 @@ fn hooks(args: &[String]) -> CmdResult {
         err_line(&format!("warning: {w}"));
     }
     Ok(exit::OK)
+}
+
+/// The diff `hooks install|uninstall` prints for a plan (unmasked: the CLI's `out` masks it,
+/// and the onboarding window masks it the same way), so the window shows exactly what the
+/// command shows for the same file.
+pub fn hook_diff(plan: &bellwether_core::hooks::Plan) -> String {
+    let file = plan.file.display();
+    bellwether_core::diff::unified_diff(&plan.old_text, &plan.new_text, &format!("{file} (current)"), &format!("{file} (after {})", plan.action.word()), 3)
+}
+
+/// The summary after the diff ("bellwether matcher groups 0 -> 16 …"), without the dry run's
+/// or the write's first words.
+pub fn hook_summary(plan: &bellwether_core::hooks::Plan, port: u16, backups: &Path) -> String {
+    use bellwether_core::hooks::{self as installer, EVENTS};
+    let before = installer::sum_groups(&installer::count_groups(&plan.before, port));
+    let after = installer::sum_groups(&installer::count_groups(&plan.after, port));
+    format!(
+        "bellwether matcher groups {before} -> {after} ({} events subscribed); {}",
+        EVENTS.len(),
+        if plan.layout_kept {
+            "every other line of the file is unchanged.".to_string()
+        } else {
+            format!("every other entry keeps its value, BUT this file is not laid out the way bellwether writes JSON (spacing, inline arrays or mixed line endings), so the write also reformats existing lines, as the diff shows. An uninstall afterwards will not restore the original bytes; the backup in {}/ keeps them.", backups.display())
+        }
+    )
 }
 
 // ------------------------------------------------------------------ pets

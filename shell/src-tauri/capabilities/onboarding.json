@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "onboarding",
+  "description": "The onboarding window (plan D6, milestone 7): its eleven commands and nothing else. Each command also checks that the caller is the window labelled onboarding. No fs, shell, http, opener, dialog, updater, clipboard or other plugin permissions; the strip's commands are not granted here.",
+  "windows": [
+    "onboarding"
+  ],
+  "permissions": [
+    "allow-setup-status",
+    "allow-hooks-preview",
+    "allow-hooks-apply",
+    "allow-login-items-set",
+    "allow-permission-request",
+    "allow-pet-select",
+    "allow-pet-import",
+    "allow-migration-preview",
+    "allow-migration-apply",
+    "allow-cli-tool-install",
+    "allow-setup-close"
+  ]
+}

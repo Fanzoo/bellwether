@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-login-items-set"
+description = "Enables the login_items_set command without any pre-configured scope."
+commands.allow = ["login_items_set"]
+
+[[permission]]
+identifier = "deny-login-items-set"
+description = "Denies the login_items_set command without any pre-configured scope."
+commands.deny = ["login_items_set"]

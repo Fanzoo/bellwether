@@ -341,6 +341,19 @@ does, what Rust does and why, and names the test.
   --write…" (both brains: exit 2, no LaunchAgents folder); `test/rename.test.mjs`, "the app's
   doctor names every legacy agent…".
 
+### 24. `show` and `hide` keep the onboarding window's `onboarded` flag
+
+- **Node:** `bellwether show|hide` (and the repository strip's tray) rewrite
+  `shell-state.json` with `version`, `hidden` and `showLabels` only.
+- **Rust:** the same three keys, the same bytes, when the file has no `onboarded` key. When it
+  has `"onboarded": true` (written by the onboarding window's Done, plan D6, milestone 7),
+  every Rust writer keeps it: `show`, `hide` and the strip's tray switches. No writer adds it
+  but the window. So a file Node never saw the app write stays byte-for-byte Node's, and
+  `bellwether hide` in the app never makes the window open again at the next launch.
+- **Pinned by:** `crates/core/src/shellstate.rs`,
+  `the_onboarded_flag_survives_show_and_hide_and_is_never_added_by_them`;
+  `shell/src-tauri/src/privacy.rs`, `kept_switches_round_trip_and_default_when_missing_or_bad`.
+
 ## Turned out not to differ
 
 - **Lone surrogates in hook payloads** (listed as expected for M3). The Rust brain keeps every

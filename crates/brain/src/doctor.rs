@@ -146,7 +146,7 @@ pub fn checks(input: &Input) -> Vec<Check> {
         }
     }
     if bellwether_core::shellstate::read(&input.home).0 {
-        add(&mut out, "strip", "INFO", "the strip is hidden (the tray's \"Hide the strip\", or `bellwether hide`); `bellwether show` brings it back".into(), OK);
+        add(&mut out, "strip", "INFO", "the strip is hidden (the tray's \"Hide everything (for screen sharing)\", or `bellwether hide`); `bellwether show` brings it back".into(), OK);
     }
     let log = shell_log(&input.home);
     out.extend(check_locator_log(log.as_deref()));

@@ -30,8 +30,8 @@ const USAGE = `bellwether — Claude Code sessions as sheep (brain CLI)
                                            move a pasture install over: token, config, colours, hooks, LaunchAgents (preview unless --write)
   bellwether token init [--force]             add a BELLWETHER_HOOK_TOKEN to the .env, only if there is none (never printed);
                                            --force replaces one that is there but unusable
-  bellwether mute | unmute                    do-not-disturb (the same as the tray's Mute; kept across restarts)
-  bellwether show | hide                      show or hide the strip (the same as the tray's Hide; kept across restarts)
+  bellwether mute | unmute                    do-not-disturb (the same as the tray's Quiet (alerts only); kept across restarts)
+  bellwether show | hide                      show or hide the strip (the same as the tray's Hide everything; kept across restarts)
   bellwether replay <file.jsonl> [--speed N] [--port P] [--tag <pane>]
   bellwether replay --burst <events/s> [--seconds S] [--port P]
   bellwether shell [--dev] [--release]        run the overlay in this terminal (--dev builds it first, into target-dev/)
@@ -209,7 +209,7 @@ async function status(args) {
 }
 
 /**
- * Do-not-disturb, the same switch as the tray's Mute: the strip stops animating and
+ * Do-not-disturb, the same switch as the tray's Quiet (alerts only): the strip stops animating and
  * shows only a small badge on a sheep that needs you. Kept in data/state.json.
  */
 async function muteCommand(command) {
@@ -242,7 +242,7 @@ function tokenCommand(args) {
 }
 
 /**
- * The tray's "Hide the strip", from the terminal: the way back for a strip hidden
+ * The tray's "Hide everything (for screen sharing)", from the terminal: the way back for a strip hidden
  * from a tray that isn't there. Writes data/shell-state.json; a running shell picks
  * it up within a second, and a shell started later starts that way.
  */

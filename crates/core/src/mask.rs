@@ -47,3 +47,11 @@ pub fn mask(text: &str, token: Option<&str>) -> String {
     let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
     jsstr::to_string_lossy(&mask_with(&jsstr::from_str(text), token.map(jsstr::from_str).as_deref(), &mut seen))
 }
+
+/// Masks `text` knowing only `token` and the header values in `text` itself (no memory of
+/// earlier output): one command's output, for a caller that isn't the CLI process (the
+/// onboarding window's hook preview).
+pub fn mask_alone(text: &str, token: Option<&str>) -> String {
+    let mut seen = Vec::new();
+    jsstr::to_string_lossy(&mask_with(&jsstr::from_str(text), token.map(jsstr::from_str).as_deref(), &mut seen))
+}

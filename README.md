@@ -370,15 +370,17 @@ just the brain.
 
 ### Staying out of the way
 
-- **Menu-bar icon** (a small sheep): *Mute (do not disturb)*, *Hide the strip*, *Show
-  labels*, *Quit Bellwether*.
-  - **Mute** is the same switch as `bellwether mute` / `bellwether unmute`, kept by the brain
-    in `data/state.json`. The strip stops animating. Only a sheep (or lamb) that needs
-    you shows a small "!", and clicks pass through the whole strip.
-  - **Hide** and **Show labels** are kept in `data/shell-state.json`, so they survive
-    a restart. A hidden strip comes back hidden.
+- **Menu-bar icon** (a small sheep): *Quiet (alerts only)*, *Hide everything (for screen
+  sharing)*, *Show labels*, *Quit Bellwether* (Bellwether.app adds *Set up Bellwether…*).
+  - **Quiet (alerts only)** is the brain's do-not-disturb, the same switch as `bellwether
+    mute` / `bellwether unmute`, kept by the brain in `data/state.json`. The strip stops
+    animating. Only a sheep (or lamb) that needs you still shows a small "!", and clicks
+    pass through the whole strip.
+  - **Hide everything (for screen sharing)** hides the whole strip, "!" included. It and
+    **Show labels** are kept in `data/shell-state.json`, so they survive a restart. A
+    hidden strip comes back hidden.
   - **The way back without the tray:** `bellwether show` (and `bellwether hide`) do the same
-    as the tray's Hide. A running shell follows within a second, and a stopped one
+    as the tray's Hide everything. A running shell follows within a second, and a stopped one
     starts that way. The shell log's "strip hidden" line says so too. If the tray
     can't be created while the strip is saved hidden, the shell shows the strip anyway
     and logs an ERROR line.
@@ -396,7 +398,7 @@ just the brain.
     empty, padded with spaces, a path, longer than 31 bytes, or a `.exe` name on a
     Mac.
   - Teams and Google Meet in a browser have no such process. Before sharing in those,
-    use *Hide the strip*, or set `bubble.detail` to `"tool"` so a bubble never shows a
+    use *Hide everything (for screen sharing)*, or set `bubble.detail` to `"tool"` so a bubble never shows a
     command.
 - **Full-screen apps:** the strip stays off a full-screen app's Space.
 - **Near the cursor:** a sheep (and its bubble) fades to `fade.opacity` while the
@@ -465,11 +467,11 @@ These need your hands, your eyes or a screen permission, so they aren't automate
    5. **Google Meet in Chrome, then in Safari:** present your entire screen and look
       from the other side.
 8. **Tray.** Click the menu-bar sheep.
-   1. *Mute*: the sheep vanish, and a waiting one shows only a "!". Run
+   1. *Quiet (alerts only)*: the sheep vanish, and a waiting one shows only a "!". Run
       `bellwether status`: it shows MUTED. Quit and restart the shell: still muted.
-      *Mute* again: back.
-   2. *Hide the strip*: the strip disappears. Quit and restart the shell: it stays
-      hidden. *Hide* again: back.
+      *Quiet* again: back.
+   2. *Hide everything (for screen sharing)*: the strip disappears, "!" included. Quit
+      and restart the shell: it stays hidden. *Hide everything* again: back.
    3. *Show labels*: every sheep shows its project.
    4. *Quit Bellwether*: the shell quits. A brain started by the shell stops too.
 9. **Full screen.** Make Safari or Terminal full screen (green button). The strip isn't
@@ -562,7 +564,8 @@ The token is never shown, and nothing changes without `--write`.
 The distribution plan in `docs/` turns Bellwether into one signed, notarized
 `Bellwether.app`. Milestones 1 (a skeleton), 3 (the brain's state), 4 (the hook
 installer, doctor, `pets import` and `migrate`) and 5 (the strip on the Rust brain, with
-the app's own files) are in the repository. The app runs without Node. It doesn't replace
+the app's own files), 6 (login items) and 7 (the setup window) are in the repository. The
+app runs without Node. It doesn't replace
 the setup above by itself: moving a repository install into the app is milestone 8, and
 until then the plan's milestone 5 status lists the steps to do it by hand. Building it
 never touches the repository strip or its LaunchAgents.
@@ -586,6 +589,22 @@ Its files live in `~/Library/Application Support/Bellwether/`: `hook-token`, `co
 imported pets (`pets/`, pinned in `pets.user.lock.json`). Logs go to
 `~/Library/Logs/Bellwether/` (`brain.log`, `shell.log`). `BELLWETHER_HOME` overrides that
 folder (logs then go to `<home>/logs/`), and `BELLWETHER_CONFIG` names another config file.
+
+**The setup window** (milestone 7) opens on the app's first launch, and again from the
+menu-bar sheep's *Set up Bellwether…* or `open -b <bundle id> --args --onboarding`. It
+walks through, in order: start at login (both login items; recommended), the hooks (the
+exact diff `bellwether hooks install` would apply to `~/.claude/settings.json`, token
+masked, applied only on Install, and refused with a fresh preview if the file changed
+since; Uninstall works the same way), sheep on the Dock (Accessibility, optional), click a
+sheep to jump to its tab (Automation for iTerm2 and Terminal, optional), the pet (Import…
+opens a file panel; the file is checked as `pets import` checks it), the `bellwether`
+command in `~/.local/bin` (optional), and a last page with doctor's results in plain words.
+A new user's hook token is made on the way (with start at login, or with the first
+Install). While a repository install's LaunchAgents are still on the Mac, it names them and
+won't turn on start at login or install hooks (moving that install is milestone 8). It
+finishes with Done, which it remembers in `shell-state.json`; closing it otherwise brings
+it back at the next launch. A strip built from the repository never opens it (a debug
+build does with `--onboarding`, for testing).
 
 **The strip** (the app opened from Finder, or `bellwether shell start`):
 - reads the port and `config.json` from that folder, and the token from `hook-token` (or
@@ -753,8 +772,8 @@ with `node scripts/third-party.mjs` after changing a dependency (offline;
 | `bellwether shell build [--release]` | Builds the strip. Without `--release`: the debug build, into `target-dev/`. With it: the binary the login item runs, in `target/release/`; it warns first, because the Accessibility permission has to be given again afterwards |
 | `bellwether shell dock-permission` | Asks macOS for Accessibility for the strip's release binary (shows the system prompt), so sheep can stand on the Dock. Only when you run it |
 | `bellwether shell start` / `stop` / `restart` | The strip in the background. With its LaunchAgent installed: `launchctl kickstart` / `kill TERM` / `kickstart -k`. Otherwise bellwether runs the release build itself (pid in `data/shell.pid`), and stops only that exact binary. Use `restart` after a config change |
-| `bellwether mute` / `bellwether unmute` | Do-not-disturb through the brain, the same as the tray's Mute; kept across restarts |
-| `bellwether show` / `bellwether hide` | Show or hide the strip, the same as the tray's Hide; a running shell follows within a second; kept across restarts |
+| `bellwether mute` / `bellwether unmute` | Do-not-disturb through the brain, the same as the tray's Quiet (alerts only); kept across restarts |
+| `bellwether show` / `bellwether hide` | Show or hide the strip, the same as the tray's Hide everything (for screen sharing); a running shell follows within a second; kept across restarts |
 | `bellwether autostart install\|uninstall [--write] [--brain-only]`, `autostart status` | The brain's and the strip's LaunchAgents (macOS). Preview by default. In Bellwether.app: its two login items (SMAppService), plus `autostart settings` |
 | `bellwether pets fetch [<pet>]` | Downloads the pinned pet art into `data/pets/` and checks its sha256. The art is never committed |
 | `bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]` | Moves a pasture install over (token, config, colours and slots, hook entries, LaunchAgents). Preview unless `--write`; see "Coming from pasture" |

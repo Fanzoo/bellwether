@@ -408,6 +408,39 @@ pub fn propose_map(pet: &Pet) -> Obj {
     map
 }
 
+/// What the onboarding window needs to draw a still of a pet: its sheet (the base64 PNG),
+/// the tile grid, the first frame of its first animation, and the colour keyed out.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Still {
+    pub title: String,
+    pub png: String,
+    pub tilesx: u32,
+    pub tilesy: u32,
+    pub frame: u32,
+    pub transparency: String,
+}
+
+/// A still of a pet file that passed [`check`] (or a pinned bundled pet).
+pub fn still(bytes: &[u8]) -> Result<Still, String> {
+    let pet = check(bytes)?;
+    let root = parse_xml(std::str::from_utf8(bytes).map_err(|e| e.to_string())?)?;
+    let image = root.child("image").ok_or("it has no <image>")?;
+    let png: String = image.text_of("png").unwrap_or_default().chars().filter(|c| !c.is_whitespace()).collect();
+    let first = root.child("animations").and_then(|l| l.children.iter().find(|c| c.name == "animation"));
+    let frame = first
+        .and_then(|a| a.child("sequence"))
+        .and_then(|s| s.children.iter().find(|c| c.name == "frame"))
+        .and_then(|f| f.text.trim().parse::<u32>().ok())
+        .filter(|f| *f < pet.tilesx * pet.tilesy)
+        .unwrap_or(0);
+    Ok(Still { title: printable(&pet.title), png, tilesx: pet.tilesx, tilesy: pet.tilesy, frame, transparency: printable(&image.text_of("transparency").unwrap_or_default()) })
+}
+
+/// The names in `<home>/pets.user.lock.json`, in its order.
+pub fn imported_names(home: &Path) -> Vec<String> {
+    read_lock(home).keys().iter().map(|k| k.to_string()).filter(|n| valid_name(n)).collect()
+}
+
 fn read_lock(home: &Path) -> Obj {
     std::fs::read_to_string(lock_file(home)).ok().and_then(|t| json::parse(&t).ok()).and_then(|v| v.get("pets").as_obj().cloned()).unwrap_or_default()
 }

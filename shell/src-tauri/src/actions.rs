@@ -72,7 +72,7 @@ fn perform(name: &str) -> (bool, String) {
 
 /// One harmless Apple Event, sent the way the locator sends them: /usr/bin/osascript
 /// as a child of this process. A terminal that isn't running is never launched.
-fn automation(bundle_id: &str, app: &str) -> (bool, String) {
+pub(crate) fn automation(bundle_id: &str, app: &str) -> (bool, String) {
     let running = osascript(&format!("application id \"{bundle_id}\" is running"), 10);
     match running {
         Ok(out) if out.trim() == "true" => {}
