@@ -1,0 +1,7 @@
+# run 3 of 4: front legs land and push back, hind legs swing forward under the body.
+part leg_far_back 15 33
+part leg_far_fwd 24 33
+part leg_back 12 33
+part leg_fwd 21 33
+part body 11 19
+part head 3 11

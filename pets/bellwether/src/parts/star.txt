@@ -1,0 +1,6 @@
+# A dizzy star: pale yellow with the outline.
+..o..
+.oyo.
+oyyyo
+.oyo.
+..o..

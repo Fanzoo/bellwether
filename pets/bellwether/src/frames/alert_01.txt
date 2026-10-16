@@ -1,0 +1,7 @@
+# alert 1: facing you, crouching to jump.
+part leg_far_short 12 37
+part leg_far_short 26 37
+part leg_short 15 37
+part leg_short 23 37
+part body_front 9 22
+part head_front 11 10

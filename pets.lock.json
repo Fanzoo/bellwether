@@ -1,11 +1,76 @@
 {
-  "comment": "Pinned pet files: bellwether pets fetch downloads exactly these, and the shell refuses to load a pet whose file doesn't match. Art is never committed; see NOTICE.",
+  "comment": "Pinned pet files. \"pets\": what `bellwether pets fetch` downloads, and the shell refuses a fetched pet whose file doesn't match; that art is never committed (see NOTICE). \"bundled\": Bellwether's own pets, committed in pets/ under CC0-1.0 and built by scripts/build-pet.mjs, which writes these pins.",
   "repo": "Adrianotiger/desktopPet",
   "commit": "1ba33bebed993439f03e502b37e9bd2daf061773",
   "pets": {
     "esheep64": {
       "path": "Pets/esheep64/animations.xml",
       "sha256": "0e0cc153ec5795dd3c37a7094d2eb912b95544a58fcfb1b9a203707ea96329cf"
+    }
+  },
+  "bundled": {
+    "bellwether": {
+      "sha256": "11886b082f011f5e9619a3690c945d23e37ff69b533ecdf3ca22f3605e853625",
+      "bytes": 71201,
+      "animationMap": {
+        "walk": "walk",
+        "run": "run",
+        "graze": "graze",
+        "sleep": [
+          "sleep",
+          "sleep loop"
+        ],
+        "alert": "alert",
+        "turn": "turn",
+        "trip": "trip",
+        "sit": "sit",
+        "dizzy": "dizzy",
+        "chew": "chew",
+        "arrive": "arrive",
+        "leave": "leave",
+        "hop": "hop",
+        "lie": "lie",
+        "carried": "carried",
+        "land": "land"
+      },
+      "overlays": {
+        "18": [
+          {
+            "tile": 53,
+            "x": 9,
+            "y": 12,
+            "w": 7,
+            "h": 7
+          }
+        ],
+        "19": [
+          {
+            "tile": 53,
+            "x": 10,
+            "y": 11,
+            "w": 7,
+            "h": 7
+          }
+        ],
+        "20": [
+          {
+            "tile": 53,
+            "x": 12,
+            "y": 7,
+            "w": 7,
+            "h": 7
+          }
+        ],
+        "21": [
+          {
+            "tile": 54,
+            "x": 14,
+            "y": 2,
+            "w": 9,
+            "h": 8
+          }
+        ]
+      }
     }
   }
 }

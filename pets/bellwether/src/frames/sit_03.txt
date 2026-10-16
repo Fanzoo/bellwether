@@ -1,0 +1,10 @@
+# sit 3 of 3: sitting, a happy blink.
+part leg_far 15 33
+part body_front 15 23
+part leg_flat 17 38 flip
+part leg 12 33
+part head 3 10
+grid 8 19
+ee
+ff
+end

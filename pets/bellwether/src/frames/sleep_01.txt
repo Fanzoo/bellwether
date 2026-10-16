@@ -1,0 +1,11 @@
+# sleep 1 of 4: the legs fold, the eye droops.
+part leg_far 15 33
+part leg_far 28 33
+part leg 12 33
+part leg 25 33
+part body 11 21
+part head 3 13
+grid 8 22
+oo
+oe
+end

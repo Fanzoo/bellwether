@@ -1,0 +1,17 @@
+# alert 5: landing, squashed down; then it turns back to the side (turn 3, 2, 1).
+part leg_far_short 12 37
+part leg_far_short 26 37
+part leg_short 15 37
+part leg_short 23 37
+part body_front 9 23
+part head_front 11 11
+grid 16 20
+fff
+eee
+fff
+end
+grid 21 20
+fff
+eee
+fff
+end

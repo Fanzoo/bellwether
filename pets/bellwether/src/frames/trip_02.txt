@@ -1,0 +1,10 @@
+# trip 2 of 5: nose in the grass, hind end up.
+part leg_far 28 33
+part leg 25 33
+part body 11 16
+part head 1 21
+grid 5 29
+eee
+eoe
+eee
+end

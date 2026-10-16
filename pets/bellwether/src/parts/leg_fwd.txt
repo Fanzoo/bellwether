@@ -1,0 +1,8 @@
+# A near leg reaching forward: the foot two pixels ahead of the hip (place it 2 left of the hip).
+..FF
+..FF
+..FF
+.FF.
+FF..
+FF..
+oo..

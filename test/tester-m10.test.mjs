@@ -149,6 +149,9 @@ describe('doctor `next`: a walk from nothing to "all set"', notUnderRust("the re
     port = await freePort();
     const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
     cfg.port = port;
+    // The walk of a repository that draws the fetched eSheep (the example's pet became
+    // Bellwether's own sheep in M10a, which needs no fetch).
+    cfg.pets.default = 'esheep64';
     fs.writeFileSync(path.join(agent, 'config.example.json'), JSON.stringify(cfg));
     settings = path.join(home, '.claude', 'settings.json');
     env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: dataDir, BELLWETHER_HOOK_TOKEN: 'walkTokenNotReal_0123456789abc' };

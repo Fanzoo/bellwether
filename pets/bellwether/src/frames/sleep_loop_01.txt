@@ -1,0 +1,7 @@
+# sleep loop 1 of 3: breathing out; a small z (an overlay).
+part body 11 22
+part head 3 20
+grid 8 29
+ff
+ee
+end

@@ -1,0 +1,7 @@
+# turn 3 of 3: facing you (the pose the alert holds and bounces).
+part leg_far 12 33
+part leg_far 26 33
+part leg 15 33
+part leg 23 33
+part body_front 9 20
+part head_front 11 8

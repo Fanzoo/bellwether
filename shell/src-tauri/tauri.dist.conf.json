@@ -11,6 +11,9 @@
   },
   "bundle": {
     "targets": ["app"],
+    "resources": {
+      "../../pets/bellwether/animations.xml": "pets/bellwether/animations.xml"
+    },
     "macOS": {
       "minimumSystemVersion": "13.0",
       "hardenedRuntime": true,

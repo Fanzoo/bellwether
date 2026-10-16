@@ -1,0 +1,8 @@
+# carried 2 of 3: dangling, the legs kicking one way, swung a pixel to the right.
+part leg_far_back 15 25
+part leg_far_fwd 26 25
+part leg_fwd 10 25
+part leg_back 25 25
+part body 11 11
+part head 3 3
+shift 1 0

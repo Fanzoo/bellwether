@@ -199,6 +199,8 @@ export function distOverlay(o) {
   mac.entitlements = path.join(TAURI_DIR, mac.entitlements);
   mac.infoPlist = path.join(TAURI_DIR, mac.infoPlist);
   mac.files = { [`Library/LaunchAgents/${overlay.identifier}.brain.plist`]: agentPlist(o, overlay.identifier) };
+  // The bundled pets (plan D8): only their built animations.xml, at Resources/pets/<name>/.
+  overlay.bundle.resources = Object.fromEntries(Object.entries(overlay.bundle.resources ?? {}).map(([from, to]) => [path.resolve(TAURI_DIR, from), to]));
   return overlay;
 }
 
@@ -268,4 +270,5 @@ function main() {
   say(kind);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+// realpaths: run through a symlinked path (macOS /tmp and /var are links), this is still the main module.
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) main();

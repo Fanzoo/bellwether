@@ -1,0 +1,8 @@
+# alert 4: coming down, the "!" still showing.
+part leg_far 12 30
+part leg_far 26 30
+part leg 15 30
+part leg 23 30
+part body_front 9 17
+part head_front 11 5
+part bang 33 4

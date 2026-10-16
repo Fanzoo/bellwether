@@ -1,0 +1,7 @@
+# sit 1 of 3: settling, the hind end going down.
+part leg_far 15 33
+part leg 12 33
+part leg_far_short 28 37
+part leg_short 25 37
+part body 11 21
+part head 3 11

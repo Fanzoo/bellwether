@@ -1,0 +1,7 @@
+# run 2 of 4: airborne, every leg tucked up, the sheep three pixels off the ground.
+part leg_far_tuck 16 33
+part leg_far_tuck 28 33
+part leg_tuck 13 33
+part leg_tuck 25 33
+part body 11 16
+part head 3 9

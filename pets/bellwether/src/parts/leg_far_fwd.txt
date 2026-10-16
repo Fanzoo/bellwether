@@ -1,0 +1,8 @@
+# A far leg reaching forward (place it 2 left of the hip).
+..ff
+..ff
+..ff
+.ff.
+ff..
+ff..
+oo..

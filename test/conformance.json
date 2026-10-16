@@ -35,7 +35,8 @@
       "isolation.test.mjs",
       "envload.test.mjs",
       "rename.test.mjs",
-      "pets.test.mjs"
+      "pets.test.mjs",
+      "pets-doctor.test.mjs"
     ]
   }
 }

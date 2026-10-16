@@ -1,0 +1,7 @@
+# hop 1 and 5 of 5: crouched, ready to spring (and landing).
+part leg_far_short 15 37
+part leg_far_short 28 37
+part leg_short 12 37
+part leg_short 25 37
+part body 11 21
+part head 3 13

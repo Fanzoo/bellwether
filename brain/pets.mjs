@@ -112,8 +112,39 @@ async function readCapped(res, folder) {
   return Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength)));
 }
 
+/** Bellwether's own pets (plan D8): built from pets/<name>/ and pinned under "bundled". Never fetched. */
+export const BUNDLED_PETS = Object.freeze(Object.assign(Object.create(null), LOCK.bundled ?? {}));
+
+/** Bellwether's own pets' names, reserved (crates/brain/src/pets.rs BUNDLED). */
+export const BUNDLED_NAMES = Object.freeze(['bellwether', 'brah']);
+
+/** Whether a name is, or reads as, a bundled pet's: no case, no trailing dots or spaces. */
+export function reservedName(name) {
+  return BUNDLED_NAMES.includes(String(name).replace(/[. ]+$/, '').toLowerCase());
+}
+
+/**
+ * For doctor: a bundled name checked by the strip's rules (exact, pinned in this version,
+ * its file matching the pin), in the Rust doctor's words (pets::bundled_check); null for
+ * any other name.
+ */
+export function checkBundled(folder) {
+  if (!reservedName(folder)) return null;
+  const canon = String(folder).replace(/[. ]+$/, '').toLowerCase();
+  const fix = 'set pets.default to "bellwether" (or remove it) in config.json';
+  if (folder !== canon) return { ok: false, fix, detail: `pets.default is ${JSON.stringify(folder)}, which the strip won't load: pet names are exact. Did you mean "${canon}"?` };
+  if (!Object.hasOwn(BUNDLED_PETS, folder)) return { ok: false, fix, detail: `${folder} is reserved for one of Bellwether's own pets, which isn't bundled in this version, so the strip draws nothing. Set pets.default to "bellwether" (or remove it) in config.json` };
+  const file = path.join(AGENT_DIR, 'pets', folder, 'animations.xml');
+  const rebuild = `rebuild Bellwether's own pet: \`node scripts/build-pet.mjs build ${folder}\``;
+  if (!fs.existsSync(file)) return { ok: false, fix: rebuild, detail: `${folder}, one of Bellwether's own pets, is missing its file (${file}): ${rebuild}` };
+  if (sha256(fs.readFileSync(file)) !== BUNDLED_PETS[folder].sha256) return { ok: false, fix: rebuild, detail: `${folder}, one of Bellwether's own pets: ${file} doesn't match its pinned sha256, so the strip refuses it: ${rebuild}` };
+  return { ok: true, detail: `${folder}, Bellwether's own pet, bundled; sha256 matches its pin` };
+}
+
 /** For doctor: which pinned pets are present and verified. */
 export function checkPets(dataDir, folder) {
+  const bundled = checkBundled(folder);
+  if (bundled) return bundled;
   const entry = Object.hasOwn(PINNED_PETS, folder) ? PINNED_PETS[folder] : undefined;
   const file = path.join(dataDir, 'pets', folder, 'animations.xml');
   if (!fs.existsSync(file)) return { ok: false, detail: `${file} is missing: run \`bellwether pets fetch\`` };

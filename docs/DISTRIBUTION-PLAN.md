@@ -18,7 +18,8 @@ on every rebuild. After this plan ships, someone can download `Bellwether.dmg` (
 `brew install --cask bellwether`) and drag it to Applications. A first-run window then
 installs the hooks, with the same preview-then-confirm the CLI has, turns on start at
 login, and offers the optional Dock and click-to-focus permissions. The app ships its
-own original sheep and updates itself. No Node runtime is needed. Someone already
+own pet, an original sheep in a flight helmet drawn in the repository (D8; an aviator
+goose follows after 1.0), and updates itself. No Node runtime is needed. Someone already
 running the repository version moves over in one guided step and keeps their sessions'
 colours, slots and token.
 
@@ -638,53 +639,224 @@ without a review fails CI.
     (conformance), `cargo test --workspace`, cross-target `cargo check` of core and
     brain, the THIRD-PARTY check, and an **unsigned** `tauri build`.
 
-### D8. Original sheep art
+### D8. Original pet art: the sheep and the aviator goose
 
-**Recommendation: commission it from a pixel artist, as a written work-for-hire or
-with a copyright assignment to the maintainer, delivered as layered source files plus
-per-frame PNGs.** The maintainer licenses it **CC-BY-4.0** (Q4).
+Revised 2026-10-15 for the maintainer's decisions (deviation 114). It replaces the
+earlier recommendation to commission an artist under CC-BY-4.0.
 
-- Drawing it in-house is the fallback if the budget isn't there. It takes longer but
-  has the same clean title.
-- Generating it and then hand-cleaning it is not recommended. The US Copyright Office's
-  January 2025 report says prompts alone don't make the user the author [26]. A sheet
-  that is mostly generated may not be protectable or cleanly licensable, and its
-  provenance is hard to state in NOTICE. AI used as an assistive tool by the artist
-  (for example to suggest in-betweens they then redraw) is fine and gets disclosed.
+**Two bundled pets, both made in the repository by the developer agent.** Both wear a
+pilot's **flight helmet with goggles**, and on both the **helmet** carries the session
+colour, so the strip looks the same whichever pet is chosen.
 
-**Specification handed to the artist** (`pets/bellwether/SPEC.md`, written in M10):
+- **`bellwether`**: an original sheep in a flight helmet. It is the default
+  (`pets.default` absent means `bellwether`) and is required for 1.0 (M10a).
+- **`brah`**: an aviator goose, a white goose in a flight helmet with goggles (aviator,
+  a little cheeky). It is a bundled alternative, chosen in the setup window or in
+  config.json, and comes after 1.0 (M10b).
+  - `brah` is its id, folder name, reserved name and config value.
+  - The docs describe it as "an aviator goose", and may call its subagents "goslings"
+    where that reads better.
+  - The product stays Bellwether, and "sheep"/"lamb" stay the general terms.
 
-- Animations for every key Bellwether uses:
-  - walk, run, graze (eat), sleep (enter plus loop), alert (front-facing bounce),
-    turn, trip, sit, dizzy, chew, arrive, leave, hop, lie;
-  - a front-facing pose used by alert, and the roll used when an alert is confirmed.
-- Side frames face the direction the desktopPet format expects, as esheep64 does
-  (verified against the player's mirroring code).
-- Frame size the same as esheep64's tile, so `slotWidthPx`, `scale: 1.5` and the layout
-  constants hold. Drawn so the sheep is crisp at the default scale on 2× displays.
-- **Horn mask:** horns drawn only in the three-tone magenta family the tinter
-  recognises: hue 285–315°, saturation ≥ 0.35, mid tone `#b300b3` (the session colour
-  lands there exactly), dark `#730073`, highlight `#ff7aff`. No other pixel may fall in
-  that hue window. `#FF00FF` is reserved for the transparency key; a PNG with alpha and
-  `transparency` unset is preferred.
-- **Lambs** use the same sheet at `lambScale` 0.6. The art must stay readable at that
-  scale, which is a review gate. Separate lamb frames would be a later change (Q4
-  sub-question).
-- Light and dark wallpapers: the outline must read on both.
+Both pets meet the same acceptance list below. One pet draws the whole strip. Mixing
+pets per session is out of scope.
 
-**Pipeline** (deterministic, in the repository):
+**Who makes it.** The developer agent draws the frames in the repository. It works
+deterministically from source files that the repository holds, and no artist is
+commissioned. The maintainer accepts that machine-made art may not be protected by
+copyright: the US Copyright Office's January 2025 report says prompts alone don't make
+the user an author [26]. So the art is dedicated to the public domain instead of being
+licensed. Quality is guarded by the maintainer's review (acceptance (f)), not by who
+drew it.
 
-1. The artist delivers `pets/bellwether/src/` (layered source) and
-   `pets/bellwether/frames/<anim>_<nn>.png`.
-2. A declarative `pets/bellwether/pet.json` lists each animation's frames, intervals,
-   movement and `next` transitions. It is code, MIT.
-3. `scripts/build-pet` packs the frames into one sheet, writes a desktopPet-format
-   `animations.xml` with the PNG embedded as base64, and records its sha256 in
-   `pets.lock.json`. Since the names are Bellwether's own, `animationMap` for this pet
-   is the identity.
-4. The result is committed and bundled as a resource. `get_pet` loads bundled pets by
-   the pin compiled into the binary, and imported pets by
-   `pets.user.lock.json`.
+**Licence: CC0-1.0.**
+
+- Everything under `pets/` is CC0-1.0: the pixel sources, `pet.json`, the built
+  `animations.xml` with its embedded sheet, and `SPEC.md`. `pets/LICENSE` holds the full
+  CC0 1.0 Universal legal code. Its section 3 public-licence fallback covers places where
+  a waiver isn't recognised.
+- `scripts/build-pet.mjs` and the tests are code, under the repository's MIT licence.
+- Keeping one licence for the whole `pets/` folder avoids a single `animations.xml`
+  file carrying two licences.
+
+**What the pets look like** (`pets/SPEC.md` says it in these words):
+
+- **The sheep** is meant to feel like eSheep: the same genre, the same kind of
+  character, the same kinds of behaviour.
+  - It is a small, round, white (or cream) woolly sheep, drawn side-on in pixel art, with
+    a dark face and dark legs. It is cheerful and bouncy.
+  - It wears a flight helmet with goggles, like the goose's. The helmet (shell, ear
+    flaps, chin strap) carries the session colour.
+  - It has no horns. The helmet covers the head, and a second coloured shape would
+    compete with it.
+  - "Similar" means the same genre and feel. It does not mean eSheep's frames, poses or
+    pixels: every frame is drawn fresh from this description (see the clean-room rule).
+- **The goose (`brah`)** is a white goose with a yellow-orange beak and feet. It wears a
+  flight helmet with goggles in every frame. It is a little cheeky.
+
+**Clean-room rule (references are mood only).**
+
+- **The goose's mood references.** The maintainer shared four mood images for the goose.
+  Two of them are plainly other people's work: one has a Dreamstime stock watermark and
+  one has a Craiyon logo. One resembles the goose from *Untitled Goose Game*.
+  - The art takes only the general idea: a white goose, a flight helmet, goggles.
+    Nothing is traced, sampled, colour-picked or closely copied from any reference.
+  - The reference images are not committed and are not given to the developer agent.
+    Its only brief is `pets/SPEC.md`, written in words.
+- **eSheep.** The same applies to the sheep, even though it is meant to feel like
+  eSheep.
+  - The agent never opens `data/pets/esheep64` (or any fetched or imported pet) while
+    drawing, and no esheep64 pixel, palette, pose or frame layout is an input.
+  - esheep64 is used only for the facts this section states: the 40×40 tile, the
+    left-facing side frames and the baseline.
+  - The silhouette tripwire (h) checks that no frame is a copy of an eSheep frame.
+- **The goose must be visibly distinct from Untitled Goose Game's goose.** That goose is
+  a flat-shaded, unoutlined white goose with an orange beak and feet, a honk pose with
+  the neck stretched and the wings out, and a stolen bell. Ours:
+  - wears the helmet and goggles in **every** frame;
+  - has a dark pixel outline;
+  - has its own proportions (a rounder, chunkier body and a shorter neck);
+  - has no bell or other carried props;
+  - doesn't use the outstretched-neck honk as a pose.
+
+  This is a review gate in (h).
+
+**The source form** (what you edit to change the art). The source is plain text: it
+can be edited by hand, read in a diff, and rebuilt.
+
+- `pets/<name>/src/palette.json` lists every colour the pet uses. Each entry has:
+  - one character;
+  - a hex colour;
+  - a role: `mask-dark`, `mask-mid` or `mask-light` (exactly `#730073`, `#b300b3` and
+    `#ff7aff`), `outline`, or a free name such as `wool`, `face`, `feather`, `beak`,
+    `goggle-lens`, `goggle-frame` or `strap`.
+
+  `.` is transparent.
+- `pets/<name>/src/frames/<anim>_<nn>.txt` holds one frame each. A frame is either a
+  40-line × 40-character grid, or a short composition of reusable parts from
+  `pets/<name>/src/parts/*.txt` (a part, an offset, an optional horizontal flip, layered
+  in order), with an optional overlay grid. The developer designs the exact composition
+  syntax. It must be documented at the top of `SPEC.md`, and every frame must resolve to
+  a 40×40 grid of palette characters.
+- A generator script that writes these files is allowed, as long as it is committed and
+  `build-pet --check` proves its output equals the committed text. The text files are
+  the source of truth.
+- `pets/<name>/pet.json` is the declarative animation table:
+  - for each animation: its frames, intervals, movement and `next` transitions;
+  - the behaviour map (below);
+  - the header `title` (`Bellwether sheep`, `Aviator goose`).
+
+**Specification** (`pets/SPEC.md`, written in M10a, one section per pet plus the
+shared rules):
+
+- **Animations**, named after Bellwether's own behaviours:
+  - `walk`, `run`, `graze` and `chew`, `sleep` (enter) and `sleep loop`, `alert`,
+    `turn`, `trip`, `sit`, `dizzy`, `arrive`, `leave`, `hop`, `lie`.
+  - `arrive` and `leave` may reuse walk and run frames, and `chew` may reuse graze
+    frames.
+  - The player's alert works like this (`sprite.mjs`): play `turn`, hold its **last
+    frame**, and bounce it. So `turn` must end on the **front-facing pose**.
+  - `alert` is the one-off escalation played when an alert is confirmed (a roll or
+    bigger bounce). It ends on a side frame, after which `turn` plays again.
+  - Indicative sizes, to bound the work:
+    - walk 4 frames, run 4, turn 3;
+    - alert 6–10;
+    - graze 4–6, sleep 4 + loop 2–4;
+    - trip, hop and dizzy 4–6 each;
+    - sit and lie 2–4 each;
+    - about 50–60 unique frames per pet in all.
+- **Behaviour map.** `pet.json` maps each of the 14 behaviour keys to its animation by
+  the same name, except `sleep`, which maps to `["sleep", "sleep loop"]`. build-pet
+  copies the map into the pin (below). When config.json has no
+  `pets.animationMap.<name>` for a bundled pet, `get_pet` returns this map. Because it
+  covers all 14 keys, none of `main.js`'s esheep64 defaults leak in. A map in
+  config.json still wins.
+- **Frames.** Side frames face **left**, as esheep64's do: walk moves `x` negative and
+  the player mirrors for rightward movement (`sprite.mjs`: "the pet art faces left").
+- **Tile size** is esheep64's: **40 × 40** (a 640 × 440 sheet of 16 × 11 tiles; the
+  "64" in esheep64's name is not the tile size).
+  - This keeps `slotWidthPx` 110, `scale: 1.5` (60 px) and the grass placement as they
+    are.
+  - Feet stand on the tile's bottom row (row 39), as esheep64's walk frames do, so the
+    strip's ground line holds.
+  - Fitting the helmet into 40 rows (and the goose's neck as well) is a review point,
+    not a reason to change the tile.
+- **The sheet** is an RGBA PNG with real alpha and no `<transparency>` element. `#FF00FF`
+  is never used.
+- **The colour mask is the helmet, on both pets.**
+  - The helmet (shell, ear flaps, chin strap) is drawn **only** in the tinter's
+    three-tone magenta family: dark `#730073`, mid `#b300b3` (the session colour lands
+    there exactly) and highlight `#ff7aff`.
+  - No other pixel may fall in the tinter's window: hue 285–315°, saturation ≥ 0.35,
+    alpha ≥ 128 (`isHorn` in `horns.mjs`).
+  - That rules out, for the sheep: the goggles, wool, face, eyes and legs. For the
+    goose: the goggles (lenses, frame, strap), beak, eye, feet and feathers.
+  - The tinter (`horns.mjs`, `HORN_HUE`, `tintHorns`) is **unchanged**. Its "horn" is
+    our helmet; the name stays as it is in the code.
+- **The goose's helmet never touches its beak** in any frame: at least one pixel of
+  feather, outline or goggle lies between them. This is needed because no orange can be
+  far from the orange session colour; see (d).
+- **Lambs (goslings)** use the same sheet at `lambScale` 0.6.
+  - On a 1× display that is 0.9 screen pixels per art pixel, and nearest-neighbour
+    scaling drops about one row and column in ten.
+  - One-pixel details (eyes, the goggle strap, outline gaps) must survive that, which is
+    a review gate.
+  - Dedicated lamb or gosling frames would be a later change.
+- **Light and dark wallpapers.** The outline must read on both.
+
+**Pipeline** (deterministic, in the repository; Node 22, no new dependency):
+
+1. **Sources**: `pets/<name>/src/` and `pets/<name>/pet.json`, as above.
+2. **`node scripts/build-pet.mjs build <name>`**:
+   - resolves every frame to a 40×40 grid;
+   - refuses any character that isn't in the palette, any mask-role colour other than
+     the three tones, and any non-mask colour inside the hue window;
+   - packs the sheet 16 tiles wide;
+   - encodes the PNG deterministically (`node:zlib` with fixed settings, no time or
+     gamma chunks);
+   - writes a desktopPet-format `pets/<name>/animations.xml` with the PNG embedded as
+     base64;
+   - records `{sha256, bytes, animationMap}` under a new top-level **`bundled`** key in
+     `pets.lock.json`.
+
+   The `pets` key, which `pets fetch` downloads, is untouched, so `pets fetch` never
+   tries to download a bundled pet. A rebuild from the same source is byte-identical.
+3. **`build-pet.mjs --check`** (in `npm test` and CI): rebuilds every bundled pet in
+   memory and fails if `animations.xml` or its pin differs from what is committed.
+4. **`build-pet.mjs review <name> [--out <dir>]`** writes the review sheets (f).
+   - Default output: `data/pet-review/<name>/`, gitignored.
+   - It uses the player's own `pet.mjs` parser and `horns.mjs` tinter, with
+     nearest-neighbour scaling as the strip does.
+5. **Bundling and loading:**
+   - `animations.xml` (only) is committed and bundled as a resource at
+     `Contents/Resources/pets/<name>/animations.xml` (`bundle.resources` in
+     `tauri.dist.conf.json`).
+   - `get_pet` and the setup window load a bundled pet only if it matches the `bundled`
+     pin compiled into the binary.
+   - A repository build also finds `pets/<name>/animations.xml` (pinned the same way)
+     before `data/pets/`, so the new pets can be seen with `shell --dev`.
+   - Imported pets keep `pets.user.lock.json`.
+
+**Choosing the pet.**
+
+- **The key is `pets.default`**: `"bellwether"` (the default when absent), `"brah"`
+  (once M10b ships), or an imported pet's name.
+- **The setup window's Pet step** (D6 step 6, M7's page):
+  - lists the bundled pets first, in a fixed order (`bellwether`, then `brah`), then
+    imported ones;
+  - each shows its title and a still: the first frame of its first animation (`walk`),
+    with the mask tinted in the first palette colour (`horns.mjs`), so nobody sees
+    magenta;
+  - "Use this pet" calls the existing `pet_select`, which writes `pets.default` through
+    the lossless writer.
+  - Nothing new is added to the window's capability.
+- **Defaults for existing users:** a new user gets `bellwether`. A migrating user's
+  copied config.json keeps whatever `pets.default` it had (for example `esheep64`, which
+  D9 imports).
+- **Reserved names:** `bellwether` and `brah` are bundled names. Both are reserved from
+  M10a, so no one can import a `brah` before the bundled one arrives. `pets import` and
+  Import… refuse them as names, saying why, so an imported file can never be shadowed by
+  a bundled pet or mistaken for one.
 
 **"Load any desktopPet pet" stays.**
 
@@ -693,30 +865,101 @@ per-frame PNGs.** The maintainer licenses it **CC-BY-4.0** (Q4).
   - UTF-8;
   - no DOCTYPE or ENTITY;
   - it parses;
-  - tiles at most 64×64.
+  - a tile grid (`tilesx`, `tilesy`) of 1 to 64 each.
 - They copy it to `Application Support/Bellwether/pets/<name>/`, pin its sha256 in
   `pets.user.lock.json`, and propose an `animationMap` by name matching. A file changed
   after import is refused, as today.
 - A migrating user's fetched `esheep64` is imported this way: it's their local copy,
   and nothing is redistributed.
 
-**Acceptance** (automated, then human):
+**Acceptance**, for **each** bundled pet (automated first, then human):
 
-- (a) `Bellwether --selftest` parses the pet with the webview's real parser;
-- (b) every `animationMap` key resolves, and every frame index is below
-  tilesx × tilesy;
-- (c) a horn test like `test/horns.test.mjs`, now run on the real sheet: every pixel
-  either is horn or sits outside the hue window;
-- (d) for each of the 8 palette colours, the tinted horn differs from the wool and
-  outline by a minimum ΔE;
-- (e) the sha256 pin matches;
-- (f) `--snapshot` grids of every behaviour at sheep and lamb scale on light and dark
-  backgrounds, reviewed and signed off by the maintainer;
-- (g) provenance: the signed agreement on file (not in the repo), the artist's credit
-  and the CC-BY-4.0 text in NOTICE, and the source files committed.
+- (a) `Bellwether --selftest` parses the pet with the webview's real parser.
+- (b) every behaviour key in the pin's `animationMap` resolves, all 14 are present, and
+  every frame index is below tilesx × tilesy.
+- (c) a mask test like `test/horns.test.mjs`, run on the built sheet:
+  - every opaque pixel is either one of the three mask tones or `isHorn` false;
+  - **the helmet shows in every frame of every mapped animation**.
+- (d) **contrast with the session colour**, in CIEDE2000 (sRGB, D65), for each of the 8
+  default palette colours tinted through `tintHorns`. Every non-mask colour in the
+  sheet falls under exactly one rule:
+  1. **Dark edge colours** (role `outline`, or any colour with CIELAB L* ≤ 35, such as a
+     dark face or dark legs) that touch the mask (4-neighbour, in any frame): at least
+     **20** from at least one of the three tinted tones.
+  2. **Other colours that touch the mask**: at least **20** from the tinted mid tone.
+  3. **Every other colour**: at least **10** from the tinted mid tone, so no part of
+     the pet reads as the session colour.
 
-NOTICE keeps the desktopPet (MIT) credit for the format, and the statement that the
-eSheep art isn't included.
+  These thresholds and the review cap in (f) are the maintainer's accepted defaults
+  (2026-10-15).
+
+  Measured while revising this decision:
+  - White or cream wool and white feathers (`#FFFFFF`, `#F3E9D2`, `#FFF8E7`) are at
+    least 29 from every mid tone. Pale-grey shading (`#B8C0CE`) is still 22. The nearest
+    is cyan `#00C2D4`.
+  - **The sheep's dark face is the case to watch.** It touches the helmet the way an
+    outline does. Against the black session colour `#202020`, its mid tone is only 4–17
+    away: 4.3 for `#2E2A2A`, 8.7 for `#3A3236`, 17.0 for `#5A4A44`. A black outline
+    scores 7.4.
+    - Rule 1 is what makes this work. The best of the three tones is 25–37 for every
+      palette colour (`#2E2A2A` 34.5, `#3A3236` 32.2, `#5A4A44` 25.3), so a black-session
+      helmet reads against the face through its highlight.
+    - Rule 2 would fail every dark face, which is why rule 1 includes dark colours by
+      their lightness and not by a flag.
+  - A typical goose orange such as `#FF9A1F` is 3.9 from `#FF8C00`. So the goose's beak
+    must not touch the helmet, and must be a yellow-orange or ochre at least 10 away (for
+    example `#F0B060`, 11.5).
+  - A pale-blue goggle lens (`#8FD3F4`) is 12.8 from cyan, so a lens that touches the
+    helmet needs a colour such as `#DDE8F0` (23.8). This holds on both pets.
+- (e) the sha256 pin matches, and `build-pet --check` passes.
+- (f) **the maintainer's visual sign-off, by iteration.**
+  - `build-pet review` sheets for the pet:
+    - every behaviour's frames in order, plus the alert sequence (turn, hold, alert,
+      turn);
+    - at sheep scale (1.5) and lamb scale (0.9);
+    - each at 1× and 2× device pixels;
+    - on light (`#F5F5F5`) and dark (`#1E1E1E`) backgrounds;
+    - one row per palette colour.
+  - Then a live `--demo --snapshot` strip with the pet on a light and a dark wallpaper.
+  - The maintainer reviews and lists the changes he wants. The developer makes them and
+    regenerates.
+  - Each round is recorded in the milestone's status (sheet paths, the requests
+    verbatim, what changed).
+  - **After three rounds without approval, work stops** and the maintainer and
+    developer rethink the approach before drawing more.
+  - A pet ships only with the maintainer's written "approved" for it.
+- (g) **provenance:**
+  - the sources are committed;
+  - `pets/LICENSE` holds the CC0-1.0 text;
+  - NOTICE has the text below;
+  - the milestone's status records that the reference images and fetched or imported
+    pets were not opened by the developer agent.
+- (h) **not a copy:**
+  - **The sheep:** an automated tripwire. When `data/pets/esheep64` exists locally (it
+    is skipped otherwise), no sheep frame's opaque silhouette matches any esheep64
+    frame's (mirrored or not) at an IoU of 0.95 or more. Beyond that it is the
+    maintainer's judgement in review. Looking like eSheep in genre and feel is the
+    intent, not a failure.
+  - **The goose:** the maintainer judges it visibly distinct from Untitled Goose Game's
+    goose and from each mood reference, against the list above. The same tripwire runs
+    on it.
+
+**NOTICE text** (replaces the "Clearly licensed replacement art is planned" sentence;
+the desktopPet MIT credit for the format and the statement that the eSheep art isn't
+included both stay). Until M10b ships, the first line names only the sheep.
+
+> Bundled pets (the sheep "bellwether" and the aviator goose "brah"), CC0-1.0.
+> The art in pets/ was made by an AI coding agent under the direction of the project's
+> maintainer, from a written specification (pets/SPEC.md). It was drawn as text pixel
+> sources (pets/*/src/) and built by scripts/build-pet.mjs. No third-party art was
+> used: nothing was traced, copied or adapted from any image, the mood references the
+> maintainer looked at were not given to the agent and are not in this repository, and
+> neither the eSheep art nor Untitled Goose Game's goose was used. Machine-made art may
+> not be protected by copyright; to the extent anyone holds rights in it, they are
+> dedicated to the public domain under CC0 1.0 Universal (pets/LICENSE).
+
+`pets.lock.json`'s `comment` ("Art is never committed") is updated to say that the
+bundled pets are committed under CC0 and the fetched ones are not.
 
 ### D9. Migration for existing users
 
@@ -857,7 +1100,7 @@ in the Node CLI. The Rust CLI honours them only during migration.
 |---|---|---|
 | `port` | unchanged; `host` still rejected | `47417` |
 | `brain.nodePath` | **removed**; doctor WARNs "obsolete, ignored" | none |
-| `pets.default` | default becomes `bellwether` | `"bellwether"` |
+| `pets.default` | default becomes `bellwether` (the bundled sheep); `"brah"` (the aviator goose) once M10b ships; or an imported pet's name | `"bellwether"` |
 | `pets.animationMap.<pet>` | unchanged; not needed for the bundled pet | `{"walk":"walk",…}` |
 | `pets.palette`, `lambScale`, `tint`, `scale` | unchanged | `["#FF8C00", …]` |
 | `behaviour.*`, `bubble.*` | unchanged; `redactPatterns` now validated by Rust `regex` (look-around rejected) | `"(?i)(token\|secret)=\\S+"` |
@@ -897,8 +1140,9 @@ The order puts the riskiest unknowns first:
    the strip, with the Automation and WebKit behaviour intact?
 2. Can the port match the Node brain's byte-level contracts?
 
-The art (M10) has a long lead time and no code dependency. **Brief the artist during
-M1.**
+The art (M10) is drawn by the developer agent from text sources in the repository (D8).
+It is split: M10a (the pipeline and the sheep) comes before M11 and 1.0; M10b (the
+aviator goose `brah`) comes after M11, in a later release.
 
 ### M1. Signed skeleton: one binary, three modes, SMAppService brain
 
@@ -3184,14 +3428,405 @@ The full commands are in docs/RELEASING.md; in order:
   cask's caveats, that `brew uninstall --zap` deletes Application Support, `config.json`
   included.
 
-### M10. Original sheep art
+### M10. Original pet art: the sheep and the aviator goose
 
-Builds: SPEC.md, the artist's delivery, `pet.json`, `scripts/build-pet`, the bundled
-`bellwether` pet and its pin, the horn and ΔE tests on the real sheet, and the NOTICE
-and THIRD-PARTY updates.
+Revised 2026-10-15 (deviation 114). Two pets, both drawn by the developer agent from
+text sources in the repository (D8). **It is split in two, on different schedules:**
 
-**Done when:** acceptance checks (a)–(g) in D8 pass, and the default config shows the
-new sheep with no `pets fetch`.
+- **M10a: the pipeline and the sheep.** Required for 1.0; runs before M11.
+- **M10b: the aviator goose `brah`.** Runs **after M11** and is not a 1.0 requirement.
+  It ships in a later release.
+
+Why split:
+- **Two review loops in one milestone can't finish in one sitting.** The maintainer's
+  sign-off (f) is an open-ended review loop.
+- **M10a proves the riskiest unknown on the default pet first.** The unknown is whether
+  agent-drawn 40×40 pixel art meets the maintainer's bar at all. M10a also builds every
+  shared piece of code and test.
+- **M10b is then art, a pin and its own gates.** It reuses everything M10a builds.
+
+#### M10a. Pipeline, shared code, and the original sheep (before M11)
+
+Builds:
+
+1. **`pets/SPEC.md`.**
+   - The shared rules, the source syntax, and both pets' briefs in D8's words. The goose
+     brief is written now, so M10b starts from an agreed text.
+   - It is the only brief the developer agent draws from (D8's clean-room rule).
+2. **`scripts/build-pet.mjs`** with `build`, `--check` and `review`.
+3. **The shared code:**
+   - the `bundled` key in `pets.lock.json`, written with its map;
+   - `get_pet` using the bundled map when config.json has none;
+   - the repository build finding `pets/<name>/`;
+   - `bundle.resources` for every bundled pet;
+   - import refusing both reserved names (`bellwether`, `brah`);
+   - the setup window's still tinted with the first palette colour, and bundled pets
+     listed first in a fixed order;
+   - `config.example.json`'s `pets.default` set to `"bellwether"` (vectors updated with
+     it).
+4. **The tests, parameterised over every bundled pet, so M10b adds no test code:**
+   - D8 acceptance (b) to (e), plus the silhouette tripwire (h);
+   - a test that `pets fetch` still lists only esheep64;
+   - the capability lists unchanged.
+5. **First look, before the rest is drawn.**
+   - Build the sheep's `walk`, `turn` (ending front-facing) and `sleep` through the
+     whole pipeline into a `shell --dev` strip and a review sheet.
+   - The maintainer's first review is on the direction: the round white sheep with its
+     dark face and legs, the helmet and goggles, the palette, readability at lamb scale.
+   - This counts as round 1 of (f)'s three.
+6. **All of the sheep's animations**, then review rounds until the maintainer approves.
+   After three rounds without approval, work stops and the approach is rethought.
+7. **`pets/LICENSE`** (CC0-1.0), **the NOTICE text** in D8 (naming only the sheep until
+   M10b), and the `pets.lock.json` comment. THIRD-PARTY.md is unchanged (no new
+   dependency), and its check stays green.
+
+**Done when:**
+
+- `build-pet --check` passes. A rebuild from a clean checkout is byte-identical, and
+  `npm test` and CI run the check.
+- D8 (a)–(e) pass for `bellwether`. In particular:
+  - the helmet is the only thing in the hue window;
+  - the helmet shows in every mapped frame;
+  - (d)'s three rules hold for all 8 palette colours, the dark face and legs included.
+- With no `pets.default` in config.json and nothing imported, a fresh app shows the new
+  sheep, helmets in session colours, with no `pets fetch` or import. `shell.log` says
+  `pet bellwether loaded: … 40x40 tiles` and logs no missing-animation warning.
+- (f) the maintainer's written "approved" for the sheep is recorded in M10a's status,
+  with each review round's requests and changes listed.
+- (g) NOTICE, `pets/LICENSE` and the sources are committed. The status records that the
+  agent opened no reference image and no fetched or imported pet.
+- (h) the silhouette tripwire passes against a local esheep64 (or is reported skipped,
+  with none present). The maintainer has seen nothing in review that he judges a copy of
+  eSheep.
+- `pets import <file> --name brah` (or `bellwether`) is refused with the reason, and
+  nothing is written.
+- An imported esheep64 still loads with its own map. eSheep users are unchanged.
+
+#### M10a status (developer, 2026-10-15, updated 2026-10-16): built; every animation drawn; the sheep approved by the maintainer (2026-10-16, round 3; the sleep "z" redone in round 3b); his by-hand check of a fresh signed app remains
+
+Built:
+- **`pets/SPEC.md`**: the source syntax first, then the shared rules, the sheep's brief
+  (and how round 1 drew it) and the goose's brief, in D8's words.
+- **`scripts/build-pet.mjs`** `build <name>|--all`, `--check` and `review <name> [--out
+  <dir>]`, no dependency. Sources: `palette.json` (char, hex, role), `parts/*.txt`, and
+  frames as a 40×40 grid or a composition (`part <name> <x> <y> [flip]`, `grid <x> <y>` …
+  `end`, `shift <dx> <dy>`; `.` clear, `~` erase, `#` comments). The build refuses unknown
+  characters, mask roles in other colours, other colours in the hue window, `#FF00FF`,
+  pixels off the tile and unused frame files; packs 16 tiles wide; writes an RGBA PNG with
+  its own deterministic encoder (deviation 115) inside a desktopPet `animations.xml`; and
+  pins `{sha256, bytes, animationMap}` under a new `bundled` key in `pets.lock.json` (its
+  comment updated). `review` draws through the player's `pet.mjs` parser and `horns.mjs`
+  tinter: 8 sheets (sheep 1.5 and lamb 0.9, 1× and 2×, `#F5F5F5` and `#1E1E1E`, every
+  animation plus the alert sequence, one row per palette colour) and `overview.png`.
+- **The sheep, first look**: `pets/bellwether/` with 15 palette colours (the 3 mask tones,
+  an outline, a dark face, a lighter face tone for the near legs, eye, blush, four wool
+  tones, goggle frame and lens, strap), 13 parts and 13 unique frames: `walk` (4, with a
+  one-pixel bounce), `turn` (3, ending front-facing), `sleep` (4) and `sleep loop` (3).
+  The other behaviours borrow these until they are drawn (deviation 116).
+- **Shared code**: the strip loads a bundled pet only while it matches its `bundled` pin
+  (`lib.rs` `pin`, `verify_pet`), from `Contents/Resources/pets/<name>/` or, in a
+  repository build, from the checkout's `pets/<name>/` (deviation 117); `get_pet` uses the
+  pin's map when config.json has none; `pets.default` absent means `bellwether`;
+  `bundle.resources` carries `animations.xml` (`build-app.mjs` makes the path absolute);
+  `pets import` refuses `bellwether` and `brah` (any case) and writes nothing; the setup
+  window lists bundled pets first in `BUNDLED` order and tints each still's helmet with the
+  first palette colour (deviation 118); `config.example.json`'s `pets.default` is
+  `"bellwether"` (config vectors regenerated); doctor (Rust and Node) treats the bundled
+  default as present; ci.yml runs `build-pet --check`; the README has a short section.
+- **Tests**, parameterised over every bundled pet with sources (`test/pets-bundled.test.mjs`):
+  `--check` (e), byte-identical rebuild, PNG chunks and alpha, (a) through `pet.mjs`, (b)
+  all 14 keys resolve and frames are on the sheet, (b) name-for-name (a `todo` while
+  `pet.json` has `draft`), (c) mask pixels and the helmet in every mapped frame, (d) the
+  three ΔE rules for the 8 colours, (h) the silhouette tripwire, `pets fetch` lists only
+  esheep64, the resource entry, the setup window's tinter copy against `tintHorns`, and the
+  source refusals. Cargo: the bundled pin and map, reserved names, the setup window's order
+  and tint. The capability lists are unchanged (their existing tests pass).
+
+Tested here:
+- `npm test`: 1066 tests, 1063 pass, 0 fail (after one fix: the art walk in
+  shell-config.test.mjs now skips `target-dev`, build output like `target`), 2 skipped, 1
+  todo (deviation 116). `npm run test:cargo`: 0 failed. `npm run test:rust` (after a
+  `conformance` build): node 29 of 29 files green, rust 29 of 29. `npm run test:vectors`:
+  60 files match. `build-pet --check`: up to date.
+- (d) for every colour, worst margin over the 8 palette colours: outline 36.0, face 32.2
+  (rule 1, against `#202020`), strap 29.9 (rule 1), goggle frame 25.7 (rule 2, against
+  `#00C2D4`), wool 24.1–30.4, lens 20.9, blush 21.3, near-leg tone 17.0 (rule 3).
+- (h) against the local esheep64: the highest silhouette IoU of any sheep tile against any
+  esheep64 tile, mirrored or not, is 0.591 (the test prints only that number).
+- (a) on an ad-hoc test bundle (`build-app.mjs --adhoc --test-port 47463 --test-home
+  <scratch>`; id `com.fanzootechnology.bellwether.adhoc`), with a temp `HOME`, a scratch
+  `BELLWETHER_HOME` whose config.json has only the port, nothing fetched or imported:
+  `--selftest` logged `pet bellwether loaded: 4 animations, 40x40 tiles, behaviours walk
+  run graze sleep alert turn trip sit dizzy chew arrive leave hop lie`, no missing
+  animation, `selftest: done PASS`. The bundle's `Resources/pets/bellwether/animations.xml`
+  has the pinned sha256. A `--demo --snapshot` run drew the flock as sheep in helmets.
+
+Review round 1 (the first look, (f) round 1 of 3): sheets in `/private/tmp/claude-501/-Users-jefffansler-Documents-projects-jeff-agent-hub/ab75b3b8-7e3b-4e7b-8be0-906d57f36b4d/scratchpad/m10a-round1/`:
+`bellwether-overview.png` (every frame at 8×, `#FF8C00` on light and `#202020` on dark;
+then strip sizes at 2× and 1×), the eight `bellwether-{sheep,lamb}-{1x,2x}-{light,dark}.png`,
+and `bellwether-live-strip-light-dark.png` (two live `--demo` snapshots on light and dark).
+The maintainer's requests (2026-10-16, through the coordinator), verbatim in substance:
+1. "The z: drop the black box. Use a white letter z with a thin dark outline (the
+   sheep's outline colour) so it reads on light and dark backgrounds alike. Keep it out
+   of the tint hue window."
+2. "The walk: Jeff can't judge it from stills. Make an animated preview: a self-contained
+   HTML page, review.html … It should play each drawn animation at its real frame
+   intervals, at sheep and lamb scale, on light and dark backgrounds, in several palette
+   colours. Include a walk that actually moves across the page, the way the strip moves
+   it, plus the turn, then the alert-hold sequence. Use the player's own parser and tinter
+   if practical."
+3. The coordinator's fixes, to make unless the maintainer's review contradicts them: "the
+   black-session helmet nearly vanishes against the dark face, especially on dark
+   backgrounds"; "the walk legs barely change between frames: give the walk a clearer leg
+   cycle, so it doesn't look like gliding"; "front-view pupils that read as a squint: fix
+   them if it's cheap".
+What changed: see round 2.
+
+Review round 2 ((f) round 2 of 3, 2026-10-16): in `/private/tmp/claude-501/-Users-jefffansler-Documents-projects-jeff-agent-hub/ab75b3b8-7e3b-4e7b-8be0-906d57f36b4d/scratchpad/m10a-round2/`: `review.html` (the animated
+preview, below), `bellwether-overview.png`, the eight gate (f) sheets, and
+`bellwether-live-strip-light-dark.png` (a live `--demo` strip from the rebuilt test bundle;
+`--selftest` PASS, and the bundle's Resources file has the new pin). What changed for each
+request:
+1. **The z** is a white letter with a one-pixel outline in the sheep's outline colour,
+   drawn only around the letter (`parts/z_small.txt` 7×7, `z_big.txt` 9×8); no box.
+   White and the outline are both far from the hue window.
+2. **`review.html`**, written by `build-pet review` (deviation 122). It is one
+   self-contained page that runs the strip's own modules: `pet.mjs` parses the built
+   file, `horns.mjs` tints it per colour, `stepper.mjs` times the frames and `sprite.mjs`
+   moves and turns the sheep. It shows:
+   - four sheep and four lambs walking across a light and a dark band, turning at the
+     ends of their ranges;
+   - every animation in place at its own intervals (sleep runs on into sleep loop), at
+     sheep and lamb scale, light and dark, in four colours;
+   - the alert on a 12-second cycle: walking, then turn and hold-and-bounce, then
+     confirmed (the alert animation, turn, a bigger bounce).
+
+   It has a speed control (1, 1/2, 1/4) and a "show as a 1x display would" switch.
+   Checked in headless Chrome with a throwaway profile at two fast-forwarded moments
+   (`#t=4100`, `#t=7400`): walkers moved and turned, `turn` held the front pose, sleep had
+   reached the loop, the alert band showed the bouncing front pose, and no warnings. No
+   animated GIFs were made.
+3. The coordinator's fixes:
+   - **The black-session helmet**: a two-pixel light-tone rim on the dome's top and back,
+     the brow, the ear flap's front and the chin strap (side view), and on both flaps' inner
+     edges and the strap (front view). On a black session that rim is the tinted grey
+     highlight, so the helmet has a light contour against the face and a dark wallpaper.
+   - **The walk**: four distinct frames instead of three. Two contact frames with the legs
+     spread two pixels forward and back, and two passing frames with one near and one far
+     hoof lifted off the ground and the sheep a pixel higher. The legs are a row longer
+     (7 rows from row 33), so more of the stride shows below the wool.
+   - **Front-view eyes**: 3×3 round eyes, white with a centred pupil, in place of the 2×2
+     eyes whose inner pupils read as a squint.
+
+The (d) margins are unchanged (the worst is still the near-leg tone at 17.0 against a
+needed 10). The (h) tripwire's highest IoU is 0.592. Tests: `npm test` 1067 tests, 1064
+pass, 0 fail, 2 skipped, 1 todo; `npm run test:cargo` 221 passed, 0 failed; `npm run
+test:rust` node 29 of 29, rust 29 of 29; vectors 60 match; `build-pet --check` up to date.
+The maintainer's verdict on round 2 (2026-10-16, through the coordinator): "I think it
+looks great." The direction is approved, with no changes requested. This is not yet the
+ship approval, which covers every animation (round 3).
+
+Review round 3 ((f) round 3 of 3, 2026-10-16): every animation, for the final sign-off.
+In `/private/tmp/claude-501/-Users-jefffansler-Documents-projects-jeff-agent-hub/ab75b3b8-7e3b-4e7b-8be0-906d57f36b4d/scratchpad/m10a-round3/`:
+- `review.html`: all 17 animations in place, walking and running bands, and the alert
+  cycle (the confirmed alert now plays its own jump);
+- `bellwether-overview.png`: every frame at 5×, then the middle frame of every animation
+  at strip sizes;
+- the eight gate (f) sheets;
+- `bellwether-live-strip-light-dark.png`: a live `--demo` strip from the rebuilt test
+  bundle, playing the real behaviours.
+
+What was drawn (53 unique frames, 16 behaviours, 17 animations; pets/SPEC.md "As drawn"
+describes each):
+- run (a gallop, 4), graze (4), chew (3), alert (8, 5 of its own), trip (5), sit (3),
+  dizzy (4), hop (4), lie (3);
+- arrive and leave on the walk and run frames;
+- for the maintainer's planned drag (deviation 123): carried (3, dangling and kicking)
+  and land (3, 1 of its own).
+
+The parts added are folded, tucked and stretched legs, a dizzy star in a new pale-yellow
+`star` colour (`#ffd75e`; its worst ΔE is 23.6, against orange, where 10 is needed) and a
+"!". `pet.json` no longer has `draft`; the map is name for name, and (b)'s check of that is
+a real, passing test (deviation 116 is resolved).
+
+The rest of M10a's Builds:
+- `pets/LICENSE` is the CC0 1.0 Universal legal code, as Creative Commons publishes it
+  (legalcode.txt; sha256 `a2010f34…`, pinned by a test).
+- NOTICE has D8's text, naming only the sheep, under its own heading. The eSheep section's
+  heading says it is the eSheep art, and its "planned" sentence now says the sheep
+  replaces it as the default.
+- THIRD-PARTY.md is unchanged (no new dependency) and `--check` is green.
+
+Gates, all green here:
+- (a) `--selftest` on the rebuilt test bundle (temp HOME, scratch `BELLWETHER_HOME` with
+  only a port, nothing fetched or imported): `pet bellwether loaded: 17 animations, 40x40
+  tiles, behaviours walk run graze sleep alert turn trip sit dizzy chew arrive leave hop
+  lie carried land`; every behaviour mapped to its own name; no missing animation;
+  `selftest: done PASS`.
+- (b) to (e) in `test/pets-bundled.test.mjs`. The helmet shows (≥ 8 mask pixels, ≥ 4 mid)
+  in all 53 frames. The (d) worst margins are unchanged from round 2, plus the star.
+- (g) the licence and NOTICE tests; provenance as recorded under round 1. This round again
+  opened no reference image and no fetched or imported pet.
+- (h) the tripwire's highest IoU against the local esheep64 is 0.595.
+
+Tests:
+- `npm test`: 1070 tests, 1068 pass, 0 fail, 2 skipped, 0 todo.
+- `npm run test:cargo`: 221 passed, 0 failed.
+- `npm run test:rust` (after a `conformance` build): node 29 of 29, rust 29 of 29.
+- `npm run differential`: 0 unexplained differences in every family.
+- Also green: `npm run test:vectors` (60 files), `build-pet --check`,
+  `third-party.mjs --check`.
+
+**For the maintainer to decide:** the strip mirrors a sheep that faces right, so a
+sleeping sheep's "z" reads backwards (like an "S") about half the time. The art can't fix
+this alone. The options are a player change (draw the sleep "z" unmirrored, or don't
+mirror sleeping sprites) or a mirror-proof sleep mark; nothing was changed.
+
+The Done-when list:
+- `build-pet --check`, byte-identical rebuilds, and the check in `npm test` and CI: done.
+- (a) to (e): done (above).
+- The fresh app: the test bundle above showed the sheep with no `pets.default` and no
+  fetch or import, and logged `pet bellwether loaded: … 40x40 tiles` with no warning. The
+  check on a **signed** build is the maintainer's (the by-hand steps below).
+- (f): **done.** The maintainer's written verdict on round 3 (2026-10-16): **"approved"**,
+  the sheep's final sign-off for gate (f), with one change, the sleep "z" drawn separately
+  and never mirrored (round 3b, deviation 125).
+- (g) and (h): done; (h)'s "nothing he judges a copy" is his to confirm in round 3.
+- `pets import … --name brah` refused, nothing written: done (round 1, on the test
+  bundle, exit 3).
+- An imported esheep64 still loads with its own map: covered by the import tests and the
+  map-precedence code; the maintainer's by-hand step 5 checks it on a signed build.
+
+Round 3b (2026-10-16): the maintainer's one change, done (deviation 125).
+- **The change:** the sleep "z" is no longer part of the sleep frames. It is an overlay,
+  declared in `pet.json`, packed as two extra tiles and pinned. The strip draws it above
+  the head on the side the sheep faces, never mirrored, at the same times and positions
+  as before. The sheep's own frames are unchanged.
+- **To glance at**, in `/private/tmp/claude-501/-Users-jefffansler-Documents-projects-jeff-agent-hub/ab75b3b8-7e3b-4e7b-8be0-906d57f36b4d/scratchpad/m10a-round3b/`:
+  - `review.html`: a new "Asleep, facing both ways" scene, plus everything as before;
+  - the sheets, now with a "sleep loop facing right" row;
+  - `bellwether-live-strip-light-dark.png`: three live `--demo` runs from the rebuilt test
+    bundle. In the first, the red sheep sleeps facing right; in the other two, facing
+    left. The "z" reads upright each time.
+- **Checks:** `--selftest` PASS (17 animations). The test of `review.html` now runs its
+  script against a stub DOM, so a page that fails at load fails `npm test`.
+- **Tests:**
+  - `npm test`: 1076 tests, 1074 pass, 0 fail, 2 skipped.
+  - `npm run test:cargo`: 221 passed, 0 failed.
+  - `npm run test:rust` (after a `conformance` build): node 29 of 29, rust 29 of 29.
+  - `npm run differential`: 0 unexplained differences in every family.
+  - Also green: vectors (60 files), `build-pet --check`, `third-party.mjs --check`.
+
+By-hand check of a fresh signed app (the maintainer; about ten minutes; nothing touches
+the live install):
+1. Build a signed test bundle on a free port and a scratch home:
+   `node scripts/build-app.mjs --test-port 47464 --test-home /tmp/bw-fresh`.
+   It signs with the Developer ID and writes to `target-dev/` only.
+2. Make a scratch home with only a port: `mkdir -p /tmp/bw-fresh /tmp/bw-fresh-user &&
+   echo '{ "port": 47464 }' > /tmp/bw-fresh/config.json`.
+3. Set `A=shell/src-tauri/target-dev/release/bundle/macos/Bellwether.app`, then run
+   `env HOME=/tmp/bw-fresh-user BELLWETHER_HOME=/tmp/bw-fresh "$A/Contents/MacOS/Bellwether"
+   --selftest`. Expect `selftest: done PASS`, and `pet bellwether loaded: 17 animations,
+   40x40 tiles` in `/tmp/bw-fresh/logs/shell.log`, with no `missing` line.
+4. Run the same with `--demo --quit-after 30`. The strip should show the new sheep with
+   helmets in session colours. A real (non-test) install logs to
+   `~/Library/Logs/Bellwether/shell.log` instead.
+5. Run the same environment with `pets import <your esheep64 animations.xml> --name
+   brah`: it is refused, and `/tmp/bw-fresh/pets` is not created. Then run it with
+   `--name esheep64`, set `"pets": { "default": "esheep64" }` in
+   `/tmp/bw-fresh/config.json`, and run step 3 again: it loads esheep64 with its own map.
+6. If it all looks right, write "approved" for the sheep here, and delete `/tmp/bw-fresh*`.
+
+Provenance (g, so far): the developer agent drew from `pets/SPEC.md` and D8's words only.
+It opened no reference image and no fetched or imported pet; esheep64 was read only
+programmatically by the tripwire test, which prints a single IoU number.
+
+Superseded by round 3 below: the "not done yet" list of round 1 (the other animations,
+`pets/LICENSE`, NOTICE) is done.
+
+#### M10a review fixes (developer, 2026-10-16, for BR-3K's "ship with fixes")
+
+- **D1, doctor passed a pet the strip refuses.** Both doctors now apply the strip's rules
+  to a bundled name (`pets::bundled_check` in Rust, `checkBundled` in brain/pets.mjs),
+  with the same words:
+  - PASS only for the exact pinned name whose file matches the pin. Rust reads the app's
+    `Resources/pets/<name>/`, or the checkout's `pets/` for a binary outside an app
+    bundle; Node reads the checkout's.
+  - `brah` before M10b is a WARN: "isn't bundled in this version", with what to set.
+  - A wrong case (`BELLWETHER`) or a trailing dot is a WARN: "pet names are exact. Did
+    you mean …".
+  - A missing file or one that doesn't match its pin is a WARN that says so.
+
+  `test/pets-doctor.test.mjs`, new in `test/conformance.json` (M4, so required against
+  both brains), checks each case's status and exact text against Node and Rust.
+  BR-3K's two doctor `todo`s in `tester-m10a.test.mjs` are real tests. They needed
+  `BELLWETHER_CONFIG` set explicitly, since the suite's isolation preload otherwise gives
+  the child its own scratch config. They pass with `BELLWETHER_BIN` set to the dev build.
+- **D2, the README.** The opening credits now say the sheep is in the repository and
+  bundled under CC0, and that the eSheep art is not included, only fetchable or
+  importable by the user. Setup step 3 needs nothing, with `pets fetch` as an optional
+  eSheep step. The same goes for section 6's command list, the strip's pin bullet, the
+  Licensing list and the commands table.
+- **D3, the silent no-op through a symlinked path.** The main-module guard in
+  `build-pet.mjs`, `build-app.mjs`, `release.mjs`, `third-party.mjs` (and
+  `test/conformance.mjs`) compares realpaths. BR-3K's `todo` is a passing test, and
+  `--check` through a symlinked checkout prints its result.
+- **D4, `bellwether.` was accepted.** `reserved` ignores trailing dots and spaces as well
+  as case, so `bellwether.`, `brah..` and `Brah. ` are refused by `pets import` (cargo
+  test). BR-3K's `todo` passes against the binary.
+- **D5, raw stack traces.** build-pet reports every failure as `build-pet: <reason>`,
+  exit 1. That covers a missing or malformed JSON file, `null` as `palette.json`, a
+  missing `pets.lock.json`, and `build brah` ("pets/brah/pet.json doesn't exist: brah has
+  no sources yet"). `BUILD_PET_DEBUG=1` shows the stack of an unexpected error.
+
+Tests after the fixes:
+- `npm test`: 1105 tests, 1103 pass, 0 fail, 2 skipped, 0 todo.
+- `npm run test:cargo`: 222 passed, 0 failed.
+- `npm run test:rust` (after a `conformance` build): node 30 of 30, rust 30 of 30, the new
+  `pets-doctor.test.mjs` included.
+- `npm run differential`: 0 unexplained differences in every family.
+- `tester-m10a.test.mjs` with `BELLWETHER_BIN` set to the dev build: 37 of 37, no todo.
+- Also green: vectors (60 files), `build-pet --check`, `third-party.mjs --check`.
+
+#### M10b. The aviator goose `brah` (after M11; not required for 1.0)
+
+Builds:
+
+- `brah`'s sources, `pet.json` and pin, from `SPEC.md`'s goose brief;
+- its review rounds (the same three-round cap);
+- the NOTICE line naming it;
+- the setup window then lists two bundled pets.
+
+No new code is expected. If the goose needs any, M10b records it as a deviation. It
+ships in a release after 1.0, through M9's pipeline.
+
+**Done when:**
+
+- D8 (a)–(e) pass for `brah`. In particular:
+  - the helmet is the only thing in the hue window;
+  - the helmet shows in every mapped frame;
+  - the helmet never touches the beak;
+  - (d)'s three rules hold for all 8 palette colours.
+- In the setup window's Pet step, both pets show tinted stills. "Use this pet" on the
+  goose writes `pets.default: "brah"`, and the strip reloads as geese with helmets in
+  session colours. Choosing the sheep switches back. config.json's other keys keep their
+  values and lines.
+- Setting `pets.default` to `"brah"` by hand in config.json does the same at the next
+  start.
+- (f) the maintainer's written "approved" for the goose is recorded, with the rounds.
+- (g) the same provenance record as for the sheep, for the goose.
+- (h) the maintainer has judged the goose visibly distinct from Untitled Goose Game's
+  goose and from each of the four mood references, against D8's list (the helmet and
+  goggles in every frame, an outline, its own proportions, no bell or props, no
+  outstretched honk).
+
+**Testing without a live account** (both parts):
+
+- All automated checks run on the committed sources and the built sheets.
+- The review sheets are generated offline.
+- The live views use `--demo --snapshot` with a scratch config (`BELLWETHER_HOME` or
+  `BELLWETHER_CONFIG`).
+- The pet switch is tested on a test build's home, never the maintainer's real config.
 
 ### M11. Remove the Node brain, ship 1.0
 
@@ -3225,7 +3860,7 @@ Builds:
 | M7 | onboarding | spare user account; the settings file there is disposable; capability tests in cargo |
 | M8 | migration | three fixture HOMEs built by a script (plists, `.env`, `data/`, settings) with launchctl calls stubbed, as today's tests do when HOME isn't the real home; the one real run is manual and preceded by a backup |
 | M9 | pipeline | rc tags on a draft release; the updater tested against a `latest.json` on a draft or a local static server via an endpoint override available only in debug builds |
-| M10 | art | automated checks plus the snapshot grid review |
+| M10a, M10b | art: the sheep (before 1.0), then the goose | D8 (a)–(e) and the (h) tripwire in `npm test` and CI on the committed sources; `build-pet review` sheets made offline; a `--demo --snapshot` strip from a test build with a scratch home; the maintainer's review rounds (f) |
 | M11 | nothing regressed | the full suite; a clean install on a fresh account; one migration run |
 
 Fixtures and offline modes the developer must provide:
@@ -3274,8 +3909,11 @@ Fixtures and offline modes the developer must provide:
   re-signed.
 - **R9 Losing the updater key.** Existing installs could never be updated again; keep
   an offline backup. Losing the notary key is recoverable (revoke, reissue).
-- **R10 Art delays or quality.** It runs in parallel from M1. The release can't ship
-  1.0 without it, but rc builds can use a placeholder pet and import.
+- **R10 Art quality.** The pets are drawn by the developer agent (D8), so the risk is that
+  agent-made 40×40 pixel art doesn't meet the maintainer's bar. Mitigation: M10a's first
+  look (walk, turn and sleep through the whole pipeline) before the rest is drawn, and a
+  cap of three review rounds before stopping to rethink. 1.0 needs only the sheep; rc
+  builds can still use an imported pet.
 - **R11 Homebrew official-repo acceptance.** Notability [23]; the project's own tap
   first.
 - **R12 Claude Code changes.**
@@ -3312,10 +3950,9 @@ Fixtures and offline modes the developer must provide:
 3. **Architectures.** Universal (Apple silicon and Intel), or Apple silicon only?
    macOS 26 is the last release for Intel Macs, so universal mostly serves older
    machines and roughly doubles the download.
-4. **Art.** What budget is there for commissioning, and is CC-BY-4.0 (recommended) or
-   MIT the licence for the sheet? Should the artist be credited by name in NOTICE? Is
-   runtime-scaled lambs (0.6) enough, or should the commission include dedicated lamb
-   frames?
+4. **Art.** (Answered 2026-10-15, deviation 114.) Who makes the pets, under which
+   licence, and are runtime-scaled lambs (0.6) enough, or are dedicated lamb frames
+   needed?
 5. **Homebrew.** Own tap only for now, or submit to the official cask repository once
    notability allows?
 6. **`pets fetch`.** Keep it in the shipped CLI as an opt-in for the eSheep pet
@@ -3351,7 +3988,7 @@ The maintainer accepted these answers to the open questions above:
 1. Bundle id for the signed app: `com.fanzootechnology.bellwether`. Permanent from the first signed build.
 2. Repository dev builds keep `local.bellwether`.
 3. Universal build (Apple silicon and Intel).
-4. Art: deferred until this version is ready for distribution; the maintainer has a concept for an original pack. Lamb frames and the licence are decided with it.
+4. Art (revised 2026-10-15, deviation 114): two bundled pets in flight helmets, the sheep `bellwether` (the default, for 1.0) and the aviator goose `brah` (after 1.0), drawn by the developer agent from text sources under CC0-1.0 (D8). Lambs are the runtime-scaled sheet for now; dedicated lamb frames would be a later change.
 5. Homebrew: own tap first.
 6. `pets fetch` for eSheep stays as an opt-in CLI command, clearly labelled.
 7. Updates: check daily and ask.
@@ -4215,3 +4852,187 @@ Recorded by the developer while fixing BR-3K's M9 review (2026-10-15).
      `release.mjs`'s `secretKeyFiles` reads the files git tracks or would add (outside a
      checkout, every file but build output) and finds a secret key's comment line, plain or
      as the base64 a `.key` file holds. The repository has none.
+
+Recorded by the planner (PL-4N) for the maintainer's art decisions (2026-10-15). This is
+a change to the plan, not a build deviation.
+
+114. **Two bundled pets in flight helmets, drawn by the developer agent, under CC0.**
+     - **The maintainer's decisions (2026-10-15):**
+       - **Two bundled pets.** The original sheep `bellwether` is the default. The
+         aviator goose is `brah`: its id, folder, reserved name and config value; the
+         docs call it "an aviator goose".
+       - **Both wear a flight helmet with goggles, and the helmet carries the session
+         colour on both.** The sheep has no horns.
+       - **The sheep is meant to feel like eSheep:** the same genre and feel, a small,
+         round, white woolly side-view pixel sheep with a dark face and legs, cheerful and
+         bouncy, with the same kinds of behaviour. It is not copied: the clean-room rule
+         and the silhouette tripwire stay. "Must look unlike eSheep" is dropped as a
+         gate.
+       - **1.0 needs only the sheep.** M10a comes before M11. M10b (`brah`) comes after
+         M11 and ships in a later release.
+       - **The art** is drawn in the repository by the developer agent from text
+         sources, not by a commissioned artist. It is CC0-1.0, not CC-BY-4.0. NOTICE
+         says "an AI coding agent under the maintainer's direction" and that no
+         reference was copied.
+       - **The maintainer's visual sign-off stays the gate,** with a review loop of at
+         most three rounds before stopping to rethink.
+       - **ΔE minimums:** 20 for colours touching the helmet, 20 best-of-three-tones for
+         dark edges, and 10 for everything else. They are accepted as defaults.
+       - **The goose's mood references are mood only,** and the goose must be visibly
+         distinct from Untitled Goose Game's.
+     - **What changed:**
+       - D8 is rewritten: the pets' looks, the source form, the clean-room rule, the
+         `bundled` pins, the pet choice, acceptance (c), (d), (f) and (g) restated, and
+         (h) added.
+       - M10 is split into M10a and M10b, on the schedules above.
+     - **Facts checked while revising:**
+       - esheep64's tile is 40×40 (a 640×440 sheet, 16×11 tiles). The bundled pets
+         keep that.
+       - `pets.lock.json`'s `pets` key is what `pets fetch` downloads, so bundled pins go
+         under a separate `bundled` key.
+       - The setup window's still was untinted, so the mask would show magenta; it is
+         now tinted with the first palette colour.
+       - D8's import rule "tiles at most 64×64" is the tile grid (`tilesx`, `tilesy` ≤ 64),
+         as `pets.rs` checks. It is reworded, not changed.
+       - A dark sheep face next to the helmet is only 4–17 ΔE from the black session
+         colour's mid tone, but 25–37 at the best of the three tones. So (d) treats any
+         colour with L* ≤ 35 like an outline.
+     - **These places still use the old wording, and D8 and M10 supersede them:**
+       - Goal ("its own original sheep");
+       - the Milestones preamble ("Brief the artist during M1"; also, M10b now follows
+         M11);
+       - R10 (the risk is now agent-made art not meeting the bar; mitigation: M10a's
+         first look and the three-round cap; rc builds can still use import);
+       - Q4 and decision 4 (licence and lamb frames: CC0, and runtime-scaled lambs for
+         now);
+       - the Configuration table's `pets.default` (also `"brah"` after M10b);
+       - the Test plan's M10 row (M10a and M10b, offline review sheets).
+
+Recorded by the developer while building M10a up to the first look (2026-10-15).
+
+115. **The PNG is encoded by build-pet itself, not with `node:zlib`.**
+     - Plan (D8): "`node:zlib` with fixed settings".
+     - True: zlib builds differ in how they search for matches (Node bundles Chromium's
+       zlib, whose match finder uses CPU-specific hashing), so the same pixels and settings
+       can deflate to different bytes on another machine, and `--check` would fail in CI.
+     - Done: one fixed-Huffman deflate block, matching only at two fixed distances (the
+       previous pixel, the pixel above), longest first: the bytes depend on the pixels
+       alone. 8-bit RGBA, filter 0, IHDR + IDAT + IEND. The sheep's 13 frames are a
+       10 343-byte PNG. `node:zlib` and the tests' own decoder read it back pixel for pixel.
+116. **The first look maps the undrawn behaviours to the drawn animations.**
+     - Plan: each behaviour maps to the animation of its own name; (b) needs all 14.
+     - True: at the first look only `walk`, `turn`, `sleep` and `sleep loop` exist, and a
+       map with missing names would log missing-animation warnings and fail (b).
+     - Done: `pet.json` has a `draft` note, and until the rest are drawn `run`, `arrive`
+       and `leave` play `walk`; `graze`, `chew`, `sit`, `trip`, `hop` and `alert` play
+       `turn`; `dizzy` and `lie` play `sleep loop`. Every (b) check runs; the
+       name-for-name check is a node:test `todo` while `draft` is set, and turns into a
+       failing test if `draft` is removed before the map is.
+117. **The bundled sheep is the default in a repository build too, and found in the
+     checkout.** `pets.default` absent means `bellwether` in both layouts (it was
+     `esheep64` in a repository). A repository build reads bundled names from the
+     checkout's `pets/<name>/animations.xml` and every other name from `data/pets/`, both
+     pinned by the compiled-in lock; the setup window's `Ctx.resources` is the checkout in
+     a repository build, so its list is the same code. The maintainer's live config.json
+     names `esheep64`, so the running strip is unaffected. doctor (Rust) reports a bundled
+     default as PASS without reading Resources (the CLI doesn't know them); the strip's
+     pin check is what refuses a changed file. Node doctor checks the checkout's file and
+     its `next` step says to rebuild it, not to fetch.
+118. **The setup window carries a copy of the tinter.** D8 says the still is tinted with
+     `horns.mjs`. The page is a classic script that loads nothing else (tester-m3 forbids
+     dynamic import in webview code, and onboarding.test.mjs runs the page as a script),
+     so `onboarding.js` has `tintMask`, a copy of `tintHorns`; a test runs the copy and the
+     original on the mask tones, the magenta key, near-window colours and about 590 others, for
+     every palette colour, and requires identical output. The colour comes from the
+     backend (`pets.tint`: the first colour of the effective palette).
+119. **Reserved names are compared without case**, since APFS folds case (`Brah` and `brah`
+     are one folder); a `pets.user.lock.json` entry with a reserved name (from before
+     M10a) is left out of the setup window's list.
+120. **Two existing tests changed with the default.** tester-m10's doctor walk is the
+     repository walk for the fetched eSheep, so its scratch config now names `esheep64`
+     (it was relying on the old default). shell-config's "pet art is never part of the
+     shell" walk now skips `target-dev/` as it skips `target/`: a built test app there
+     legitimately holds the CC0 sheep in its Resources.
+121. **(c)'s "the helmet shows" is at least 8 mask pixels, 4 of them the mid tone**, in
+     every frame of every mapped animation; one stray pixel wouldn't read as a helmet.
+
+Recorded by the developer while making M10a's review round 2 (2026-10-16).
+
+122. **`build-pet review` also writes `review.html`, an animated preview.** D8's (f) asks for
+     still sheets and a live strip. The maintainer couldn't judge the walk from stills, so
+     the review now also writes one self-contained page. It embeds the built
+     `animations.xml` and the player's own `expr`, `stepper`, `sprite`, `pet` and `horns`
+     modules: each module is wrapped in its own function scope, its imports bound from the
+     ones before it (`playerBundle`). Nothing in the player changed. `#t=<ms>` fast-forwards
+     the page, so it can be checked headless; `#1x` simulates a 1× display. A test runs the
+     bundled modules and walks every bundled pet with the bundled Sprite. No GIFs.
+
+Recorded by the developer while drawing the rest of the sheep (round 3, 2026-10-16).
+
+116 (update). **Resolved in round 3.** Every behaviour has its own animation, `pet.json`
+     has no `draft`, and the name-for-name check is a passing test.
+123. **Two more behaviours, `carried` and `land`, for the planned drag (at the maintainer's
+     request).**
+     - Plan: D8 and M10a name 14 behaviour keys.
+     - True: a later milestone will let users drag a sheep along the strip. Jeff asked for
+       its art now: `carried` (dangling from the scruff, legs kicking, looping) and `land`
+       (a drop and settle that flows into walk or graze).
+     - Done: they are behaviour keys 15 and 16 in build-pet's `BEHAVIOURS` and Rust's
+       `pets::BEHAVIOURS`, mapped name for name in `pet.json` and the pin, and every
+       acceptance test covers them.
+     - Nothing plays them yet; no drag code was written. The desktopPet format is
+       unchanged: they are ordinary animations.
+     - A pet without them (any imported pet, esheep64's config map) falls back to walk
+       through the player's existing `idsFor`; a test proves it.
+     - `pets import`'s proposed map adds them only when a file has animations of those
+       names.
+124. **The overview adapts to the full set.** With more than six animations it zooms
+     frames at 5× (8× before). Its strip-size panel shows the middle frame of every
+     animation in four colours; the per-size sheets still have all eight colours.
+     `review.html` gained a running band beside the walking one.
+
+Recorded by the developer for the maintainer's round 3 change (2026-10-16).
+
+125. **Overlays: the sleeping "z" is drawn separately and never mirrored (the maintainer's
+     choice).**
+     - Plan: one tile per frame; the player mirrors the whole tile for rightward movement.
+     - True: a sleeping sheep facing right showed a mirrored "z" (an "S").
+     - Done:
+       - `pet.json` gained an optional `overlays` map (frame → part, x, y). build-pet packs
+         each overlay part into one extra tile of the same sheet (tiles 53 and 54 here)
+         and pins `{frame index: [{tile, x, y, w, h}]}` under `bundled.<name>.overlays`.
+         `animations.xml` stays plain desktopPet; other players see two unused tiles.
+       - `get_pet` passes the pin's overlays (`null` for any other pet).
+       - `shell/src/player/overlay.mjs` (`cleanOverlays`, `overlayPlacements`) places them.
+         `main.js` draws them after the sprite's mirrored transform is restored. Facing
+         right, the position mirrors across the tile so the "z" stays beside the head,
+         and the image is never flipped. Same timing (the frames' own) and the same
+         positions as before.
+       - The four sleep frames lost their `part z_…` line and are otherwise unchanged.
+         Shown with their overlays, they are pixel for pixel what round 3 approved.
+       - (c) still checks every sheet pixel, the overlay tiles included; (d) now measures
+         frames as shown, overlays included.
+       - Tests: placement never mirrored, the draw order in `main.js`, cleaning,
+         pin = sources, and the Rust payload.
+       - `review` draws overlays the strip's way; its sheets add a "sleep loop facing
+         right" row, and `review.html` a scene of sheep and lambs asleep facing both ways.
+     - An imported pet gets no overlays. The capability lists are unchanged: `get_pet`'s
+       payload only gained a field.
+     - grass-dock.test.mjs pinned the exact `pet = { … }` line in `main.js`; its regex now
+       also allows the `overlays` field.
+
+Recorded by the developer while fixing BR-3K's M10a review (2026-10-16).
+
+126. **doctor judges a bundled name by the strip's rules, and the Rust brain carries the
+     pins.** `crates/brain/src/pets.rs` compiles in `pets.lock.json` (`LOCK`, the same
+     file the strip compiles in) for `bundled_sha` and `bundled_check`. For a binary
+     outside an app bundle (a dev build), `bundled_file` falls back to the checkout's
+     `pets/`, by `CARGO_MANIFEST_DIR`, as a repository strip does. The Node and Rust
+     doctors now share one wording, pinned by `test/pets-doctor.test.mjs` in the
+     conformance table.
+127. **Reserved names ignore trailing dots and spaces** (`bellwether.`, `Brah. `), as well
+     as case. Only the bundled names are affected: `bellwether.x` and `brahma` import as
+     before.
+128. **Script entry guards compare realpaths** (`build-pet`, `build-app`, `release`,
+     `third-party`, `test/conformance.mjs`). Before, a symlinked path ran nothing and
+     exited 0.

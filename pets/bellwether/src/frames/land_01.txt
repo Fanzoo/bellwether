@@ -1,0 +1,12 @@
+# land 1 of 3: dropping the last few pixels, legs reaching for the ground (then the crouch, hop 1, and standing, turn 1).
+part leg_far 15 29
+part leg_far 28 29
+part leg 12 29
+part leg 25 29
+part body 11 15
+part head 3 7
+grid 7 15
+eee
+eoe
+eee
+end

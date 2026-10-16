@@ -1,0 +1,9 @@
+# trip 3 of 5: flat on its belly, a hind leg stuck out behind, eyes crossed out.
+part leg_flat 33 37
+part body 11 22
+part head 1 21
+grid 5 29
+efe
+fef
+efe
+end

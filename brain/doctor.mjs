@@ -129,7 +129,7 @@ export async function runDoctor({ settingsFile = USER_SETTINGS, env = process.en
     for (const c of checkLocatorLog(dataDir)) add(c.name, c.status, c.detail);
 
     // The shell's pet, and whether the brain starts at login (Milestone 3).
-    const pet = checkPets(dataDir, config.pets?.default ?? 'esheep64');
+    const pet = checkPets(dataDir, config.pets?.default ?? 'bellwether');
     add('pets', pet.ok ? 'PASS' : 'WARN', pet.detail);
     if (process.platform === 'darwin') {
       const plist = plistPath(home);
@@ -141,7 +141,7 @@ export async function runDoctor({ settingsFile = USER_SETTINGS, env = process.en
       if (old.length) add('old LaunchAgents', 'WARN', `pasture's LaunchAgents from before the rename are still installed (${old.join(', ')}); the old brain may hold the port. \`bellwether migrate\` (or \`bellwether autostart install\`) previews removing them`);
       if (strip && !isStripRunning()) add('strip running', 'WARN', 'the strip\'s LaunchAgent is installed but no strip is running (quit from the menu bar?): `./bellwether shell start`');
     }
-    add('next', 'INFO', nextStep({ checks, installed, home, dataDir, petOk: pet.ok }));
+    add('next', 'INFO', nextStep({ checks, installed, home, dataDir, petOk: pet.ok, petFix: pet.fix }));
   }
 
   if (e2e) {
@@ -498,12 +498,12 @@ function defaultRunClaude({ cwd, hooksFile }) {
  * art, build the strip, start at login, then hooks. Hooks come last on purpose: with
  * hooks installed and no brain, every Claude Code session prints hook errors.
  */
-export function nextStep({ checks, installed, home = os.homedir(), dataDir = DATA_DIR, petOk = true, platform = process.platform, shellBuilt = fs.existsSync(shellBinary()) }) {
+export function nextStep({ checks, installed, home = os.homedir(), dataDir = DATA_DIR, petOk = true, petFix = null, platform = process.platform, shellBuilt = fs.existsSync(shellBinary()) }) {
   const status = (n) => checks.find((c) => c.name === n)?.status;
   const P = './bellwether';
   if (status('config') === 'FAIL') return 'fix config.json (the config line above says what is wrong)';
   if (status('token') === 'FAIL') return 'put a token in the .env: `./bellwether token init` (README, Setup step 1)';
-  if (!petOk) return `fetch the pet art: \`${P} pets fetch\``;
+  if (!petOk) return petFix ?? `fetch the pet art: \`${P} pets fetch\``;
   if (!shellBuilt) return `build the strip that starts at login (a few minutes, once): \`${P} shell build --release\` (to try it in a terminal first: \`${P} shell --dev --release\`)`;
   const autostarted = fs.existsSync(plistPath(home));
   if (platform === 'darwin' && (!autostarted || !fs.existsSync(plistPath(home, SHELL_LABEL)))) return `start bellwether at login: \`${P} autostart install\` (preview), then the same with --write`;

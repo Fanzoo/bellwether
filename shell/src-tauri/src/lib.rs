@@ -43,19 +43,43 @@ use settings::Settings;
 const MAX_PET_BYTES: u64 = 16 * 1024 * 1024;
 const PET_LOCK: &str = include_str!("../../../pets.lock.json");
 
+/// A pet's pin in the pets.lock.json compiled into this binary: a bundled pet's under
+/// "bundled" (plan D8, built by scripts/build-pet.mjs), a fetched one's under "pets".
+fn pin(folder: &str) -> Result<(Value, bool), String> {
+    let lock: Value = serde_json::from_str(PET_LOCK).map_err(|e| format!("pets.lock.json: {e}"))?;
+    let plain = bellwether_brain::pets::valid_name(folder);
+    if let Some(p) = lock.get("bundled").and_then(|b| b.get(folder)).filter(|_| plain) {
+        return Ok((p.clone(), true));
+    }
+    match lock.get("pets").and_then(|b| b.get(folder)).filter(|_| plain) {
+        Some(p) => Ok((p.clone(), false)),
+        None => Err(format!("{folder} is not a pinned pet (pets.lock.json); only pinned pets are loaded")),
+    }
+}
+
 /// Checks a pet file against its pinned sha256 from pets.lock.json.
 fn verify_pet(folder: &str, bytes: &[u8]) -> Result<(), String> {
     use sha2::{Digest, Sha256};
-    let lock: Value = serde_json::from_str(PET_LOCK).map_err(|e| format!("pets.lock.json: {e}"))?;
-    let want = lock
-        .pointer(&format!("/pets/{folder}/sha256"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("{folder} is not a pinned pet (pets.lock.json); only pinned pets are loaded"))?;
+    let (entry, bundled) = pin(folder)?;
+    let want = entry.get("sha256").and_then(Value::as_str).ok_or_else(|| format!("{folder}'s pin in pets.lock.json has no sha256"))?;
     let got: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
     if got != want {
-        return Err(format!("pets/{folder}/animations.xml doesn't match its pinned sha256 (expected {want}, got {got}); run `bellwether pets fetch`"));
+        let fix = if bundled { "it is one of Bellwether's own pets: rebuild it with `node scripts/build-pet.mjs build` (a repository), or reinstall the app" } else { "run `bellwether pets fetch`" };
+        return Err(format!("pets/{folder}/animations.xml doesn't match its pinned sha256 (expected {want}, got {got}); {fix}"));
     }
     Ok(())
+}
+
+/// A bundled pet's behaviour map, from its pin (plan D8): what `get_pet` uses when
+/// config.json has no `pets.animationMap.<name>`.
+fn bundled_map(folder: &str) -> Option<Value> {
+    pin(folder).ok().filter(|(_, bundled)| *bundled).and_then(|(p, _)| p.get("animationMap").cloned())
+}
+
+/// A bundled pet's overlays, from its pin (deviation 125): images the player draws over
+/// some frames and never mirrors (the sheep's sleeping "z"). Other pets have none.
+fn bundled_overlays(folder: &str) -> Value {
+    pin(folder).ok().filter(|(_, bundled)| *bundled).and_then(|(p, _)| p.get("overlays").cloned()).unwrap_or(Value::Null)
 }
 
 /// Pet files never need a DTD; refusing DOCTYPE and ENTITY outright rules out entity
@@ -95,13 +119,15 @@ struct PetPayload {
     folder: String,
     xml: String,
     animation_map: Value,
+    overlays: Value,
     display: Value,
 }
 
 /// Where pets come from (distribution plan D8, milestone 5).
 enum PetPlace {
-    /// A repository: `data/pets/<name>/animations.xml`, pinned in pets.lock.json.
-    Repository { data_dir: PathBuf },
+    /// A repository: a bundled pet from the checkout's `pets/<name>/animations.xml`, else
+    /// `data/pets/<name>/animations.xml`, both pinned in pets.lock.json.
+    Repository { data_dir: PathBuf, repo: Option<PathBuf> },
     /// The app: a bundled pet (`Contents/Resources/pets/<name>/animations.xml`, pinned in
     /// the pets.lock.json compiled into this binary), else an imported one
     /// (`<home>/pets/<name>/animations.xml`, pinned in `<home>/pets.user.lock.json` by
@@ -123,7 +149,13 @@ fn pet_xml(place: &PetPlace, name: &str) -> Result<String, String> {
         std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))
     };
     let bytes = match place {
-        PetPlace::Repository { data_dir } => {
+        PetPlace::Repository { repo: Some(repo), .. } if bellwether_brain::pets::BUNDLED.contains(&name) => {
+            let path = repo.join("pets").join(name).join("animations.xml");
+            let bytes = read(&path, &format!("{} is missing: build it with `node scripts/build-pet.mjs build {name}`", path.display()))?;
+            verify_pet(name, &bytes)?;
+            bytes
+        }
+        PetPlace::Repository { data_dir, .. } => {
             let path = data_dir.join("pets").join(name).join("animations.xml");
             let bytes = read(&path, &format!("{} is missing: run `bellwether pets fetch`", path.display()))?;
             // The same pins `bellwether pets fetch` uses (pets.lock.json, compiled in): a pet
@@ -156,9 +188,9 @@ fn pet_xml(place: &PetPlace, name: &str) -> Result<String, String> {
 /// name comes from config (`pets.default`) and must be a plain name: no path.
 #[tauri::command]
 fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
-    let fallback = if matches!(shared.pets, PetPlace::App { .. }) { "bellwether" } else { "esheep64" };
     let config = shared.config.read().unwrap().clone();
-    let folder = config.pointer("/pets/default").and_then(Value::as_str).unwrap_or(fallback).to_string();
+    // No pets.default: Bellwether's own sheep (plan D8).
+    let folder = config.pointer("/pets/default").and_then(Value::as_str).unwrap_or(bellwether_brain::pets::DEFAULT_PET).to_string();
     if folder.is_empty() || !folder.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
         return Err(format!("pets.default {folder:?} must be a plain folder name"));
     }
@@ -166,7 +198,8 @@ fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
         log(&format!("error: refusing to load pet {folder}: {e}"));
         e
     })?;
-    let animation_map = config.pointer(&format!("/pets/animationMap/{folder}")).cloned().unwrap_or(Value::Null);
+    // config.json's map wins; a bundled pet otherwise brings its own (all 14 behaviours).
+    let animation_map = config.pointer(&format!("/pets/animationMap/{folder}")).cloned().or_else(|| bundled_map(&folder)).unwrap_or(Value::Null);
     let num = |p: &str, d: f64| config.pointer(p).and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
     let palette = sheep_palette(config.pointer("/pets/palette"));
     let display = serde_json::json!({
@@ -183,7 +216,8 @@ fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
         "snapshotAfterMs": shared.snapshot.as_ref().map(|(_, secs)| secs * 1000.0),
         "snapshotEveryMs": shared.snapshot.as_ref().and(shared.snapshot_every).map(|secs| secs * 1000.0),
     });
-    Ok(PetPayload { folder, xml, animation_map, display })
+    let overlays = bundled_overlays(&folder);
+    Ok(PetPayload { folder, xml, animation_map, overlays, display })
 }
 
 /// Long-poll for the next snapshot (rev > after), at most 25 s.
@@ -405,7 +439,7 @@ pub fn run() {
         home: settings.data_dir.clone(),
     };
     let shared = Shared {
-        pets: if app_layout { PetPlace::App { resources: settings.resources.clone(), home: settings.data_dir.clone() } } else { PetPlace::Repository { data_dir: settings.data_dir.clone() } },
+        pets: if app_layout { PetPlace::App { resources: settings.resources.clone(), home: settings.data_dir.clone() } } else { PetPlace::Repository { data_dir: settings.data_dir.clone(), repo: settings.agent_dir.clone() } },
         config: std::sync::RwLock::new(settings.config.clone()),
         selftest: flags.selftest,
         snapshot: flags.snapshot.clone().map(|p| (p, flags.snapshot_after)),
@@ -433,7 +467,8 @@ pub fn run() {
         layout: settings.layout,
         home: settings.data_dir.clone(),
         port: settings.port,
-        resources: settings.resources.clone(),
+        // Where bundled pets are: the app's Resources, or a repository's checkout (its pets/).
+        resources: if app_layout { settings.resources.clone() } else { settings.agent_dir.clone() },
         user_home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
         env_config: std::env::var("BELLWETHER_CONFIG").ok().filter(|c| !c.is_empty()),
         env_token: std::env::var("BELLWETHER_HOOK_TOKEN").ok().filter(|t| !t.is_empty()),
@@ -1212,10 +1247,44 @@ mod tests {
         let app = PetPlace::App { resources: Some(res.clone()), home: home.clone() };
         assert!(pet_xml(&app, "esheep64").unwrap_err().contains("doesn't match its pinned sha256"));
         // The repository keeps data/pets and pets.lock.json.
-        let repo = PetPlace::Repository { data_dir: home.clone() };
+        let repo = PetPlace::Repository { data_dir: home.clone(), repo: None };
         assert!(pet_xml(&repo, "tiny").unwrap_err().contains("not a pinned pet"));
         assert!(pet_xml(&repo, "nothere").unwrap_err().contains("pets fetch"));
         let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&res);
+    }
+
+    /// Plan D8, milestone M10a: a bundled pet loads from the checkout (a repository build)
+    /// or the app's Resources only while it matches the "bundled" pin compiled in, and
+    /// brings its own map of all 14 behaviours; a fetched pet has no such map.
+    #[test]
+    fn bundled_pets_load_by_their_pin_and_bring_their_own_map() {
+        let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+        let data = temp("bundled-data");
+        let repo = PetPlace::Repository { data_dir: data.clone(), repo: Some(checkout.clone()) };
+        let xml = pet_xml(&repo, "bellwether").unwrap();
+        assert!(xml.contains("<title>Bellwether sheep</title>"));
+        let map = bundled_map("bellwether").expect("bellwether's pin carries its map");
+        for (b, _) in bellwether_brain::pets::BEHAVIOURS {
+            assert!(map.get(b).is_some(), "the bundled map has {b}");
+        }
+        assert_eq!(bundled_map("esheep64"), None, "a fetched pet brings no map");
+        let overlays = bundled_overlays("bellwether");
+        assert!(overlays.as_object().is_some_and(|o| !o.is_empty()), "the sheep's sleeping z: {overlays}");
+        assert_eq!(bundled_overlays("esheep64"), Value::Null, "a fetched pet has no overlays");
+        let res = temp("bundled-res");
+        let file = res.join("pets").join("bellwether").join("animations.xml");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, xml.replace("Bellwether sheep", "Bellwether sheeq")).unwrap();
+        let app = PetPlace::App { resources: Some(res.clone()), home: data.clone() };
+        let e = pet_xml(&app, "bellwether").unwrap_err();
+        assert!(e.contains("doesn't match its pinned sha256") && e.contains("Bellwether's own pets"), "{e}");
+        std::fs::write(&file, &xml).unwrap();
+        assert_eq!(pet_xml(&app, "bellwether").unwrap(), xml);
+        // Without a checkout, a repository build can't find it in data/ (it isn't fetched).
+        let bare = PetPlace::Repository { data_dir: data.clone(), repo: None };
+        assert!(pet_xml(&bare, "bellwether").is_err());
+        let _ = std::fs::remove_dir_all(&data);
         let _ = std::fs::remove_dir_all(&res);
     }
 

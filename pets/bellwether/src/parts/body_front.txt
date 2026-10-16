@@ -1,0 +1,18 @@
+# The body from the front: a round ball of wool.
+....ooo.oooooo.ooo....
+..ooWWWoWWWsssosssoo..
+.oWWWwwwwwwwwwwwwssso.
+.oWwwwwwwwwwwwwwwwwso.
+oWWwwwwwwwwwwwwwwwwsso
+oWwwwwwwwwwwwwwwwwwwso
+oWwwwwwwwwwwwwwwwwwwso
+owwwwwwwwwwwwwwwwwwwwo
+owwwwwwwwwwwwwwwwwwwwo
+oswwwwwwwwwwwwwwwwwwSo
+oswwwwwwwwwwwwwwwwwwSo
+.osswwwwwwwwwwwwwwSSo.
+.ossswwwwwwwwwwwwSSSo.
+..oSsssssssSSSSSSSSo..
+...oSSsssssSSSSSSSo...
+....ooSSSSSSSSSSoo....
+......oooooooooo......

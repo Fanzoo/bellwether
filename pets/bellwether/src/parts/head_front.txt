@@ -1,0 +1,22 @@
+# The head from the front (the alert's hold): the dome, both goggles on the brow, both
+# ear flaps (a light rim on their inner edges), the chin strap under the chin; two round
+# eyes looking at you, a small nose and mouth.
+.....oooooooo.....
+...oo33333322oo...
+..o333322222222o..
+.o3gggg2222gggg2o.
+.ogelllggggelllgo.
+.ogllllg22gllllgo.
+.o2gggg2222gggg2o.
+o23offffffffffo32o
+o23ffffffffffff32o
+o23ffeeeffeeeff32o
+o23ffeoeffeoeff32o
+o13ffeeeffeeeff31o
+o13fpffffffffpf31o
+.o1fffffoofffff1o.
+.o13ffffffffff31o.
+..o31fffoofff13o..
+...o3333333333o...
+....o22222222o....
+.....oooooooo.....

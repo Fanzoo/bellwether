@@ -1,0 +1,7 @@
+# sleep 4 of 4: asleep; the first z (an overlay, pet.json).
+part body 11 22
+part head 3 20
+grid 8 29
+ff
+ee
+end

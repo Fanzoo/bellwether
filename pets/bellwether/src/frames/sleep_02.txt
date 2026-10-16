@@ -1,0 +1,7 @@
+# sleep 2 of 4: lying down, the head lowering.
+part body 11 22
+part head 3 16
+grid 8 25
+oo
+oe
+end

@@ -1,0 +1,11 @@
+# graze 4 of 4: head down, a contented blink.
+part leg_far 15 33
+part leg_far 28 33
+part leg 12 33
+part leg 25 33
+part body 11 19
+part head 1 21
+grid 6 30
+ff
+ee
+end

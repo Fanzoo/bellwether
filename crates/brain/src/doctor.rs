@@ -531,9 +531,15 @@ pub fn webkit_check(text: Option<&str>) -> Option<Check> {
     })
 }
 
-/// The pet the strip draws: an imported pet is checked against pets.user.lock.json.
+/// The pet the strip draws: Bellwether's own (bundled, plan D8; the default), or an
+/// imported pet, checked against pets.user.lock.json.
 fn pets_check(home: &Path, c: &Config) -> Check {
-    let name = c.merged.get("pets").get("default").as_str().map(jsstr::to_string_lossy).unwrap_or_else(|| "esheep64".into());
+    let name = c.merged.get("pets").get("default").as_str().map(jsstr::to_string_lossy).unwrap_or_else(|| crate::pets::DEFAULT_PET.into());
+    // A bundled name, checked by the strip's rules (M10a review D1): exact, pinned in this
+    // version, its file matching the pin.
+    if let Some((ok, why)) = crate::pets::bundled_check(&name) {
+        return Check::new("pets", if ok { "PASS" } else { "WARN" }, why, OK);
+    }
     let file = home.join("pets").join(&name).join("animations.xml");
     if !file.exists() {
         return Check::new("pets", "INFO", format!("{name} is not an imported pet (no {}); the strip draws it from its own pets. `bellwether pets import <animations.xml>` imports one", file.display()), OK);

@@ -163,14 +163,14 @@ function renderPets() {
   const pets = status.pets;
   $('pet-intro').textContent = pets.list.length
     ? 'Choose the pet the strip draws. Every session gets its own colour.'
-    : 'No pet is installed yet. Bellwether\'s own sheep comes with a later version; until then, use Import… with a desktopPet pet file (animations.xml) you have.';
+    : 'No pet is installed yet. Use Import… with a desktopPet pet file (animations.xml) you have.';
   $('pet-import').disabled = !pets.editable;
   $('pet-list').replaceChildren(...pets.list.map((p) => {
     const li = document.createElement('li');
     li.classList.toggle('current', p.name === pets.current);
     const title = document.createElement('div');
     title.textContent = p.title ? `${p.title} (${p.name})` : p.name;
-    if (p.still) li.append(still(p.still));
+    if (p.still) li.append(still(p.still, pets.tint));
     li.append(title);
     if (p.problem) {
       const why = document.createElement('div');
@@ -197,8 +197,49 @@ function renderPets() {
   }));
 }
 
-/** A canvas showing one tile of a pet sheet, its transparency colour keyed out. */
-function still(s) {
+/**
+ * The strip's tinter (player/horns.mjs `tintHorns`), copied: this page is a classic script
+ * and loads nothing else, so it can't import it. test/pets-bundled.test.mjs checks the copy
+ * recolours exactly as the original does. The mid magenta becomes `hex`, the dark and
+ * light tones darker and lighter; nothing outside the mask's hue window changes.
+ */
+function tintMask(data, hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex ?? '');
+  if (!m) return 0;
+  const t = m.slice(1).map((x) => Number.parseInt(x, 16));
+  let n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const [r, g, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]];
+    if (a < 128 || (r > 240 && g < 16 && b > 240)) continue;
+    const max = Math.max(r, g, b);
+    const c = max - Math.min(r, g, b);
+    let h = 0;
+    if (c) {
+      if (max === r) h = ((g - b) / c) % 6;
+      else if (max === g) h = (b - r) / c + 2;
+      else h = (r - g) / c + 4;
+      h *= 60;
+      if (h < 0) h += 360;
+    }
+    const s = max ? c / max : 0;
+    if (!(s >= 0.35 && h >= 285 && h <= 315)) continue;
+    const white = 1 - s;
+    const shade = Math.min(1, max / 255 / (0xb3 / 255));
+    for (let k = 0; k < 3; k++) {
+      const shaded = t[k] * shade;
+      data[i + k] = Math.round(shaded + (255 - shaded) * white);
+    }
+    n++;
+  }
+  return n;
+}
+
+/**
+ * A canvas showing one tile of a pet sheet, its transparency colour keyed out, and its
+ * helmet (the mask) tinted with `tint`, the first palette colour, so no one sees the
+ * mask's magenta (plan D8).
+ */
+function still(s, tint) {
   const c = document.createElement('canvas');
   const img = new Image();
   img.addEventListener('load', () => {
@@ -208,13 +249,14 @@ function still(s) {
     c.height = h;
     const g = c.getContext('2d');
     g.drawImage(img, (s.frame % s.tilesx) * w, Math.floor(s.frame / s.tilesx) * h, w, h, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h);
     if (/^magenta$/i.test(s.transparency)) {
-      const d = g.getImageData(0, 0, w, h);
       for (let i = 0; i < d.data.length; i += 4) {
         if (d.data[i] === 255 && d.data[i + 1] === 0 && d.data[i + 2] === 255) d.data[i + 3] = 0;
       }
-      g.putImageData(d, 0, 0);
     }
+    if (tint) tintMask(d.data, tint);
+    g.putImageData(d, 0, 0);
   });
   img.src = `data:image/png;base64,${s.png}`;
   return c;

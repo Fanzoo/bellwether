@@ -451,22 +451,26 @@ impl Onboarding {
 
     // ------------------------------------------------------------ pets
 
-    /// Every pet the strip could draw: bundled ones (pinned by the compiled-in lock), then
-    /// imported ones (pinned in pets.user.lock.json), each with a still to show.
+    /// Every pet the strip could draw: Bellwether's own (bundled, pinned by the compiled-in
+    /// lock) first, in their fixed order (plan D8), then imported ones (pinned in
+    /// pets.user.lock.json), or a repository's fetched ones; each with a still to show.
+    /// `tint` is the first palette colour: the window tints each still's helmet with it, so
+    /// no one sees the mask's magenta.
     pub fn pets(&self, config: &Value) -> Value {
         let mut list = Vec::new();
+        // The app's Resources, or a repository's checkout: both keep bundled pets in pets/.
+        if let Some(res) = &self.ctx.resources {
+            for name in bellwether_brain::pets::BUNDLED {
+                let bytes = std::fs::read(res.join("pets").join(name).join("animations.xml")).ok();
+                if let Some(b) = bytes.filter(|b| crate::verify_pet(name, b).is_ok()) {
+                    list.push(pet_entry(name, "bundled", &b));
+                }
+            }
+        }
         match self.ctx.layout {
             Layout::App => {
-                if let Some(res) = &self.ctx.resources {
-                    for name in dir_names(&res.join("pets")) {
-                        let bytes = std::fs::read(res.join("pets").join(&name).join("animations.xml")).ok();
-                        if let Some(b) = bytes.filter(|b| crate::verify_pet(&name, b).is_ok()) {
-                            list.push(pet_entry(&name, "bundled", &b));
-                        }
-                    }
-                }
                 for name in bellwether_brain::pets::imported_names(&self.ctx.home) {
-                    if list.iter().any(|p: &Value| p["name"] == name.as_str()) {
+                    if bellwether_brain::pets::reserved(&name) || list.iter().any(|p: &Value| p["name"] == name.as_str()) {
                         continue;
                     }
                     match bellwether_brain::pets::load(&self.ctx.home, &name) {
@@ -477,6 +481,9 @@ impl Onboarding {
             }
             Layout::Repository => {
                 for name in dir_names(&self.ctx.home.join("pets")) {
+                    if bellwether_brain::pets::reserved(&name) {
+                        continue;
+                    }
                     let bytes = std::fs::read(self.ctx.home.join("pets").join(&name).join("animations.xml")).ok();
                     if let Some(b) = bytes.filter(|b| crate::verify_pet(&name, b).is_ok()) {
                         list.push(pet_entry(&name, "fetched", &b));
@@ -484,9 +491,9 @@ impl Onboarding {
                 }
             }
         }
-        let fallback = if self.ctx.layout == Layout::App { "bellwether" } else { "esheep64" };
-        let current = config.pointer("/pets/default").and_then(Value::as_str).unwrap_or(fallback).to_string();
-        json!({ "current": current, "list": list, "editable": self.config_editable().is_ok() })
+        let current = config.pointer("/pets/default").and_then(Value::as_str).unwrap_or(bellwether_brain::pets::DEFAULT_PET).to_string();
+        let tint = crate::sheep_palette(config.pointer("/pets/palette")).get(0).cloned().unwrap_or(Value::Null);
+        json!({ "current": current, "list": list, "editable": self.config_editable().is_ok(), "tint": tint })
     }
 
     /// config.json can be changed here: the app's own file, not BELLWETHER_CONFIG's (read
@@ -1287,6 +1294,34 @@ mod tests {
     }
 
     const TINY_PET: &str = "<animations><header><title>tiny</title></header><image><tilesx>2</tilesx><tilesy>1</tilesy><png>iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==</png><transparency>Magenta</transparency></image><spawns><spawn id=\"1\"><x>0</x><y>0</y><next probability=\"100\">1</next></spawn></spawns><animations><animation id=\"1\"><name>walk</name><start><x>0</x><y>0</y><interval>200</interval></start><end><x>0</x><y>0</y><interval>200</interval></end><sequence repeat=\"0\" repeatfrom=\"0\"><frame>1</frame><frame>0</frame></sequence></animation></animations></animations>";
+
+    /// Plan D8, milestone M10a: Bellwether's own pets first, in their fixed order, then the
+    /// imported ones; the still's tint is the first palette colour; a bundled pet can be chosen.
+    #[test]
+    fn bundled_pets_are_listed_first_with_the_tint_and_can_be_chosen() {
+        let base = temp("bundled");
+        let mut c = ctx(&base, Some(T));
+        c.resources = Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap());
+        let ob = Onboarding::new(c);
+        let f = base.join("tiny.xml");
+        std::fs::write(&f, TINY_PET).unwrap();
+        ob.pet_import_file(&f).unwrap();
+        let pets = ob.pets(&Value::Null);
+        let names: Vec<&str> = pets["list"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["bellwether", "tiny"], "bundled first (brah joins after bellwether in M10b)");
+        assert_eq!(pets["list"][0]["kind"], "bundled");
+        assert_eq!(pets["list"][0]["title"], "Bellwether sheep");
+        assert_eq!(pets["list"][0]["still"]["frame"], 0, "the first frame of walk");
+        assert_eq!(pets["tint"], "#FF8C00", "the first default palette colour");
+        assert_eq!(ob.pets(&json!({ "pets": { "palette": ["#123456"] } }))["tint"], "#123456");
+        assert_eq!(pets["current"], "bellwether");
+        let merged = ob.pet_select("tiny", &Value::Null).unwrap();
+        assert_eq!(merged.pointer("/pets/default").and_then(Value::as_str), Some("tiny"));
+        let merged = ob.pet_select("bellwether", &merged).unwrap();
+        assert_eq!(merged.pointer("/pets/default").and_then(Value::as_str), Some("bellwether"));
+        assert!(merged.pointer("/pets/animationMap/bellwether").is_none(), "a bundled pet brings its own map");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn an_imported_pet_is_listed_with_its_still_and_selecting_it_edits_only_pets() {

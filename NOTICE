@@ -13,8 +13,20 @@ desktopPet (Adrianotiger/desktopPet), MIT licence
   attribution, as the project's README asks ("Please retain attribution ... in any
   redistributed version"). No desktopPet code is copied into bellwether.
 
-Pet art (the sprite sheets inside each animations.xml): NOT included
-  The art is NOT committed to this repository and NOT bundled into any build.
+Bellwether's own pet (pets/), CC0-1.0
+  Bundled pets (the sheep "bellwether"), CC0-1.0.
+  The art in pets/ was made by an AI coding agent under the direction of the project's
+  maintainer, from a written specification (pets/SPEC.md). It was drawn as text pixel
+  sources (pets/*/src/) and built by scripts/build-pet.mjs. No third-party art was
+  used: nothing was traced, copied or adapted from any image, the mood references the
+  maintainer looked at were not given to the agent and are not in this repository, and
+  neither the eSheep art nor Untitled Goose Game's goose was used. Machine-made art may
+  not be protected by copyright; to the extent anyone holds rights in it, they are
+  dedicated to the public domain under CC0 1.0 Universal (pets/LICENSE).
+  scripts/build-pet.mjs and the tests are code, under the MIT licence.
+
+eSheep pet art (the sprite sheets inside desktopPet's animations.xml files): NOT included
+  The eSheep art is NOT committed to this repository and NOT bundled into any build.
   `bellwether pets fetch` downloads it on each user's machine into data/pets/
   (gitignored) from desktopPet at the pinned commit
   1ba33bebed993439f03e502b37e9bd2daf061773, checked against the sha256 in
@@ -23,7 +35,7 @@ Pet art (the sprite sheets inside each animations.xml): NOT included
   obviously the art. The default pet, esheep64, credits "sprites from LiL_Stenly"; the
   original eSheep is by Tatsutoshi Nomura for Fuji Television. Because of that, this
   project does not redistribute the art: each user fetches it from its upstream source
-  for their own use. Clearly licensed replacement art is planned.
+  for their own use. Bellwether's own sheep (above) replaces it as the default.
 
 web-esheep (Adrianotiger/web-esheep), GPL-3.0: NOT vendored
   https://github.com/Adrianotiger/web-esheep

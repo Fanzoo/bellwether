@@ -1,0 +1,11 @@
+# trip 4 of 5: pushing back up, legs folded.
+part leg_far_short 15 37
+part leg_far_short 28 37
+part leg_short 12 37
+part leg_short 25 37
+part body 11 21
+part head 3 14
+grid 8 23
+ff
+ee
+end

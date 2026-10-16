@@ -1,0 +1,7 @@
+# lie 2 of 3: lying down, a blink.
+part body 11 22
+part head 3 15
+grid 8 24
+ff
+ee
+end

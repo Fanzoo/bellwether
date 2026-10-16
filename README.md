@@ -10,18 +10,21 @@ jump to that terminal.
   moves an existing pasture install over (see "Coming from pasture").
 - **Early, macOS-first:** it runs on macOS today. Windows and Linux (Hyprland) are
   planned, not built.
-- **Credits:** the pets come from [desktopPet](https://github.com/Adrianotiger/desktopPet)
-  by Adriano (MIT), and its eSheep, the inspiration and the pet format bellwether plays
-  (`animations.xml`). See NOTICE.
-- **No art in the repo:** bellwether downloads the sheep art on your machine (`./bellwether
-  pets fetch`, pinned and sha256-checked). The art's own licence is unclear, so it is
-  never committed or bundled.
+- **Credits:** bellwether plays the pet format (`animations.xml`) of
+  [desktopPet](https://github.com/Adrianotiger/desktopPet) by Adriano (MIT), and its
+  eSheep is the inspiration. See NOTICE.
+- **The sheep:** Bellwether's own sheep, in a flight helmet that takes each session's
+  colour, is in this repository (`pets/`) and bundled with the app, under CC0-1.0
+  (`pets/LICENSE`). It is the default pet; nothing needs downloading.
+- **eSheep art is not included:** its licence is unclear, so it is never committed or
+  bundled. You can still fetch it on your own machine (`./bellwether pets fetch`, pinned
+  and sha256-checked) or import a desktopPet file you have (`bellwether pets import`).
 
 It has two parts:
 
 - the *brain*, a zero-dependency Node CLI: hook listener, state model, `/state`,
-  `status`, `replay`, the hook installer and `doctor`, plus `pets fetch` and the
-  brain's login autostart;
+  `status`, `replay`, the hook installer and `doctor`, plus the optional `pets fetch`
+  (the eSheep pet) and the brain's login autostart;
 - the *shell* (`shell/`, Tauri 2): a transparent, click-through strip above the Dock
   with one coloured sheep per session, a bubble on the one that needs you, lambs for
   its subagents, and a menu-bar icon.
@@ -62,9 +65,11 @@ the repository root.
    without a newline, keeps the file's permissions, and never prints the token.
 2. **Check:** `./bellwether doctor`. The token line passes. The brain line
    fails (nothing is running yet), and that's expected.
-3. **The sheep art:** `./bellwether pets fetch`. It downloads the pinned
-   file and checks its sha256; run again, it says `esheep64: already present and
-   verified`.
+3. **The sheep:** nothing to do. Bellwether's own sheep is in `pets/bellwether/`, and
+   the strip draws it when config.json has no `pets.default` (config.example.json names
+   it). Optional, for the eSheep instead: `./bellwether pets fetch` downloads the pinned
+   file into `data/pets/` and checks its sha256 (run again, it says `esheep64: already
+   present and verified`); then set `"pets": { "default": "esheep64" }` in config.json.
 4. **Build the strip, and try it:** `./bellwether shell --dev --release`. It
    compiles into `shell/src-tauri/target-dev/` (a few minutes the first time), then an
    empty strip opens above the Dock with a sheep in the menu bar. **Quit it** (menu-bar
@@ -195,7 +200,7 @@ Needs Rust (`rustc --version`, 1.99 or newer) and Xcode's command-line tools. `b
 finds cargo on PATH, in `~/.cargo/bin` or in `$CARGO_HOME/bin`; `doctor` shows which. Then:
 
 ```
-./bellwether pets fetch              # the sheep art, pinned and sha256-checked, into data/pets/
+./bellwether pets fetch              # optional: the eSheep pet, pinned and sha256-checked, into data/pets/
 ./bellwether shell --dev --release   # builds into target-dev/ (about a minute the first time), then runs
 ./bellwether shell build --release   # builds the strip the login item runs, into target/release/
 ```
@@ -239,9 +244,11 @@ Screen Recording is never needed.
   `data/`; Node isn't involved. The login autostart runs the shell with
   `--no-spawn-brain`, so it never starts one: its brain is the Node brain's LaunchAgent.
 - Quit it with Ctrl-C in its terminal, or from its menu-bar icon.
-- It loads only pinned pets whose file matches the sha256 in `pets.lock.json` (the
-  same pins `pets fetch` uses). A changed or unknown pet file is refused with a line
-  in `data/shell.log`; run `bellwether pets fetch` again.
+- It loads only pinned pets whose file matches the sha256 in `pets.lock.json`:
+  Bellwether's own from `pets/` (pinned under `bundled`), a fetched one from
+  `data/pets/` (the pins `pets fetch` uses). A changed or unknown pet file is refused
+  with a line in `data/shell.log`: rebuild the sheep (`node scripts/build-pet.mjs build
+  bellwether`) or run `bellwether pets fetch` again.
 - Its log is `data/shell.log`: one timestamped line per snapshot, sheep and click,
   never any bubble text.
 
@@ -802,11 +809,28 @@ choose to. launchd is asked only when HOME is your real home folder.
   deletes `~/Library/Application Support/Bellwether`, your `config.json` and hook token
   included (back up `config.json` first if you want it).
 
+### Bellwether's own pets
+
+The app has its own sheep, `bellwether`, in a flight helmet that takes the session
+colour (an aviator goose, `brah`, comes later). Its art is committed under CC0-1.0 in
+`pets/`, as text sources that `scripts/build-pet.mjs` builds into
+`pets/bellwether/animations.xml`; `pets/SPEC.md` describes the source form and the
+design. With no `pets.default` in config.json, the strip draws it, from the checkout
+(a repository build) or from the app's Resources, only while it matches its pin in
+`pets.lock.json`. The names `bellwether` and `brah` can't be used by `pets import`.
+
+```
+node scripts/build-pet.mjs build bellwether        # after editing pets/bellwether/src or pet.json
+node scripts/build-pet.mjs --check                 # npm test and CI run this too
+node scripts/build-pet.mjs review bellwether --out /tmp/review   # the review sheets
+```
+
 ## Licensing
 
 MIT (`LICENSE`), for this repository's code. `NOTICE` covers:
 - the pet format (desktopPet, MIT, credited);
-- the pet art, which is fetched by `pets fetch` and never committed or bundled,
+- Bellwether's own pets in `pets/`, CC0-1.0 (`pets/LICENSE`), committed and bundled;
+- the eSheep pet art, which is fetched by `pets fetch` and never committed or bundled,
   because its licence is unclear;
 - web-esheep, GPL-3.0, not vendored (a reference only);
 - the Linux library for later.
@@ -832,7 +856,7 @@ with `node scripts/third-party.mjs` after changing a dependency (offline;
 | `bellwether mute` / `bellwether unmute` | Do-not-disturb through the brain, the same as the tray's Quiet (alerts only); kept across restarts |
 | `bellwether show` / `bellwether hide` | Show or hide the strip, the same as the tray's Hide everything (for screen sharing); a running shell follows within a second; kept across restarts |
 | `bellwether autostart install\|uninstall [--write] [--brain-only]`, `autostart status` | The brain's and the strip's LaunchAgents (macOS). Preview by default. In Bellwether.app: its two login items (SMAppService), plus `autostart settings` |
-| `bellwether pets fetch [<pet>]` | Downloads the pinned pet art into `data/pets/` and checks its sha256. The art is never committed |
+| `bellwether pets fetch [<pet>]` | Optional: downloads the pinned eSheep pet into `data/pets/` and checks its sha256. That art is never committed |
 | `bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]` | Moves a pasture install over (token, config, colours and slots, hook entries, LaunchAgents). Preview unless `--write`; see "Coming from pasture" |
 | `bellwether hooks print [--out <file> [--force]]` | The hook block as a standalone settings file, to stdout or (0600) to a file. Replaces only an earlier bellwether hooks file unless `--force`; never a Claude Code settings file |
 | `bellwether hooks install [--write] [--settings <path>]` | Dry-run diff by default. Idempotent: a second run says "already installed, no changes" |

@@ -1,0 +1,11 @@
+# hop 3 of 5: the top of the hop, legs tucked, eyes shut with glee.
+part leg_far_tuck 16 26
+part leg_far_tuck 28 26
+part leg_tuck 13 26
+part leg_tuck 25 26
+part body 11 9
+part head 3 1
+grid 8 10
+ee
+ff
+end

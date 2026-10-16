@@ -21,7 +21,7 @@
           "slotWidthPx": 110
         },
         "pets": {
-          "default": "esheep64",
+          "default": "bellwether",
           "lambScale": 0.6,
           "tint": "horns",
           "scale": 1.5,
@@ -449,7 +449,7 @@
           "slotWidthPx": 110
         },
         "pets": {
-          "default": "esheep64",
+          "default": "bellwether",
           "lambScale": 0.6,
           "tint": "horns",
           "scale": 1.5,
@@ -558,7 +558,7 @@
             "#12A84A",
             "#FF4FB0"
           ],
-          "default": "esheep64",
+          "default": "bellwether",
           "lambScale": 0.6,
           "tint": "horns",
           "scale": 1.5,
@@ -675,7 +675,7 @@
           "slotWidthPx": 110
         },
         "pets": {
-          "default": "esheep64",
+          "default": "bellwether",
           "lambScale": 0.6,
           "tint": "horns",
           "scale": 1.5,
@@ -785,7 +785,7 @@
             "#12A84A",
             "#FF4FB0"
           ],
-          "default": "esheep64",
+          "default": "bellwether",
           "lambScale": 0.6,
           "tint": "horns",
           "scale": 1.5,

@@ -1,0 +1,12 @@
+# trip 1 of 5: a front hoof catches; pitching forward, eyes wide.
+part leg_far 15 33
+part leg_far 28 33
+part leg_lift 11 33
+part leg_back 25 33
+part body 11 19
+part head 2 13
+grid 6 21
+eee
+eoe
+eee
+end

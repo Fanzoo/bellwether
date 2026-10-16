@@ -1,0 +1,11 @@
+# hop 2 of 5: springing up and forward, hind legs pushing, front legs reaching.
+part leg_far_fwd 13 27
+part leg_far_back 28 27
+part leg_fwd 10 27
+part leg_back 25 27
+part body 11 13
+part head 3 5
+grid 8 14
+ee
+ff
+end

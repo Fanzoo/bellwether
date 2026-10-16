@@ -11,6 +11,7 @@ import { tintHorns, tintWhole } from './player/horns.mjs';
 import { fadeStep, frontmost, tuftPixels, tuftX } from './player/grass.mjs';
 import { familyHomes, homeX } from './player/layout.mjs';
 import { assertSafePetXml, parsePetDocument, resolveAnimationMap } from './player/pet.mjs';
+import { cleanOverlays, overlayPlacements } from './player/overlay.mjs';
 import { Sprite, behaviourOf } from './player/sprite.mjs';
 import { tileOf } from './player/stepper.mjs';
 
@@ -76,7 +77,9 @@ async function loadPet(onMissing = warn) {
   const base = keyed(image, model.transparency);
   // Every colour is a tint, the first included (Milestone 10: no untinted sheep).
   const sheets = display.palette.map((hex) => tinted(base, hex, display.tint));
-  pet = { model, map, sheets, tileW, tileH, ...grassFor(model, map, base, tileW, tileH) };
+  // A bundled pet's never-mirrored overlays (the sleeping "z"); an imported pet has none.
+  const overlays = cleanOverlays(p.overlays, model.tilesx * model.tilesy);
+  pet = { model, map, sheets, tileW, tileH, overlays, ...grassFor(model, map, base, tileW, tileH) };
   log(`pet ${p.folder} loaded: ${Object.keys(model.animations).length} animations, ${tileW}x${tileH} tiles, behaviours ${Object.keys(map).join(' ')}`);
 }
 
@@ -447,6 +450,14 @@ function drawSprite({ key, sprite, actor, colourIndex }, now) {
     ctx.drawImage(sheet, col * pet.tileW, row * pet.tileH, pet.tileW, pet.tileH, d.x, d.y, w, h);
   }
   ctx.restore();
+  // Overlays after the restore: placed for the facing, but never mirrored.
+  for (const o of overlayPlacements(pet.overlays, d.frame, { x: d.x, y: d.y, width: w, tileW: pet.tileW, flip: d.flip })) {
+    const t = tileOf(pet.model, o.tile);
+    ctx.save();
+    ctx.globalAlpha = d.opacity;
+    ctx.drawImage(sheet, t.col * pet.tileW, t.row * pet.tileH, o.sw, o.sh, o.dx, o.dy, o.dw, o.dh);
+    ctx.restore();
+  }
 }
 
 /** "+N": lambs beyond behaviour.maxLambsShown, in the next free place beside the parent. */

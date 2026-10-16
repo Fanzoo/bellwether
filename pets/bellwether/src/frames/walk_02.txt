@@ -1,0 +1,7 @@
+# walk 2 of 4 (passing): the near back and far front legs swing through, hooves up; the sheep a pixel higher.
+part leg_far_lift 14 33
+part leg_far 28 33
+part leg 12 33
+part leg_lift 24 33
+part body 11 18
+part head 3 10

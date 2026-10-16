@@ -1,0 +1,7 @@
+# sleep 3 of 4: the head down, the eye closed.
+part body 11 22
+part head 3 19
+grid 8 28
+ff
+ee
+end

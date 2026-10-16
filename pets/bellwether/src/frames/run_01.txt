@@ -1,0 +1,7 @@
+# run 1 of 4: stretched out, front legs reaching forward, hind legs pushing back; head low and forward.
+part leg_far_fwd 12 33
+part leg_far_back 29 33
+part leg_fwd 9 33
+part leg_back 26 33
+part body 11 19
+part head 2 12

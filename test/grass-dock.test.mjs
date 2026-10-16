@@ -48,7 +48,7 @@ describe('grass while eating', () => {
     assert.equal(s.alpha, 0);
   });
   test('the webview: tufts made once at load, stepped per sprite, drawn after the sprites, never while muted or hidden', () => {
-    assert.match(main, /pet = \{ model, map, sheets, tileW, tileH, \.\.\.grassFor\(model, map, base, tileW, tileH\) \}/);
+    assert.match(main, /pet = \{ model, map, sheets, tileW, tileH, (overlays, )?\.\.\.grassFor\(model, map, base, tileW, tileH\) \}/); // overlays: deviation 125
     assert.equal([...main.matchAll(/tuftPixels\(/g)].length, 1, 'one place makes tufts (at load)');
     assert.match(main, /if \(stepGrass\(entry, now\)\) dirty = true;/);
     assert.match(main, /drawSprite\(e, now\);\s*\/\/ The grass[^\n]*\n\s*for \(const e of all\) drawGrass\(e\);/);

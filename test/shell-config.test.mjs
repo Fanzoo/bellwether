@@ -59,8 +59,10 @@ test('the shell has no Tauri plugin that reaches files, processes or the network
   assert.match(cargo, /^tauri = \{ version = "=2\.12\.1"/m);
 });
 
+// The fetched eSheep art. Bellwether's own pets (pets/, CC0) are bundled into a built app
+// (plan D8), which lands in target-dev/ like any other build output.
 test('the pet art is never part of the shell or the repository', () => {
-  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.name === 'target' || e.name === 'gen' || e.name === 'node_modules' ? [] : e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.name === 'target' || e.name === 'target-dev' || e.name === 'gen' || e.name === 'node_modules' ? [] : e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
   for (const f of walk(path.join(AGENT_DIR, 'shell'))) {
     assert.doesNotMatch(path.basename(f), /^animations\.xml$/i, f);
     if (/\.(js|mjs|html|css|json|rs)$/.test(f)) assert.doesNotMatch(fs.readFileSync(f, 'utf8'), /iVBORw0KGgo[A-Za-z0-9+/]{200}/, `${f} embeds image data`);

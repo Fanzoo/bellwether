@@ -1,0 +1,7 @@
+# alert 2: springing straight up, legs dangling.
+part leg_far 12 28
+part leg_far 26 28
+part leg 15 28
+part leg 23 28
+part body_front 9 15
+part head_front 11 3

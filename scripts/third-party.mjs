@@ -137,7 +137,8 @@ function render() {
   return lines.join('\n');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// realpaths: run through a symlinked path (macOS /tmp and /var are links), this is still the main module.
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   if (!registryAvailable()) {
     // A fresh clone before its first `cargo build` has no registry to read from.
     process.stdout.write('skipped: no cargo registry (or Cargo.lock) on this machine to read licences from; build the shell once, then run this again\n');

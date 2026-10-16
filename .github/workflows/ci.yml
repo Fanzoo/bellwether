@@ -57,6 +57,8 @@ jobs:
         run: npm test
       - name: The shared vectors match what the Node brain answers
         run: npm run test:vectors
+      - name: Bellwether's own pets match their sources (plan D8)
+        run: node scripts/build-pet.mjs --check
 
   cargo:
     name: Rust tests (npm run test:cargo)

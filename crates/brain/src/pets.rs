@@ -20,9 +20,74 @@ use crate::{exit, BrainError};
 
 pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 
+/// Bellwether's own pets (plan D8), in the order the setup window lists them. Their names
+/// are reserved: `pets import` refuses them, so an imported file is never shadowed by a
+/// bundled pet or mistaken for one.
+pub const BUNDLED: [&str; 2] = ["bellwether", "brah"];
+
+/// The pet the strip draws when config.json has no `pets.default`.
+pub const DEFAULT_PET: &str = "bellwether";
+
+/// Whether `name` is, or reads as, a bundled pet's name: compared without case (APFS folds
+/// case, so `Brah` and `brah` are one folder) and without trailing dots or spaces
+/// (`bellwether.` reads as the sheep; M10a review D4).
+pub fn reserved(name: &str) -> bool {
+    let core = name.trim_end_matches(['.', ' ']);
+    BUNDLED.iter().any(|b| b.eq_ignore_ascii_case(core))
+}
+
+/// The pets.lock.json compiled into this binary: the same pins the strip checks.
+pub const LOCK: &str = include_str!("../../../pets.lock.json");
+
+/// A bundled pet's pinned sha256, by its exact name; None when this version doesn't
+/// bundle it (`brah` before M10b) or the name isn't exact.
+pub fn bundled_sha(name: &str) -> Option<String> {
+    if !BUNDLED.contains(&name) {
+        return None;
+    }
+    let lock = json::parse(LOCK).ok()?;
+    lock.get("bundled").get(name).get("sha256").as_str().map(str::to_string)
+}
+
+/// Where this binary's bundled pet file is: the app's `Contents/Resources/pets/<name>/`,
+/// or, for a build that isn't in an app bundle (a repository's dev build), the checkout's
+/// `pets/<name>/`, as the strip finds them.
+pub fn bundled_file(name: &str) -> PathBuf {
+    let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
+    let contents = exe.as_ref().and_then(|e| e.parent()).filter(|d| d.file_name().is_some_and(|n| n == "MacOS")).and_then(Path::parent).filter(|c| c.file_name().is_some_and(|n| n == "Contents"));
+    match contents {
+        Some(c) => c.join("Resources").join("pets").join(name).join("animations.xml"),
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("pets").join(name).join("animations.xml"),
+    }
+}
+
+/// What doctor says about `pets.default` when it names (or nearly names) a bundled pet,
+/// by the strip's own rules: the exact name, pinned in this version, its file matching
+/// the pin. None for any other name. The Node doctor says the same (brain/pets.mjs).
+pub fn bundled_check(name: &str) -> Option<(bool, String)> {
+    if !reserved(name) {
+        return None;
+    }
+    let canon = BUNDLED.iter().find(|b| b.eq_ignore_ascii_case(name.trim_end_matches(['.', ' ']))).copied().unwrap_or("bellwether");
+    if name != canon {
+        return Some((false, format!("pets.default is {name:?}, which the strip won't load: pet names are exact. Did you mean \"{canon}\"?")));
+    }
+    let Some(want) = bundled_sha(name) else {
+        return Some((false, format!("{name} is reserved for one of Bellwether's own pets, which isn't bundled in this version, so the strip draws nothing. Set pets.default to \"bellwether\" (or remove it) in config.json")));
+    };
+    let file = bundled_file(name);
+    Some(match std::fs::read(&file) {
+        Err(_) => (false, format!("{name}, one of Bellwether's own pets, is missing its file ({}): reinstall Bellwether", file.display())),
+        Ok(bytes) if sha256_hex(&bytes) != want => (false, format!("{name}, one of Bellwether's own pets: {} doesn't match its pinned sha256, so the strip refuses it: reinstall Bellwether", file.display())),
+        Ok(_) => (true, format!("{name}, Bellwether's own pet, bundled; sha256 matches its pin")),
+    })
+}
+
 /// bellwether's behaviours, and the animation names that stand for each, best first
-/// (the first are the behaviour's own name; then esheep64's names for it).
-pub const BEHAVIOURS: [(&str, &[&str]); 14] = [
+/// (the first are the behaviour's own name; then esheep64's names for it). The last two,
+/// `carried` and `land`, are for the planned drag along the strip; nothing plays them yet,
+/// and a pet without them falls back to walk (the player's `idsFor`).
+pub const BEHAVIOURS: [(&str, &[&str]); 16] = [
     ("walk", &["walk"]),
     ("run", &["run"]),
     ("graze", &["graze", "eat"]),
@@ -37,6 +102,8 @@ pub const BEHAVIOURS: [(&str, &[&str]); 14] = [
     ("leave", &["leave", "run"]),
     ("hop", &["hop", "jump"]),
     ("lie", &["lie", "sleep3a"]),
+    ("carried", &["carried"]),
+    ("land", &["land"]),
 ];
 
 pub fn lock_file(home: &Path) -> PathBuf {
@@ -488,6 +555,9 @@ pub fn import(home: &Path, source: &Path, name: Option<&str>, force: bool) -> Re
     if !valid_name(&name) {
         return Err(bad(format!("{name:?} can't be a pet's name: use 1 to 40 of [A-Za-z0-9_.-], not starting with a dot (--name <name>)")));
     }
+    if reserved(&name) {
+        return Err(bad(format!("{name:?} is the name of one of Bellwether's own pets ({}), so an imported pet can't use it: it would be shadowed by the bundled one, or mistaken for it. Import it under another name with --name <name>. Nothing was imported.", BUNDLED.join(", "))));
+    }
     let bytes = std::fs::read(source).map_err(|e| bad(format!("{}: {}", source.display(), bellwether_core::config::io_code(&e))))?;
     let pet = check(&bytes).map_err(|why| bad(format!("{} was refused: {why}. Nothing was imported.", source.display())))?;
     let target = pet_file(home, &name);
@@ -589,6 +659,49 @@ mod tests {
         for n in ["", ".hidden", "a/b", "..", &"x".repeat(41)] {
             assert!(!valid_name(n), "{n}");
         }
+    }
+
+    #[test]
+    fn the_bundled_names_are_refused_and_nothing_is_written() {
+        let home = std::env::temp_dir().join(format!("bw-pets-reserved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let src = home.join("src.xml");
+        std::fs::write(&src, pet("", "<tilesx>8</tilesx><tilesy>4</tilesy>")).unwrap();
+        for name in ["bellwether", "brah", "Brah", "BELLWETHER", "bellwether.", "brah.."] {
+            let e = import(&home, &src, Some(name), true).err().unwrap_or_else(|| panic!("{name} was imported"));
+            assert!(e.message.contains("one of Bellwether's own pets") && e.message.contains("Nothing was imported"), "{}", e.message);
+        }
+        // A trailing space is refused too (a space is never part of a pet's name).
+        for name in ["bellwether ", "Brah. "] {
+            assert!(import(&home, &src, Some(name), true).is_err(), "{name:?} was imported");
+            assert!(reserved(name), "{name:?} reads as a bundled name");
+        }
+        // A file in a folder named after one (…/brah/animations.xml) is refused too.
+        let dir = home.join("brah");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(&src, dir.join("animations.xml")).unwrap();
+        assert!(import(&home, &dir.join("animations.xml"), None, false).is_err());
+        assert!(!home.join("pets").exists() && !lock_file(&home).exists(), "nothing was written");
+        assert!(import(&home, &src, Some("brahma"), false).is_ok(), "only the bundled names are reserved");
+        assert!(import(&home, &src, Some("bellwether.x"), false).is_ok());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn doctor_checks_a_bundled_name_as_the_strip_loads_it() {
+        let (ok, why) = bundled_check("bellwether").unwrap();
+        assert!(ok, "{why}");
+        assert!(why.contains("sha256 matches its pin"));
+        let (ok, why) = bundled_check("brah").unwrap();
+        assert!(!ok && why.contains("isn't bundled in this version"), "{why}");
+        for name in ["BELLWETHER", "Bellwether", "bellwether.", "BRAH"] {
+            let (ok, why) = bundled_check(name).unwrap();
+            assert!(!ok && why.contains("pet names are exact") && why.contains("Did you mean"), "{name}: {why}");
+        }
+        assert_eq!(bundled_check("esheep64"), None);
+        assert_eq!(bundled_sha("BELLWETHER"), None, "pins are by exact name");
+        assert!(bundled_sha("bellwether").is_some());
     }
 
     #[test]

@@ -1,0 +1,85 @@
+{
+  "comment": "Every colour the sheep uses (pets/SPEC.md). '.' is transparent. The helmet is drawn only in the three mask tones, which the strip recolours to the session colour.",
+  "colours": [
+    {
+      "char": "1",
+      "hex": "#730073",
+      "role": "mask-dark"
+    },
+    {
+      "char": "2",
+      "hex": "#b300b3",
+      "role": "mask-mid"
+    },
+    {
+      "char": "3",
+      "hex": "#ff7aff",
+      "role": "mask-light"
+    },
+    {
+      "char": "o",
+      "hex": "#2a2522",
+      "role": "outline"
+    },
+    {
+      "char": "f",
+      "hex": "#3a3236",
+      "role": "face"
+    },
+    {
+      "char": "F",
+      "hex": "#5a4a44",
+      "role": "face-light"
+    },
+    {
+      "char": "e",
+      "hex": "#ffffff",
+      "role": "eye"
+    },
+    {
+      "char": "p",
+      "hex": "#e7a0a0",
+      "role": "cheek"
+    },
+    {
+      "char": "W",
+      "hex": "#fffdf5",
+      "role": "wool-light"
+    },
+    {
+      "char": "w",
+      "hex": "#f3ead6",
+      "role": "wool"
+    },
+    {
+      "char": "s",
+      "hex": "#dcd0b8",
+      "role": "wool-shade"
+    },
+    {
+      "char": "S",
+      "hex": "#bfb29a",
+      "role": "wool-deep"
+    },
+    {
+      "char": "g",
+      "hex": "#8e9096",
+      "role": "goggle-frame"
+    },
+    {
+      "char": "l",
+      "hex": "#cfe3ee",
+      "role": "goggle-lens"
+    },
+    {
+      "char": "t",
+      "hex": "#4a3b33",
+      "role": "strap"
+    },
+    {
+      "char": "y",
+      "hex": "#ffd75e",
+      "role": "star"
+    }
+  ]
+}

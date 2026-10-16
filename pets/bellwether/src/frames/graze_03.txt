@@ -1,0 +1,11 @@
+# graze 3 of 4: head down, nibbling (mouth open).
+part leg_far 15 33
+part leg_far 28 33
+part leg 12 33
+part leg 25 33
+part body 11 19
+part head 1 21
+grid 3 34
+oo
+oo
+end

@@ -1,0 +1,7 @@
+# walk 3 of 4 (contact): the near front and far back legs push back, the others reach forward.
+part leg_far_fwd 13 33
+part leg_far_back 28 33
+part leg_back 12 33
+part leg_fwd 23 33
+part body 11 19
+part head 3 11

@@ -1,0 +1,14 @@
+# dizzy 3 of 4: swaying, eyes crossed out, two stars circling the helmet.
+part leg_far 15 33
+part leg_far 28 33
+part leg 12 33
+part leg 25 33
+part body 11 19
+part head 3 11
+grid 7 19
+efe
+fef
+efe
+end
+part star 15 3
+part star 5 7

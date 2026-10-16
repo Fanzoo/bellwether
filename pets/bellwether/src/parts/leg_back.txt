@@ -1,0 +1,8 @@
+# A near leg pushing back: the foot two pixels behind the hip.
+FF..
+FF..
+FF..
+.FF.
+..FF
+..FF
+..oo

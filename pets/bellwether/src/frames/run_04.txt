@@ -1,0 +1,7 @@
+# run 4 of 4: gathered, hooves lifting, the sheep a pixel up.
+part leg_far_lift 14 33
+part leg_far_lift 27 33
+part leg_lift 11 33
+part leg_lift 24 33
+part body 11 18
+part head 3 10
