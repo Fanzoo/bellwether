@@ -113,6 +113,8 @@ describe('scripts/build-app.mjs', () => {
     assert.ok(!bundleMatches(test, { testPort: null, testHome: null }), 'a leftover test bundle is not a release build');
     assert.ok(bundleMatches(test, { testPort: 47418, testHome: '/tmp/a&b' }));
     const src = read('scripts', 'build-app.mjs');
-    assert.ok(src.indexOf('fs.rmSync(APP, { recursive: true, force: true })') < src.indexOf("spawnSync(TAURI_CLI, ['build'"), 'the old app is deleted before the build');
+    const removed = src.indexOf('fs.rmSync(APP, { recursive: true, force: true })');
+    assert.ok(removed > 0 && removed < src.indexOf('spawnSync(TAURI_CLI, args'), 'the old app is deleted before the build');
+    assert.ok(src.indexOf('const APP = appPath(o);') < removed, 'the app deleted is the one this build makes (milestone 9: universal and debug paths)');
   });
 });

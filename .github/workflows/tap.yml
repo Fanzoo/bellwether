@@ -1,0 +1,80 @@
+# The Homebrew cask (distribution plan D7, milestone 9). When the maintainer publishes a
+# release that release.yml drafted, as a full release (not a pre-release), this renders packaging/homebrew/bellwether.rb with the
+# release's version and its DMG's sha256 and opens a pull request on Fanzoo/homebrew-tap.
+#
+# Secrets: one, TAP_GITHUB_TOKEN, a fine-grained token that can open pull requests on the
+# tap repository only. It lives in the `homebrew-tap` environment (deployment rule: `v*`
+# tags), apart from the signing secrets in `release`. This workflow never runs on
+# pull_request or pull_request_target, and the repository token here can only read.
+# Every action is pinned by full commit SHA.
+name: tap
+
+on:
+  release:
+    # `released`: published as a full release, or a pre-release later made one. A release
+    # published as a pre-release gets no cask (it doesn't reach users; docs/RELEASING.md).
+    types: [released]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tap
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.14.0"
+  TAP: Fanzoo/homebrew-tap
+
+jobs:
+  cask:
+    name: Pull request on the Homebrew tap
+    if: startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease && !github.event.release.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: homebrew-tap
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: The release's DMG matches its SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir published --pattern SHA256SUMS --pattern "Bellwether_${TAG#v}_universal.dmg"
+          cd published && sha256sum -c --ignore-missing SHA256SUMS && test -f "Bellwether_${TAG#v}_universal.dmg"
+      - name: Render the cask
+        run: node scripts/release.mjs cask --version "${TAG#v}" --sums published/SHA256SUMS > bellwether.rb
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          set -eu
+          version="${TAG#v}"
+          branch="bellwether-$version"
+          gh auth setup-git
+          gh repo clone "$TAP" tap -- --depth 1
+          mkdir -p tap/Casks
+          cp bellwether.rb tap/Casks/bellwether.rb
+          cd tap
+          if [ -z "$(git status --porcelain -- Casks/bellwether.rb)" ]; then
+            echo "the tap already has bellwether $version"
+            exit 0
+          fi
+          git config user.name "bellwether release"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add Casks/bellwether.rb
+          git commit -m "bellwether $version"
+          git push origin "$branch"
+          gh pr create --repo "$TAP" --head "$branch" --title "bellwether $version" \
+            --body "Bellwether $version: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG (opened by the tap workflow)."

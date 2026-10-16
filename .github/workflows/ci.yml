@@ -1,8 +1,10 @@
-# Tests, the parity table and the cross-platform check (distribution plan, milestone 2).
+# Tests, the parity table, the cross-platform check (distribution plan, milestone 2) and an
+# unsigned universal app with its release files (milestone 9, plan D7).
 #
-# Needs no secrets: nothing here signs, notarizes or publishes, and the token has read
-# access only. The release workflow (milestone 9) is the only one that will reach the
-# signing environment. Actions are pinned by commit SHA.
+# Needs no secrets: nothing here signs with a Developer ID, notarizes or publishes, no job
+# names an environment, and the token has read access only, so a pull request from a fork
+# runs all of it and reaches nothing of the release's. release.yml (a pushed `v*` tag) is
+# the only workflow that reaches the signing environment. Actions are pinned by commit SHA.
 name: ci
 
 on:
@@ -118,36 +120,61 @@ jobs:
           npm run --silent differential | tee differential.txt
           { echo '## Differential'; echo; echo '```'; cat differential.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-  release-check:
-    name: A release build has no hidden commands
-    runs-on: macos-latest
-    timeout-minutes: 60
+  bundle:
+    name: Unsigned universal app, DMG and updater files; no hidden commands
+    # The same image and toolchain as release.yml's signing job.
+    runs-on: macos-15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Rust toolchain
-        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Rust toolchain (release.yml's), both Mac targets
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
+          rustup default 1.99.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             shell/src-tauri/target-dev
-          key: cargo-release-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
-      - name: cargo build --release (the compile step of `tauri build`; no features, as a release has)
-        run: cargo build --release --manifest-path shell/src-tauri/Cargo.toml
-      - name: "`__fixture` is an unknown command: exit 1"
+          key: cargo-bundle-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+      - name: The Tauri CLI (shell/package-lock.json pins it, with hashes)
+        run: npm ci --prefix shell
+      # `tauri build` compiles with `cargo build --release` and no features, as a release
+      # has; signed ad hoc (no Developer ID here), so it is the unsigned build of plan D7.
+      - name: tauri build, universal, ad hoc
+        run: node scripts/build-app.mjs --universal --adhoc
+      - name: "`__fixture` is an unknown command in the bundled binary: exit 1"
         run: |
           home="$(mktemp -d)"
           echo '{"port": 47999}' > "$home/config.json"
           set +e
-          out="$(BELLWETHER_HOME="$home" shell/src-tauri/target-dev/release/bellwether-shell __fixture 2>&1)"
+          out="$(BELLWETHER_HOME="$home" shell/src-tauri/target-dev/universal-apple-darwin/release/bundle/macos/Bellwether.app/Contents/MacOS/Bellwether __fixture 2>&1)"
           code=$?
           set -e
           printf '%s\n' "$out" | head -3
           test "$code" -eq 1
           printf '%s\n' "$out" | grep -q 'unknown command "__fixture"'
+      # The release files, signed with a key made here and thrown away: proves the DMG, the
+      # updater archive, latest.json and SHA256SUMS on every pull request, with no secret.
+      - name: Release files with a throwaway updater key
+        run: |
+          set -eu
+          umask 077
+          keydir="$(mktemp -d)"
+          pw="$(openssl rand -hex 16)"
+          shell/node_modules/.bin/tauri signer generate --ci -p "$pw" -w "$keydir/throwaway.key" > /dev/null
+          version="$(node -p "require('./package.json').version")"
+          TAURI_SIGNING_PRIVATE_KEY_PATH="$keydir/throwaway.key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$pw" \
+            node scripts/release.mjs assets --app shell/src-tauri/target-dev/universal-apple-darwin/release/bundle/macos/Bellwether.app \
+            --tag "v$version" --out "$RUNNER_TEMP/release" --adhoc-dmg
+          rm -rf "$keydir"
+          node -e "const j=require(process.argv[1]); if (Object.keys(j.platforms).sort().join() !== 'darwin-aarch64,darwin-x86_64') process.exit(1)" "$RUNNER_TEMP/release/latest.json"
 
   cross-check:
     name: cargo check, ${{ matrix.target }}

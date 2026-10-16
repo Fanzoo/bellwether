@@ -564,8 +564,9 @@ The token is never shown, and nothing changes without `--write`.
 The distribution plan in `docs/` turns Bellwether into one signed, notarized
 `Bellwether.app`. Milestones 1 (a skeleton), 3 (the brain's state), 4 (the hook
 installer, doctor, `pets import` and `migrate`) and 5 (the strip on the Rust brain, with
-the app's own files), 6 (login items), 7 (the setup window) and 8 (moving a repository
-install into the app) are in the repository. The app runs without Node. It doesn't replace
+the app's own files), 6 (login items), 7 (the setup window), 8 (moving a repository
+install into the app) and 9 (the release pipeline, updates and the Homebrew cask) are in
+the repository. The app runs without Node. It doesn't replace
 the setup above by itself: `bellwether migrate --to-app` (or the setup window's first
 step) moves a repository install into it, when you choose to (see "Moving a repository
 install into the app" below). Building it never touches the repository strip or its
@@ -700,7 +701,7 @@ calls launchctl and the login items only through test stand-ins
    API key (Users and Access > Integrations; the `.p8` downloads only once):
    `xcrun notarytool store-credentials bellwether --key <AuthKey.p8> --key-id <key id> --issuer <issuer id>`.
 4. The Tauri CLI, into `shell/node_modules` (gitignored):
-   `npm install --prefix shell --no-package-lock`.
+   `npm ci --prefix shell`.
 
 **Build:**
 
@@ -708,6 +709,7 @@ calls launchctl and the login items only through test stand-ins
 node scripts/build-app.mjs --notarize        # build, sign, notarize, staple, then check with spctl
 node scripts/build-app.mjs                   # build and sign only
 node scripts/build-app.mjs --adhoc           # no keychain: ad hoc, hardened, under its own id (…bellwether.adhoc)
+node scripts/build-app.mjs --universal       # Apple silicon and Intel (rustup target add x86_64-apple-darwin once)
 ```
 
 - The app goes to `shell/src-tauri/target-dev/release/bundle/macos/Bellwether.app`.
@@ -774,6 +776,31 @@ user (with its pid), even with its plist deleted. The app only looks (`launchctl
 it never stops, loads, moves or deletes them by itself. Moving them aside is the
 migration's job (`bellwether migrate --to-app`, or the setup window's first step), when you
 choose to. launchd is asked only when HOME is your real home folder.
+
+**Updates and releases** (milestone 9; the maintainer's steps are in
+`docs/RELEASING.md`):
+- The installed app checks for a new version 10 s after it starts and then once a day,
+  and asks before installing ("Install and Relaunch" or "Later"). The menu-bar sheep's
+  *Check for Updates…* checks at once and says when there is nothing new. Updates come
+  from the newest published GitHub release (`latest.json`), are signed with the project's
+  updater key (the app refuses anything else, or a signature made for another version),
+  and replace the app where it is. After the relaunch the app restarts its own brain
+  agent, so hooks see a gap of well under a second.
+- `"updates": {"check": "off"}` in `config.json` turns the automatic checks off; *Check
+  for Updates…* still works.
+- Only the Developer ID app updates itself. A repository build, an ad-hoc or test build
+  (`--adhoc`, `--test-port`) and an app without the updater key in
+  `tauri.dist.conf.json` never do; `shell.log` says `updates: off (…)` and why.
+- Releases are built by `.github/workflows/release.yml` from a pushed `v*` tag: a universal
+  app, signed and notarized, a stapled DMG, the updater's archive and signature,
+  `latest.json` and `SHA256SUMS`, on a draft release. `node scripts/release.mjs` does the
+  same steps by hand (`version`, `check`, `assets`, `cask`).
+- Homebrew: `brew install --cask fanzoo/tap/bellwether` (once the tap exists). The cask puts
+  `bellwether` on your PATH. Before `brew uninstall --cask bellwether`, run `bellwether hooks
+  uninstall --write` and `bellwether autostart uninstall --write`: Homebrew can't edit
+  Claude Code's settings. A plain uninstall keeps your files; `brew uninstall --zap` also
+  deletes `~/Library/Application Support/Bellwether`, your `config.json` and hook token
+  included (back up `config.json` first if you want it).
 
 ## Licensing
 
@@ -909,8 +936,9 @@ oracle until the Rust brain replaces it:
 
 **CI** (`.github/workflows/ci.yml`, GitHub Actions, no secrets): the Node suite and the
 vector check, the cargo tests with and without the `conformance` feature, the parity table
-(published as the job summary) and the differential, a release build's refusal of
-`__fixture`, and `cargo check` of the platform-neutral crates (`crates/core`,
+(published as the job summary) and the differential, an unsigned universal `tauri build`
+with its DMG and updater files (signed with a key made and thrown away in the job) and
+its refusal of `__fixture`, and `cargo check` of the platform-neutral crates (`crates/core`,
 `crates/brain`) for Linux and Windows. Before the suite, CI does what a developer's
 checkout already has: `cargo fetch` (every
 platform's crates, whose licences THIRD-PARTY.md lists), a debug build of the strip, and

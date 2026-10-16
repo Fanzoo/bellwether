@@ -28,6 +28,9 @@ tauri-build = { version = "=2.7.1", features = [] }
 [dependencies]
 tauri = { version = "=2.12.1", features = ["tray-icon"] }
 tauri-plugin-single-instance = "=2.5.2"
+# Updates (plan D7, milestone 9): driven from Rust only (updater.rs); no capability grants
+# an `updater:` permission, so no webview can reach it. rustls, no system proxy lookup.
+tauri-plugin-updater = { version = "=2.13.2", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -40,8 +43,9 @@ bellwether-core = { path = "../../crates/core" }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSBundle", "NSURL", "NSArray"] }
 # The onboarding window's pet Import… panel (NSOpenPanel), from Rust only: the webviews get
-# no dialog permission (plan D6, milestone 7; in the lockfile already, through tao).
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSPanel", "NSSavePanel", "NSOpenPanel", "NSApplication"] }
+# no dialog permission (plan D6, milestone 7; in the lockfile already, through tao). The
+# update offer is an NSAlert from Rust too (updater.rs, milestone 9).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSPanel", "NSSavePanel", "NSOpenPanel", "NSApplication", "NSAlert", "NSButton", "NSControl", "NSView"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
 # Dev builds run the conformance suite and the differential: the regex engine, the

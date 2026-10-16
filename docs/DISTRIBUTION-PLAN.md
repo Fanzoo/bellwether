@@ -3041,6 +3041,149 @@ notarization step, `SHA256SUMS`, and the tap cask with an automated PR.
 - the job log contains no secret values (grep for the cert password, the key id and
   the issuer).
 
+#### M9 status (developer, 2026-10-15): built and tested locally with throwaway keys; every "Done when" item needs the maintainer's tag, secrets, environments and tap (below); CI not yet run
+
+Built:
+- **The updater** (`shell/src-tauri/src/updater.rs`): `tauri-plugin-updater` =2.13.2, driven
+  from Rust only. A check 10 s after start and every 24 h (unless `updates.check` is
+  `"off"`), and from the tray's new **Check for Updates…** (id `updates`), which also says
+  when there is nothing new. A found update is offered in an NSAlert ("Install and Relaunch"
+  / "Later"); Install downloads, checks the minisign signature (and the signed version,
+  `requireSignedVersion`), swaps the bundle and relaunches; the relaunched app restarts its
+  own brain agent (deviation 49). Only the Developer ID app updates itself (deviation 97);
+  no capability grants an `updater:` permission. Debug-only test hooks (deviation 98).
+- **Release scripts**: `scripts/build-app.mjs` gained `--universal`, notarization by App
+  Store Connect API key from the environment (`notarize`, key id and issuer never printed),
+  and, for tests, `--debug` and `--updater-pubkey`. `scripts/release.mjs`: `version` (all
+  ten places, deviation 102), `check <tag>`, `assets` (the DMG by hdiutil, signed, notarized,
+  stapled and `spctl`-checked; the updater archive and its version-bound `.sig`;
+  `latest.json` with both Mac keys for a universal build; `SHA256SUMS`) and `cask`.
+  `scripts/health-gap.mjs` measures the update gap with a 50 ms `/health` poll.
+- **Workflows**: `.github/workflows/release.yml` (a pushed `v*` tag; the `build` job in the
+  `release` environment with `contents: read`: a throwaway keychain with a random password,
+  the Team ID masked, the `.p8` in a 0600 temp file, universal build, notarize and staple the
+  app and the DMG, release files, the `__fixture` refusal; an `always()` step deletes the
+  keychain and key files; the `publish` job, `contents: write` and no secret, checks
+  `SHA256SUMS` and drafts the release). `.github/workflows/tap.yml` (on `release:
+  published`, environment `homebrew-tap`, one token; deviation 100). `ci.yml`: `release-check`
+  became `bundle` (deviation 106). Every action pinned by full SHA.
+- **The cask**: `packaging/homebrew/bellwether.rb` (deviation 101), rendered per release.
+- **Docs**: `docs/RELEASING.md` (one-time setup, each release, the numbered proof of this
+  milestone, the local updater test); the README's "Updates and releases".
+- `.gitignore` covers `*.key`, `*.key.pub`, `*.p12`, `*.p8`, `*.pem`, `*.cer`, keychains and
+  `release-out/`. THIRD-PARTY.md regenerated; NOTICE lines for the TLS stack (deviation 107).
+
+Tested here:
+- **The update, end to end** (debug ad-hoc test bundles built from a copy of the checkout in
+  /tmp at 0.2.0-rc.1 and 0.2.0-rc.2, test port 47561, a temp HOME, a throwaway key in /tmp
+  deleted afterwards; the rc.2 files served by `python3 -m http.server` on 47562):
+  `updates: 0.2.0-rc.2 is available (this is 0.2.0-rc.1)` → `downloaded, signature checked
+  and installed in 2233 ms` → `relaunching` → `starting: Bellwether 0.2.0-rc.2` → the next
+  check `0.2.0-rc.2 is the newest version`. The bundle in place was rc.2 and passed
+  `codesign --verify --deep --strict`. The 50 ms `/health` poll: one gap of **803 ms**, the
+  new version answering about 0.8 s after `relaunching` (the brain child case: no login agent in a
+  test build; 1281 ms before deviation 99).
+- **Refusals**: a `latest.json` announcing 0.2.0-rc.3 with rc.2's archive and signature:
+  "The update was signed for version 0.2.0-rc.2 but the update endpoint announced version
+  0.2.0-rc.3 …"; one pointing at another file: "The signature verification failed". The app
+  kept running, unchanged, both times. Found on the way: a symlinked executable path is
+  refused (deviation 105).
+- **Universal**: `build-app.mjs --universal --adhoc` → `lipo -archs`: `x86_64 arm64`, 18 MB;
+  the x86_64 slice runs under Rosetta (`arch -x86_64 … --version`: `bellwether 0.1.0
+  (rust)`); `__fixture` → `unknown command "__fixture"`, exit 1. Its `release.mjs assets`
+  (throwaway key, ad-hoc DMG): `Bellwether_0.1.0_universal.dmg` 9.3 MB, `.app.tar.gz` 8.6 MB,
+  `latest.json` with `darwin-aarch64` and `darwin-x86_64` pointing at the same archive,
+  `shasum -a 256 -c SHA256SUMS` all OK. The test DMG mounted read-only showed
+  `Bellwether.app` and `Applications -> /Applications`; the app inside verified.
+- **Workflows**: `actionlint` 1.7.12 (Docker image, with shellcheck 0.11.0) on all three:
+  no findings (one SC2046 fixed). `test/release.test.mjs` (15 tests) pins the secret
+  handling as text; two mutations (a secret in ci.yml, an unpinned action) each failed it.
+- **Cask**: rendered for 0.2.0-rc.1; Homebrew's RuboCop with Homebrew's own config (`brew
+  rubocop --config /opt/homebrew/Library/.rubocop.yml`, in a scratch `Casks/` folder): no
+  offenses (a cask with misordered stanzas, as a control, got the `Cask/` cops' findings);
+  loaded with `Cask::CaskLoader::FromPathLoader`: token, version, URL, the app, the
+  `bellwether` binary link, uninstall, zap, `macos >= 13`. `brew style` and `brew audit`
+  refuse a cask outside a tap, and no tap was created here.
+- **Release check**: `node scripts/release.mjs check v0.1.0` refuses (no updater key yet);
+  `check v0.2.0-rc.1` also lists the ten version places; `version 0.2.0-rc.1` in the /tmp
+  copy changed only the version strings and `cargo metadata --locked` accepted the lock.
+- No Apple Team ID in any tracked or new file (grepped with the value from the keychain,
+  never printed); no key id or issuer anywhere (they were never known here).
+- Suites (`caffeinate -dims`): `npm test` 1023 tests, 1021 pass, 0 fail, 2
+  skipped (as before); `npm run test:cargo` 218 passed, 0 failed (20 test binaries); `cargo test
+  --workspace --features bellwether-shell/conformance` 220 passed, 0 failed; `npm run
+  test:rust` (rebuilt with the feature) node 29 of 29 files green, rust 29 of 29; `npm run
+  differential` (seed 1) 0 differences in env, redact, normalise, diff and fixture, json 0
+  unexplained (22 336 explained, integer-like keys), `node --env-file` 0 unexplained; `npm run
+  test:vectors` all 60 files match; `third-party.mjs --check` up to date; `cargo check` of
+  core and brain for Linux and Windows clean. The first full run had one red test,
+  rename.test.mjs (`"local.bellwether"` as a literal in updater.rs's test); fixed, then the
+  whole sequence was run again (the counts above).
+
+Not done or not proved here (the maintainer's, docs/RELEASING.md):
+- the one-time setup: the updater key (and its public key in `tauri.dist.conf.json`), the
+  `release` and `homebrew-tap` environments and their secrets, the tap repository and its
+  token;
+- every "Done when" item: a tag, a notarized and stapled DMG on a draft, rc.1 → rc.2 through
+  the real feed with the login agent (gap and grants), `brew install`, a fork's PR, the log
+  grep. Developer ID signing and notarization were not run in this milestone (ad hoc only);
+- the NSAlert itself was not clicked (the scripted answer skips it); its words are
+  unit-tested;
+- the CI jobs have never run (`bundle`, `release`, `tap`).
+
+#### M9 by-hand steps (maintainer)
+
+The full commands are in docs/RELEASING.md; in order:
+1. One-time setup steps 1–7 there: the `.p12`, the API key and `.p8`, `tauri signer generate`
+   (back up the key and password offline), the public key into `tauri.dist.conf.json`
+   (commit), the `release` environment (reviewer, `v*` tag rule, eight secrets), Actions
+   settings, the tap repository, its fine-grained token and the `homebrew-tap` environment.
+2. `node scripts/release.mjs version 0.2.0-rc.1`, the suites, commit, `node
+   scripts/release.mjs check v0.2.0-rc.1`, `git tag v0.2.0-rc.1`, push the branch and tag.
+3. Approve the `release` deployment; check the draft (`shasum -c`, `spctl --assess --type
+   open --context context:primary-signature`, `stapler validate`).
+4. Grep the run's log for the certificate password, key id, issuer and Team ID (0 each).
+5. Publish rc.1 as the latest release (not a pre-release); merge the tap PR.
+6. Install rc.1 from the DMG; setup window: start at login, Accessibility, Automation.
+7. Release rc.2 the same way (steps 2–5).
+8. `node scripts/health-gap.mjs --port 47417`, then Check for Updates… > Install and
+   Relaunch: the new version within 2 s, the gap under 1000 ms, the grants kept (doctor,
+   Dock, a sheep click).
+9. `brew install --cask fanzoo/tap/bellwether` where the app isn't installed; `bellwether
+   doctor` from PATH.
+10. A pull request from a fork: `ci` runs, `release` has no deployment for it.
+
+#### M9 review fixes (BR-3K: "ship with fixes", 2026-10-15)
+
+- **D1, the secret key accepted as the public key.** `release.mjs check` now decodes the
+  pasted key and requires the comment line `untrusted comment: minisign public key`, one
+  key line and nothing else; a comment that says "secret key" or "encrypted" is refused by
+  name ("holds the updater's SECRET key (updater.key), not its public key …"). Checked
+  against a real `tauri signer generate` pair under /tmp (deleted): the `.pub` passes, the
+  `.key` is refused. And a guard against a committed secret key (deviation 113): `check`
+  (so the release job's first check) and `npm test` (so CI) fail when any file git tracks or
+  would add holds a minisign secret key, plain or base64. BR-3K's `todo` in
+  `test/tester-m9.test.mjs` is now a passing test.
+- **D2, a missing prerequisite.** RELEASING.md's one-time setup starts with a step 0: Node,
+  Xcode's command-line tools, Rust, `npm ci --prefix shell` (before `tauri signer
+  generate`), `gh` signed in as an admin (`gh secret set`), and on a fresh clone the debug
+  build and `pets fetch` the suites need. Walked against a clean checkout: step 1 needs
+  Keychain Access only, step 3 the Tauri CLI, steps 5 and 7 `gh`, "Each release" Node and
+  Rust; the local updater test also names its needs.
+- **D3, the tap for pre-releases.** `tap.yml` runs on `release: released` (published as a
+  full release, or a pre-release later made one) and skips a pre-release or draft in its
+  `if:` (deviation 110). RELEASING.md says a pre-release gets no tap PR.
+- **Hardening.** The release job refuses, before any step with a secret, a tag whose commit
+  isn't on `main` (full-history checkout, `git merge-base --is-ancestor`, the tag through
+  `env` only; tried in a scratch repository: a tag on main passes, one on a side branch exits
+  1), and RELEASING.md asks for the same check before approving (deviation 111). The signing
+  job runs on `macos-15` with Rust 1.99.0, and the Tauri CLI comes from a committed
+  `shell/package-lock.json` with `npm ci` (deviations 109, 112; ci.yml's `bundle` job uses
+  the same three). RELEASING.md says what the publish job's `sha256sum -c` does and doesn't
+  prove, to publish in version order (deviation 104's "latest"), and, with the README and the
+  cask's caveats, that `brew uninstall --zap` deletes Application Support, `config.json`
+  included.
+
 ### M10. Original sheep art
 
 Builds: SPEC.md, the artist's delivery, `pet.json`, `scripts/build-pet`, the bundled
@@ -3947,3 +4090,128 @@ Recorded by the developer while fixing BR-3K's M8 re-check (2026-10-15).
     known label, restored only into `~/Library/LaunchAgents`).
 92. **The run lock is an `flock`, and its file stays.** Deviation 90's lock removed a stale file
     and created a new one; that is now the kernel's job, so the takeover can't race.
+
+Recorded by the developer while building M9 (2026-10-15).
+
+93. **The release workflow runs the repository's scripts, not `tauri-action`.**
+    - Plan (Stack, D7): `tauri-apps/tauri-action`, pinned by SHA, builds, signs, notarizes,
+      uploads the assets and writes `latest.json`.
+    - True: the build needs what `scripts/build-app.mjs` does around `tauri build` (the
+      generated overlay with absolute paths, the bundled agent plist, the checks of M1); the
+      DMG's notarization and staple, `SHA256SUMS` and both `latest.json` keys need steps of
+      their own anyway; and an action handed the signing secrets is one more third party that
+      can read them. The scripts also run on a Mac by hand, so every step was tried here.
+    - Done: `build-app.mjs --universal --notarize` (notarization by API key when the three
+      `APPLE_API_*` variables are set, else the keychain profile; key id and issuer never
+      printed), then `release.mjs assets`. The draft is made with `gh release create --draft`
+      by a separate job that has `contents: write` and no secret. No third-party action
+      besides GitHub's own (checkout, setup-node, cache, upload/download-artifact), all pinned.
+94. **The updater's archive is made after notarization, by `release.mjs`.**
+    - Plan (D4): `createUpdaterArtifacts: true`, the bundler's `.app.tar.gz` and `.sig`.
+    - True: the bundler makes the archive inside `tauri build`, before `build-app.mjs`
+      notarizes and staples, so it would hold an app without its ticket.
+    - Done: `release.mjs assets` tars the stapled app (`Bellwether.app/…` at the top, no
+      xattrs, ACLs or AppleDouble files) and signs it with `tauri signer sign --app-version
+      <v>`. `tauri.dist.conf.json` sets `requireSignedVersion: true` (newer than the plan:
+      the plugin then refuses an archive whose signed version isn't the version `latest.json`
+      announces, so a tampered feed can't pair a new number with an old build; tested).
+95. **The DMG is made with `hdiutil`, not the bundler's `dmg` target.** The bundler lays the
+    window out by scripting Finder through AppleScript, which a CI runner or a locked screen
+    doesn't always allow and which asks for Automation on a Mac. `release.mjs` makes a UDZO
+    image (HFS+) with the app and an `Applications` link, signs it with the Developer ID,
+    notarizes, staples and checks it with `spctl --type open --context
+    context:primary-signature`, then `hdiutil verify`.
+96. **Asset names carry the version and architecture**: `Bellwether_<v>_universal.dmg`,
+    `Bellwether_<v>_universal.app.tar.gz` and `.sig` (the plan's archive was
+    `Bellwether.app.tar.gz`), so `SHA256SUMS` and the release page name what each file is.
+    A one-architecture build (a local test) is named `aarch64` or `x64`, and its
+    `latest.json` has only its own platform key.
+97. **The feed and key are in `tauri.dist.conf.json`; only the Developer ID app updates.**
+    - Plan (D7): `pubkey` in `tauri.conf.json`.
+    - True: `tauri.conf.json` is the dev builds' (`local.bellwether`); a dev, repository,
+      ad-hoc or test build must never replace itself with the Developer ID app; and the
+      plugin fails at start when its configuration is missing, so it can't be registered
+      everywhere.
+    - Done: `updater.rs::refusal` decides (app layout, a key, the permanent id, not a test
+      build, not ad hoc); only then is the plugin registered and the tray item shown, and the
+      strip logs `updates: on` or `updates: off (why)`. The key in the repository is a
+      `SET-ME` placeholder until the maintainer makes the real one (docs/RELEASING.md);
+      builds work meanwhile (and don't update), and `release.mjs check` refuses to release.
+98. **Test hooks, debug builds only.** Besides the plan's endpoint override
+    (`BELLWETHER_UPDATE_ENDPOINT`): `BELLWETHER_UPDATE_ANSWER=install|later` (no click, and no
+    failure alert) and `BELLWETHER_UPDATE_FIRST_CHECK_SEC`. Each is read in a
+    `cfg(debug_assertions)` function with a release twin that ignores it (a cargo test pins
+    the three). `build-app.mjs` gained `--debug` (only with `--adhoc` and both test flags)
+    and `--updater-pubkey <file>` (ad hoc only), to build such a bundle trusting a throwaway
+    key.
+99. **The strip starts its brain thread before the tray and the windows.** After an update
+    the relaunched app spawns its brain child (when there is no login agent) about 450 ms
+    sooner: the measured gap in a debug test build went from 1281 ms to 803 ms. The agent
+    case is unchanged (deviation 49's kickstart).
+100. **The tap's pull request opens when a release is published, from its own environment.**
+     - Plan (D7): CI opens a PR on the tap; the token among the `release` environment's
+       secrets.
+     - True: a draft's assets can't be downloaded, so the cask's URL works only once the
+       maintainer publishes; and the tap token has nothing to do with signing.
+     - Done: `.github/workflows/tap.yml` on `release: published`, environment `homebrew-tap`
+       (one secret, `TAP_GITHUB_TOKEN`), checks the DMG against `SHA256SUMS`, renders
+       `packaging/homebrew/bellwether.rb` and pushes a branch and PR to Fanzoo/homebrew-tap.
+101. **The cask has more than D7's stanzas.** `uninstall launchctl:
+     "com.fanzootechnology.bellwether.brain"` as well as `quit:` (otherwise the brain agent
+     keeps answering from the deleted bundle until logout), a `zap` that also clears the
+     Caches, HTTPStorages and WebKit folders of the bundle id, `depends_on macos: :ventura`
+     (Homebrew's spelling of 13 or later), `livecheck` on GitHub's latest release, and
+     caveats naming `autostart uninstall --write` as well as `hooks uninstall --write`.
+102. **The version lives in ten places, and `release.mjs version` sets them all.** package.json,
+     shell/package.json, tauri.conf.json, the three Cargo.toml files and their Cargo.lock
+     entries, and `brain/util.mjs` (the Node brain's `VERSION`). The release job refuses a tag
+     that disagrees with any of them. M9 doesn't bump the repository: it stays at 0.1.0 until
+     the maintainer releases.
+103. **`updates.check` is the strip's alone.** It is read from config.json by the strip
+     (`"prompt"` default, `"off"`; anything else warns and means `"prompt"`). It isn't added to
+     `config.example.json` (pinned by the config vectors, brain.test.mjs) or checked by doctor.
+     The README documents it.
+104. **The feed is GitHub's "latest release".** `releases/latest/download/latest.json` skips
+     drafts and pre-releases, so an rc reaches installed apps only when published as the
+     latest release (docs/RELEASING.md, "Each release" step 5). The workflow never marks a
+     release as a pre-release; that is decided when publishing.
+105. **The updater refuses an executable path with a symlink in it** (Tauri's `StartingBinary`
+     check), found when the test app ran from `/tmp` (a link to `/private/tmp`). An app in
+     /Applications is unaffected; the local test runs from `/private/tmp`.
+106. **ci.yml's `release-check` became `bundle`.** It is now the "unsigned `tauri build`" of D7:
+     a universal, ad-hoc `build-app.mjs` build, the `__fixture` refusal checked in the bundled
+     binary, and `release.mjs assets` with an updater key generated in the job and thrown
+     away, so the DMG, archive, `latest.json` (both keys) and `SHA256SUMS` are proved on every
+     pull request with no secret.
+107. **The updater's crates.** `tauri-plugin-updater` =2.13.2 with default features off and
+     `rustls-tls` only (no system proxy lookup). New crates are in THIRD-PARTY.md; NOTICE has
+     lines for ring ("Apache-2.0 AND ISC", as the Stack said) and for `webpki-root-certs`
+     (CDLA-Permissive-2.0, a licence new to the list). `security-framework` arrives with it
+     (rustls-platform-verifier checks certificates against the system's trust store); the
+     Stack's rejection of it was for the token (D3), which still never touches the keychain.
+     The NSAlert needs four more `objc2-app-kit` features (no new crate).
+108. **Universal builds work here** (deviation 9): `x86_64-apple-darwin` is installed, and
+     `build-app.mjs --universal` builds, signs (ad hoc) and checks that the binary has both
+     slices (`lipo -archs`: `x86_64 arm64`).
+
+Recorded by the developer while fixing BR-3K's M9 review (2026-10-15).
+
+109. **`shell/package-lock.json` is committed, and the Tauri CLI is installed with `npm ci`.**
+     Every place said `npm install --prefix shell --no-package-lock` (README, both scripts'
+     messages, both workflows). The lock pins @tauri-apps/cli 2.12.1 and its platform
+     packages with sha512 hashes, so the signing job's npm inputs no longer float. Made with
+     `npm install --package-lock-only` in an empty folder (so every platform's package is
+     listed, not just this Mac's), then proved with `npm ci` there (`tauri-cli 2.12.1`).
+110. **`tap.yml` runs on `release: released`, not `published`** (supersedes deviation 100's
+     trigger). `published` fires for a pre-release too; `released` fires when a release is
+     published as a full release or a pre-release is made one, and the job's `if:` also skips
+     a pre-release or draft.
+111. **The release job checks the tag's commit is on `main`** before any step holds a secret,
+     and RELEASING.md asks the reviewer to look before approving.
+112. **The signing job's runner and toolchain are pinned**: `macos-15` and Rust 1.99.0 (the
+     version used here), in `release.yml` and in ci.yml's `bundle` job, so CI builds what a
+     release builds.
+113. **A minisign secret key anywhere in the repository fails `check` and `npm test`.**
+     `release.mjs`'s `secretKeyFiles` reads the files git tracks or would add (outside a
+     checkout, every file but build output) and finds a secret key's comment line, plain or
+     as the base64 a `.key` file holds. The repository has none.

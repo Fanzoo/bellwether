@@ -14,3 +14,16 @@ shell/src-tauri/target-dev/
 shell/src-tauri/gen/
 
 .DS_Store
+
+# Signing material (milestone 9): never committed. The updater's private key, Apple
+# certificates and keys, keychains, and release files built locally.
+*.key
+*.key.pub
+*.p12
+*.p8
+*.pem
+*.cer
+*.keychain
+*.keychain-db
+*.mobileprovision
+release-out/

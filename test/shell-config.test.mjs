@@ -52,7 +52,10 @@ test('the CSP allows only self, inline images and Tauri IPC: no network, no unsa
 test('the shell has no Tauri plugin that reaches files, processes or the network from the webview', () => {
   const cargo = fs.readFileSync(path.join(TAURI, 'Cargo.toml'), 'utf8');
   const deps = [...cargo.matchAll(/^(tauri-plugin-[a-z-]+)\s*=/gm)].map((m) => m[1]);
-  assert.deepEqual(deps, ['tauri-plugin-single-instance']);
+  // Milestone 9: the updater, driven from Rust only (updater.rs); no capability grants an
+  // `updater:` permission (checked above), so no webview reaches it.
+  assert.deepEqual(deps, ['tauri-plugin-single-instance', 'tauri-plugin-updater']);
+  assert.match(cargo, /^tauri-plugin-updater = \{ version = "=2\.13\.2", default-features = false, features = \["rustls-tls"\] \}$/m);
   assert.match(cargo, /^tauri = \{ version = "=2\.12\.1"/m);
 });
 

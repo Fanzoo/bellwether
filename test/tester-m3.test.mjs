@@ -68,12 +68,15 @@ describe('webview surface', () => {
     assert.doesNotMatch(tray, /#\[tauri::command\]|invoke_handler|\.emit\(|eval|Command::new|std::process|fs::(remove|write)|LaunchAgents/);
     const ids = [...tray.matchAll(/with_id\(app, "([a-z]+)"/g)].map((m) => m[1]);
     // M7: "setup" (Set up Bellwether…) only opens the onboarding window, from Rust.
-    assert.deepEqual(ids, ['mute', 'hide', 'labels', 'quit', 'setup']);
+    // M9: "updates" (Check for Updates…) only asks updater.rs to check, from Rust.
+    assert.deepEqual(ids, ['mute', 'hide', 'labels', 'quit', 'setup', 'updates']);
     // the strip's six commands stay six; the onboarding window's eleven live in onboarding.rs
     assert.equal([...fs.readFileSync(path.join(TAURI, 'src', 'lib.rs'), 'utf8').matchAll(/#\[tauri::command\]/g)].length, 6);
     assert.equal([...fs.readFileSync(path.join(TAURI, 'src', 'onboarding.rs'), 'utf8').matchAll(/#\[tauri::command\]/g)].length, 11);
     const lib = read(path.join(TAURI, 'src', 'lib.rs'));
-    assert.equal([...lib.matchAll(/\.plugin\(/g)].length, 1);
+    // M9: two plugins, single-instance and (only in a build that updates itself) the updater.
+    assert.equal([...lib.matchAll(/\.plugin\(/g)].length, 2);
+    assert.match(lib, /if updates_on \{\s*builder = builder\.plugin\(tauri_plugin_updater::Builder::new\(\)\.build\(\)\);\s*\}/);
     assert.equal(fs.readdirSync(path.join(TAURI, 'capabilities')).sort().join(), 'onboarding.json,strip.json');
     for (const f of fs.readdirSync(path.join(TAURI, 'src'))) {
       const s = read(path.join(TAURI, 'src', f));

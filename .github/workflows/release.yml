@@ -1,0 +1,174 @@
+# Release (distribution plan D7, milestone 9). A pushed `v*` tag becomes a DRAFT GitHub
+# release holding the notarized, stapled DMG, the updater archive and its signature,
+# latest.json and SHA256SUMS. Nothing reaches users until the maintainer publishes the
+# draft (docs/RELEASING.md); publishing runs tap.yml, which opens the Homebrew tap's PR.
+#
+# Secrets (D7):
+# - Runs only on a pushed `v*` tag: never on pull_request, never pull_request_target.
+# - The signing job uses the `release` environment (required reviewer: the maintainer;
+#   deployment rule: `v*` tags). Every signing secret lives there, none at repository level.
+#   That job can only read the repository.
+# - Only the publish job has `contents: write`, and it holds no secret: it uploads what the
+#   signing job built, after checking SHA256SUMS.
+# - The certificate goes into a keychain made for this job with a random password; the
+#   keychain and every key file are deleted in an always() step. No `set -x` anywhere.
+#   The Team ID (in the signing identity's name) is masked in the log; the API key id and
+#   issuer are secrets, so GitHub masks them, and the scripts never print them.
+# - Before any step that holds a secret, the tagged commit must be on main (a `v*` tag can
+#   point at any commit, including one with a changed workflow or script).
+# - Every action is pinned by full commit SHA; the runner image, the Rust toolchain and the
+#   Tauri CLI (shell/package-lock.json, `npm ci`) are pinned too.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: "22.14.0"
+  RUST_TOOLCHAIN: "1.99.0"
+  APP: shell/src-tauri/target-dev/universal-apple-darwin/release/bundle/macos/Bellwether.app
+
+jobs:
+  build:
+    name: Build, sign and notarize (universal)
+    runs-on: macos-15
+    timeout-minutes: 150
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the whole history, so the ancestry check below is exact
+      - name: The tagged commit is on main
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          git fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main
+          commit="$(git rev-parse --verify "refs/tags/${TAG}^{commit}")"
+          if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
+            echo "the tag's commit $commit is not on main: refusing to sign it"
+            exit 1
+          fi
+          echo "the tag's commit $commit is on main"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: The tag, the versions, the update feed and the updater key agree (and no secret key is in the repository)
+        run: node scripts/release.mjs check "$GITHUB_REF_NAME"
+      - name: Rust toolchain (pinned), both Mac targets
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
+          rustup default "$RUST_TOOLCHAIN"
+      - name: The Tauri CLI (shell/package-lock.json pins it, with hashes)
+        run: npm ci --prefix shell
+      - name: The Developer ID certificate, in a keychain made for this job
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -eu
+          keychain="$RUNNER_TEMP/bellwether-signing.keychain-db"
+          echo "BELLWETHER_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          kpass="$(openssl rand -base64 32)"
+          echo "::add-mask::$kpass"
+          umask 077
+          cert="$RUNNER_TEMP/certificate.p12"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$cert"
+          security create-keychain -p "$kpass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kpass" "$keychain"
+          security import "$cert" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security > /dev/null
+          rm -f "$cert"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kpass" "$keychain" > /dev/null
+          # Search this keychain first, then the runner's own (paths without spaces).
+          others="$(security list-keychains -d user | tr -d '"' | xargs)"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $others
+          # The Team ID is part of the identity's name: mask it for the rest of the job.
+          team="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*Developer ID Application: .*(\([A-Z0-9]\{10\}\))".*/\1/p' | head -n 1)"
+          if [ -z "$team" ]; then echo "no Developer ID Application identity in APPLE_CERTIFICATE"; exit 1; fi
+          echo "::add-mask::$team"
+          echo "imported one Developer ID Application identity"
+      - name: The notary API key, to a file only this job can read
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -eu
+          umask 077
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary-key.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/notary-key.p8" >> "$GITHUB_ENV"
+      - name: Build the universal app, sign it, notarize and staple it
+        env:
+          BELLWETHER_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: node scripts/build-app.mjs --universal --notarize
+      - name: "Release files: the DMG (signed, notarized, stapled), the updater archive and .sig, latest.json, SHA256SUMS"
+        env:
+          BELLWETHER_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node scripts/release.mjs assets --app "$APP" --tag "$GITHUB_REF_NAME" --out "$RUNNER_TEMP/release" --sign "$BELLWETHER_SIGNING_IDENTITY" --notarize
+      - name: The release build has no hidden commands
+        run: |
+          set -eu
+          home="$(mktemp -d)"
+          echo '{"port": 47999}' > "$home/config.json"
+          set +e
+          out="$(BELLWETHER_HOME="$home" "$APP/Contents/MacOS/Bellwether" __fixture 2>&1)"
+          code=$?
+          set -e
+          printf '%s\n' "$out" | head -3
+          test "$code" -eq 1
+          printf '%s\n' "$out" | grep -q 'unknown command "__fixture"'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Delete the keychain and the key files
+        if: always()
+        run: |
+          if [ -n "${BELLWETHER_KEYCHAIN:-}" ]; then security delete-keychain "$BELLWETHER_KEYCHAIN" || true; fi
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/notary-key.p8"
+
+  publish:
+    name: Draft the GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: release
+      - name: The files match SHA256SUMS
+        working-directory: release
+        run: sha256sum -c SHA256SUMS
+      # This catches a corrupted transfer only: SHA256SUMS comes in the same artifact. What the
+      # files can be trusted for is the build job (environment-gated, the only writer).
+      - name: Create the draft release (published by the maintainer, by hand)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Bellwether ${TAG#v}" --generate-notes release/*

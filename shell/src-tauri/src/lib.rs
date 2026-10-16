@@ -26,6 +26,7 @@ mod signals;
 mod settings;
 mod strips;
 mod tray;
+mod updater;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -449,6 +450,29 @@ pub fn run() {
     // repository strip and an already-running one (any earlier build) still exclude each
     // other; a test bundle or a dev strip on another port never hands off to them.
     let mut context = tauri::generate_context!();
+    // Updates (plan D7, milestone 9): only a build that may update itself (the Developer ID
+    // app, with the updater configuration of tauri.dist.conf.json) registers the plugin and
+    // gets the tray item. No capability grants an `updater:` permission (updater.rs).
+    let bundle_id = identity::bundle_id();
+    let overrides = login_items::bundle_agent_overrides();
+    let updater_off = updater::refusal(&updater::Build {
+        layout: settings.layout,
+        plugin_config: context.config().plugins.0.get("updater"),
+        bundle_id: bundle_id.as_deref(),
+        test_build: overrides.0.is_some() || overrides.1.is_some(),
+        ad_hoc: bundle_id.as_deref() == Some(identity::PERMANENT_ID) && identity::ad_hoc(),
+        test_endpoint: updater::test_endpoint().is_some(),
+    });
+    let updates_on = updater_off.is_none() && !checks_only;
+    let (update_policy, policy_warning) = updater::policy(&settings.config);
+    if let Some(w) = policy_warning {
+        log(&format!("warning: {w}"));
+    }
+    match (&updater_off, checks_only) {
+        (Some(why), _) => log(&format!("updates: off ({why})")),
+        (None, true) => log("updates: off (--selftest, --demo or --locate)"),
+        (None, false) => log(&format!("updates: on, from {}", updater::test_endpoint().unwrap_or_else(|| "the release feed".into()))),
+    }
     let lock_id = single_instance_id(&context.config().identifier, settings.port);
     context.config_mut().identifier = lock_id;
     let mut builder = tauri::Builder::default();
@@ -465,6 +489,9 @@ pub fn run() {
                 log("another bellwether shell tried to start; this one keeps running");
             }
         }));
+    }
+    if updates_on {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
     let app = builder
         .manage(brain.clone())
@@ -514,6 +541,13 @@ pub fn run() {
                 handle.exit(0);
                 return Ok(());
             }
+            // The brain first (milestone 9): after an update the relaunched app starts its
+            // brain child before the tray and the windows, which shortens the gap in which
+            // no brain answers (`--demo` has no brain).
+            if !flags.demo {
+                let b = brain_for_setup.clone();
+                std::thread::spawn(move || brain::run(b, brain_cfg));
+            }
             // Milestone 7: the tray, and the thread that hides the strip while sharing
             // or when the tray says so. The tray switches start as they were left, so a
             // strip hidden from the tray opens hidden (never flashing up first).
@@ -524,7 +558,7 @@ pub fn run() {
                 // own concern, so only in the app layout. The repository's strip is itself
                 // run by a legacy agent.
                 let notices = if app_layout && !flags.demo { tray::startup_notices() } else { Vec::new() };
-                if let Err(e) = tray::build(&handle, kept, false, &notices, app_layout && !flags.demo) {
+                if let Err(e) = tray::build(&handle, kept, false, &notices, app_layout && !flags.demo, updates_on) {
                     log(&format!("warning: no tray icon ({e}); use `bellwether mute` / `bellwether show` instead"));
                     if kept.hidden {
                         // Fail open: with no tray, a strip saved hidden would be lost.
@@ -548,17 +582,17 @@ pub fn run() {
             let (h, b) = (handle.clone(), brain_for_setup.clone());
             std::thread::spawn(move || privacy_loop(h, b, sharing_names, strip_height));
 
-            let b = brain_for_setup.clone();
             if flags.demo {
                 // Debug: one sheep per behaviour, without a brain, to check the
                 // animation map by eye. No hooks, no brain, nothing persisted.
                 log("--demo: showing a synthetic flock; the brain is not contacted");
-                b.set_demo(demo_snapshot());
-            } else {
-                std::thread::spawn(move || brain::run(b, brain_cfg));
+                brain_for_setup.set_demo(demo_snapshot());
             }
             let h = handle.clone();
             std::thread::spawn(move || clickthrough::run(h, fade_radius));
+            if updates_on {
+                updater::schedule(handle.clone(), update_policy);
+            }
 
             if flags.selftest {
                 let h = handle.clone();

@@ -286,7 +286,11 @@ describe('same-project labels', () => {
 describe('the single-instance bypass (M10-14: only --locate bypasses it; --selftest opens a window and stays under it)', () => {
   const lib = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'lib.rs'), 'utf8');
   test('exactly one .plugin( call, skipped only for --locate', () => {
-    assert.equal([...lib.matchAll(/\.plugin\(/g)].length, 1);
+    // Milestone 9 adds the updater's, only in a build that updates itself (never with
+    // --locate, --selftest or --demo: `updates_on` is false for those).
+    assert.equal([...lib.matchAll(/\.plugin\(tauri_plugin_single_instance/g)].length, 1);
+    assert.equal([...lib.matchAll(/\.plugin\(/g)].length, 2);
+    assert.match(lib, /let updates_on = updater_off\.is_none\(\) && !checks_only;/);
     assert.match(lib, /if flags\.locate\.is_none\(\) \{\s*builder = builder\.plugin\(tauri_plugin_single_instance::init/);
     assert.doesNotMatch(lib, /if [^\n{]*selftest[^\n{]*\{\s*builder = builder\.plugin/, '--selftest must stay under single-instance');
   });

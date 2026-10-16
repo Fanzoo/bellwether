@@ -2,6 +2,13 @@
   "$schema": "https://schema.tauri.app/config/2",
   "identifier": "com.fanzootechnology.bellwether",
   "mainBinaryName": "Bellwether",
+  "plugins": {
+    "updater": {
+      "pubkey": "SET-ME: the public key printed by `npx tauri signer generate` (docs/RELEASING.md, one-time setup)",
+      "endpoints": ["https://github.com/Fanzoo/bellwether/releases/latest/download/latest.json"],
+      "requireSignedVersion": true
+    }
+  },
   "bundle": {
     "targets": ["app"],
     "macOS": {

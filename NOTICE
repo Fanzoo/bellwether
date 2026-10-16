@@ -56,3 +56,12 @@ Shell (npm): one devDependency, @tauri-apps/cli (Apache-2.0 OR MIT), used only t
 bundle a .app; it is not part of what runs.
 
 Tauri and wry: Apache-2.0 OR MIT. tao: Apache-2.0 (as its Cargo.toml states).
+
+The updater (tauri-plugin-updater, Apache-2.0 OR MIT; milestone 9) brings the TLS stack
+for the update check:
+  ring: "Apache-2.0 AND ISC". Parts of ring are derived from BoringSSL and OpenSSL;
+    ring's LICENSE files carry those notices (https://github.com/briansmith/ring).
+  rustls, rustls-webpki, untrusted: ISC and/or Apache-2.0 OR MIT.
+  webpki-root-certs: the Mozilla root certificate data, under the Community Data
+    License Agreement, Permissive, version 2.0
+    (https://cdla.dev/permissive-2-0/).

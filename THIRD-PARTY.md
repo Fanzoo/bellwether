@@ -14,21 +14,23 @@ bundle a `.app`; `cargo build` does not need it.
 |---|---|---|---|
 | @tauri-apps/cli | 2.12.1 | shell/package.json devDependency | Apache-2.0 OR MIT |
 
-## Rust crates (455)
+## Rust crates (495)
 
 | Licence | Crates |
 |---|---|
-| MIT OR Apache-2.0 | 207 |
-| MIT | 109 |
-| Apache-2.0 OR MIT | 44 |
-| Zlib OR Apache-2.0 OR MIT | 19 |
+| MIT OR Apache-2.0 | 231 |
+| MIT | 111 |
+| Apache-2.0 OR MIT | 48 |
+| Zlib OR Apache-2.0 OR MIT | 20 |
 | Unicode-3.0 | 18 |
-| MIT/Apache-2.0 | 12 |
+| MIT/Apache-2.0 | 13 |
 | Unlicense OR MIT | 9 |
 | MPL-2.0 | 5 |
 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 5 |
+| BSD-3-Clause | 3 |
 | Apache-2.0/MIT | 3 |
-| BSD-3-Clause | 2 |
+| Apache-2.0 OR ISC OR MIT | 3 |
+| ISC | 3 |
 | Zlib | 2 |
 | MIT OR Zlib OR Apache-2.0 | 2 |
 | BSD-3-Clause OR MIT OR Apache-2.0 | 2 |
@@ -41,10 +43,11 @@ bundle a `.app`; `cargo build` does not need it.
 | Apache-2.0 AND MIT | 1 |
 | CC0-1.0 OR MIT-0 OR Apache-2.0 | 1 |
 | Apache-2.0 / MIT | 1 |
-| ISC | 1 |
 | MIT OR Apache-2.0 OR Zlib | 1 |
+| Apache-2.0 AND ISC | 1 |
 | Apache-2.0 WITH LLVM-exception | 1 |
 | (MIT OR Apache-2.0) AND Unicode-3.0 | 1 |
+| CDLA-Permissive-2.0 | 1 |
 
 | Crate | Version | Licence |
 |---|---|---|
@@ -150,6 +153,7 @@ bundle a `.app`; `cargo build` does not need it.
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |
 | field-offset | 0.3.6 | MIT OR Apache-2.0 |
+| filetime | 0.2.29 | MIT/Apache-2.0 |
 | find-msvc-tools | 0.1.14 | MIT OR Apache-2.0 |
 | flate2 | 1.1.10 | MIT OR Apache-2.0 |
 | fnv | 1.0.7 | Apache-2.0 / MIT |
@@ -175,6 +179,7 @@ bundle a `.app`; `cargo build` does not need it.
 | gdkx11 | 0.18.2 | MIT |
 | gdkx11-sys | 0.18.2 | MIT |
 | generic-array | 0.14.7 | MIT |
+| getrandom | 0.2.17 | MIT OR Apache-2.0 |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 |
 | gio | 0.18.4 | MIT |
@@ -200,6 +205,7 @@ bundle a `.app`; `cargo build` does not need it.
 | httparse | 1.10.1 | MIT OR Apache-2.0 |
 | httpdate | 1.0.3 | MIT OR Apache-2.0 |
 | hyper | 1.12.0 | MIT |
+| hyper-rustls | 0.27.10 | Apache-2.0 OR ISC OR MIT |
 | hyper-util | 0.1.21 | MIT |
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 |
 | iana-time-zone-haiku | 0.1.2 | MIT OR Apache-2.0 |
@@ -227,6 +233,8 @@ bundle a `.app`; `cargo build` does not need it.
 | jiff-tzdb | 0.1.9 | Unlicense OR MIT |
 | jiff-tzdb-platform | 0.1.3 | Unlicense OR MIT |
 | jni | 0.21.1 | MIT/Apache-2.0 |
+| jni | 0.22.4 | MIT OR Apache-2.0 |
+| jni-macros | 0.22.4 | MIT OR Apache-2.0 |
 | jni-sys | 0.3.1 | MIT OR Apache-2.0 |
 | jni-sys | 0.4.1 | MIT OR Apache-2.0 |
 | jni-sys-macros | 0.4.1 | MIT OR Apache-2.0 |
@@ -249,6 +257,7 @@ bundle a `.app`; `cargo build` does not need it.
 | memchr | 2.8.3 | Unlicense OR MIT |
 | memoffset | 0.9.1 | MIT |
 | mime | 0.3.17 | MIT OR Apache-2.0 |
+| minisign-verify | 0.2.5 | MIT |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
 | mio | 1.2.4 | MIT |
@@ -274,6 +283,7 @@ bundle a `.app`; `cargo build` does not need it.
 | objc2-exception-helper | 0.1.1 | Zlib OR Apache-2.0 OR MIT |
 | objc2-foundation | 0.3.2 | MIT |
 | objc2-io-surface | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
+| objc2-osa-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-quartz-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-security | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-service-management | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
@@ -281,8 +291,10 @@ bundle a `.app`; `cargo build` does not need it.
 | objc2-user-notifications | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-web-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
+| openssl-probe | 0.2.1 | MIT OR Apache-2.0 |
 | option-ext | 0.2.0 | MPL-2.0 |
 | ordered-stream | 0.2.0 | MIT OR Apache-2.0 |
+| osakit | 0.3.1 | MIT OR Apache-2.0 |
 | pango | 0.18.3 | MIT |
 | pango-sys | 0.18.0 | MIT |
 | parking | 2.2.1 | Apache-2.0 OR MIT |
@@ -325,16 +337,26 @@ bundle a `.app`; `cargo build` does not need it.
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 |
 | reqwest | 0.13.5 | MIT OR Apache-2.0 |
+| ring | 0.17.14 | Apache-2.0 AND ISC |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 |
 | rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT |
+| rustls-native-certs | 0.8.5 | Apache-2.0 OR ISC OR MIT |
+| rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |
+| rustls-platform-verifier | 0.7.1 | MIT OR Apache-2.0 |
+| rustls-platform-verifier-android | 0.2.0 | MIT OR Apache-2.0 |
+| rustls-webpki | 0.103.15 | ISC |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |
 | same-file | 1.0.6 | Unlicense/MIT |
+| schannel | 0.1.29 | MIT |
 | schemars | 0.8.22 | MIT |
 | schemars | 0.9.0 | MIT |
 | schemars | 1.2.2 | MIT |
 | schemars_derive | 0.8.22 | MIT |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 |
+| security-framework | 3.7.0 | MIT OR Apache-2.0 |
+| security-framework-sys | 2.17.0 | MIT OR Apache-2.0 |
 | selectors | 0.38.0 | MPL-2.0 |
 | semver | 1.0.28 | MIT OR Apache-2.0 |
 | serde | 1.0.229 | MIT OR Apache-2.0 |
@@ -355,6 +377,8 @@ bundle a `.app`; `cargo build` does not need it.
 | shlex | 2.0.1 | MIT OR Apache-2.0 |
 | signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 |
 | simd-adler32 | 0.3.10 | MIT |
+| simd_cesu8 | 1.2.0 | Apache-2.0 OR MIT |
+| simdutf8 | 0.1.5 | MIT OR Apache-2.0 |
 | siphasher | 1.0.4 | MIT OR Apache-2.0 |
 | slab | 0.4.12 | MIT |
 | smallvec | 1.16.2 | MIT OR Apache-2.0 |
@@ -366,6 +390,7 @@ bundle a `.app`; `cargo build` does not need it.
 | string_cache | 0.9.0 | MIT OR Apache-2.0 |
 | string_cache_codegen | 0.6.1 | MIT OR Apache-2.0 |
 | strsim | 0.11.1 | MIT |
+| subtle | 2.6.1 | BSD-3-Clause |
 | swift-rs | 1.0.8 | MIT OR Apache-2.0 |
 | syn | 1.0.109 | MIT OR Apache-2.0 |
 | syn | 2.0.119 | MIT OR Apache-2.0 |
@@ -375,12 +400,15 @@ bundle a `.app`; `cargo build` does not need it.
 | system-deps | 6.2.2 | MIT OR Apache-2.0 |
 | tao | 0.37.1 | Apache-2.0 |
 | tao-macros | 0.1.4 | MIT OR Apache-2.0 |
+| tar | 0.4.46 | MIT OR Apache-2.0 |
 | target-lexicon | 0.12.16 | Apache-2.0 WITH LLVM-exception |
 | tauri | 2.12.1 | Apache-2.0 OR MIT |
 | tauri-build | 2.7.1 | Apache-2.0 OR MIT |
 | tauri-codegen | 2.7.1 | Apache-2.0 OR MIT |
 | tauri-macros | 2.7.1 | Apache-2.0 OR MIT |
+| tauri-plugin | 2.7.1 | Apache-2.0 OR MIT |
 | tauri-plugin-single-instance | 2.5.2 | Apache-2.0 OR MIT |
+| tauri-plugin-updater | 2.13.2 | Apache-2.0 OR MIT |
 | tauri-runtime | 2.12.1 | Apache-2.0 OR MIT |
 | tauri-runtime-wry | 2.12.1 | Apache-2.0 OR MIT |
 | tauri-utils | 2.10.1 | Apache-2.0 OR MIT |
@@ -398,6 +426,7 @@ bundle a `.app`; `cargo build` does not need it.
 | tinyvec | 1.13.3 | Zlib OR Apache-2.0 OR MIT |
 | tokio | 1.53.2 | MIT |
 | tokio-macros | 2.7.2 | MIT |
+| tokio-rustls | 0.26.6 | MIT OR Apache-2.0 |
 | tokio-util | 0.7.20 | MIT |
 | toml | 0.8.2 | MIT OR Apache-2.0 |
 | toml | 1.1.8+spec-1.1.0 | MIT OR Apache-2.0 |
@@ -423,6 +452,7 @@ bundle a `.app`; `cargo build` does not need it.
 | unicode-ident | 1.0.26 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 |
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
+| untrusted | 0.9.0 | ISC |
 | ureq | 3.4.2 | MIT OR Apache-2.0 |
 | ureq-proto | 0.6.4 | MIT OR Apache-2.0 |
 | url | 2.5.8 | MIT OR Apache-2.0 |
@@ -449,6 +479,7 @@ bundle a `.app`; `cargo build` does not need it.
 | web_atoms | 0.2.6 | MIT OR Apache-2.0 |
 | webkit2gtk | 2.0.2 | MIT |
 | webkit2gtk-sys | 2.0.2 | MIT |
+| webpki-root-certs | 1.0.9 | CDLA-Permissive-2.0 |
 | webview2-com | 0.39.1 | MIT |
 | webview2-com-macros | 0.8.1 | MIT |
 | webview2-com-sys | 0.39.1 | MIT |
@@ -468,17 +499,27 @@ bundle a `.app`; `cargo build` does not need it.
 | windows-result | 0.4.1 | MIT OR Apache-2.0 |
 | windows-strings | 0.5.1 | MIT OR Apache-2.0 |
 | windows-sys | 0.45.0 | MIT OR Apache-2.0 |
+| windows-sys | 0.52.0 | MIT OR Apache-2.0 |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 |
 | windows-targets | 0.42.2 | MIT OR Apache-2.0 |
+| windows-targets | 0.52.6 | MIT OR Apache-2.0 |
 | windows-threading | 0.2.1 | MIT OR Apache-2.0 |
 | windows-version | 0.1.7 | MIT OR Apache-2.0 |
 | windows_aarch64_gnullvm | 0.42.2 | MIT OR Apache-2.0 |
+| windows_aarch64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
 | windows_aarch64_msvc | 0.42.2 | MIT OR Apache-2.0 |
+| windows_aarch64_msvc | 0.52.6 | MIT OR Apache-2.0 |
 | windows_i686_gnu | 0.42.2 | MIT OR Apache-2.0 |
+| windows_i686_gnu | 0.52.6 | MIT OR Apache-2.0 |
+| windows_i686_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
 | windows_i686_msvc | 0.42.2 | MIT OR Apache-2.0 |
+| windows_i686_msvc | 0.52.6 | MIT OR Apache-2.0 |
 | windows_x86_64_gnu | 0.42.2 | MIT OR Apache-2.0 |
+| windows_x86_64_gnu | 0.52.6 | MIT OR Apache-2.0 |
 | windows_x86_64_gnullvm | 0.42.2 | MIT OR Apache-2.0 |
+| windows_x86_64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
 | windows_x86_64_msvc | 0.42.2 | MIT OR Apache-2.0 |
+| windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 |
 | winnow | 0.5.40 | MIT |
 | winnow | 1.0.4 | MIT |
 | winreg | 0.56.0 | MIT |
@@ -487,6 +528,7 @@ bundle a `.app`; `cargo build` does not need it.
 | wry | 0.57.0 | Apache-2.0 OR MIT |
 | x11 | 2.21.0 | MIT |
 | x11-dl | 2.21.0 | MIT |
+| xattr | 1.6.1 | MIT OR Apache-2.0 |
 | yoke | 0.8.3 | Unicode-3.0 |
 | yoke-derive | 0.8.4 | Unicode-3.0 |
 | zbus | 5.19.0 | MIT |
@@ -495,6 +537,7 @@ bundle a `.app`; `cargo build` does not need it.
 | zcheapstr | 1.1.0 | MIT |
 | zerofrom | 0.1.8 | Unicode-3.0 |
 | zerofrom-derive | 0.1.8 | Unicode-3.0 |
+| zeroize | 1.9.1 | Apache-2.0 OR MIT |
 | zerotrie | 0.2.5 | Unicode-3.0 |
 | zerovec | 0.11.8 | Unicode-3.0 |
 | zerovec-derive | 0.11.6 | Unicode-3.0 |

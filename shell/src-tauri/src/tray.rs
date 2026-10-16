@@ -9,6 +9,8 @@
 //!   included; it and Show labels are the shell's own, kept in data/shell-state.json.
 //! - "Set up Bellwether…" (id `setup`, Bellwether.app only) opens the onboarding window
 //!   (plan D6, milestone 7).
+//! - "Check for Updates…" (id `updates`, only in a build that updates itself: updater.rs)
+//!   checks now and says what it found (plan D7, milestone 9).
 //! - Autostart is not here: `bellwether autostart` stays the one way to set it up, and
 //!   nothing here writes LaunchAgents (plan D5).
 //! - Notices (plan D5, milestone 6), above the switches, found once at start: legacy
@@ -88,15 +90,21 @@ pub fn startup_notices() -> Vec<Notice> {
 pub const QUIET: &str = "Quiet (alerts only)";
 pub const HIDE: &str = "Hide everything (for screen sharing)";
 pub const SETUP: &str = "Set up Bellwether…";
+pub const UPDATES: &str = "Check for Updates…";
 
 /// The menu, top to bottom, as words (the log line and its test).
-pub fn menu_words(notices: usize, setup: bool) -> String {
-    format!("{}{QUIET}, {HIDE}, Show labels, {}Quit", if notices == 0 { String::new() } else { format!("{notices} notice(s), ") }, if setup { format!("{SETUP}, ") } else { String::new() })
+pub fn menu_words(notices: usize, setup: bool, updates: bool) -> String {
+    format!(
+        "{}{QUIET}, {HIDE}, Show labels, {}{}Quit",
+        if notices == 0 { String::new() } else { format!("{notices} notice(s), ") },
+        if setup { format!("{SETUP}, ") } else { String::new() },
+        if updates { format!("{UPDATES}, ") } else { String::new() }
+    )
 }
 
 /// `setup`: the "Set up Bellwether…" item, which opens the onboarding window (the app
-/// layout only; plan D6).
-pub fn build(app: &AppHandle<Wry>, kept: Kept, muted: bool, notices: &[Notice], setup: bool) -> tauri::Result<()> {
+/// layout only; plan D6). `updates`: "Check for Updates…" (a build that updates itself).
+pub fn build(app: &AppHandle<Wry>, kept: Kept, muted: bool, notices: &[Notice], setup: bool, updates: bool) -> tauri::Result<()> {
     let mute = CheckMenuItem::with_id(app, "mute", QUIET, true, muted, None::<&str>)?;
     let hide = CheckMenuItem::with_id(app, "hide", HIDE, true, kept.hidden, None::<&str>)?;
     let labels = CheckMenuItem::with_id(app, "labels", "Show labels", true, kept.show_labels, None::<&str>)?;
@@ -104,6 +112,9 @@ pub fn build(app: &AppHandle<Wry>, kept: Kept, muted: bool, notices: &[Notice], 
     let menu = Menu::with_items(app, &[&mute, &hide, &labels, &PredefinedMenuItem::separator(app)?])?;
     if setup {
         menu.append(&MenuItem::with_id(app, "setup", SETUP, true, None::<&str>)?)?;
+    }
+    if updates {
+        menu.append(&MenuItem::with_id(app, "updates", UPDATES, true, None::<&str>)?)?;
     }
     menu.append(&quit)?;
     if !notices.is_empty() {
@@ -123,7 +134,7 @@ pub fn build(app: &AppHandle<Wry>, kept: Kept, muted: bool, notices: &[Notice], 
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .build(app)?;
     app.manage(TrayItems { mute, hide, labels });
-    log(&format!("tray: {}", menu_words(notices.len(), setup)));
+    log(&format!("tray: {}", menu_words(notices.len(), setup, updates)));
     Ok(())
 }
 
@@ -159,6 +170,10 @@ fn on_menu(app: &AppHandle<Wry>, id: &str) {
         "setup" => {
             log("tray: Set up Bellwether…");
             crate::onboarding::open(app);
+        }
+        "updates" => {
+            log("tray: Check for Updates…");
+            crate::updater::check_in_background(app, crate::updater::Trigger::Tray);
         }
         "login-items" => {
             log("tray: opening System Settings > General > Login Items");
@@ -240,8 +255,9 @@ mod tests {
     /// say which one keeps the "!" (Quiet) and which hides everything (Hide everything).
     #[test]
     fn the_switches_say_what_they_hide() {
-        assert_eq!(menu_words(0, false), "Quiet (alerts only), Hide everything (for screen sharing), Show labels, Quit");
-        assert_eq!(menu_words(1, true), "1 notice(s), Quiet (alerts only), Hide everything (for screen sharing), Show labels, Set up Bellwether…, Quit");
+        assert_eq!(menu_words(0, false, false), "Quiet (alerts only), Hide everything (for screen sharing), Show labels, Quit");
+        assert_eq!(menu_words(1, true, false), "1 notice(s), Quiet (alerts only), Hide everything (for screen sharing), Show labels, Set up Bellwether…, Quit");
+        assert_eq!(menu_words(0, true, true), "Quiet (alerts only), Hide everything (for screen sharing), Show labels, Set up Bellwether…, Check for Updates…, Quit");
         let src = include_str!("tray.rs");
         let code = src.split("#[cfg(test)]").next().unwrap();
         // (Split, so tester-m3's scan of tray.rs for menu ids doesn't count these.)
@@ -249,5 +265,16 @@ mod tests {
         assert!(code.contains(r#""mute" => {"#) && code.contains(r#"let action = if brain.muted() { "unmute" } else { "mute" };"#), "Quiet is still the brain's mute");
         assert!(code.contains(r#"if id == "hide" {"#) && code.contains("k.hidden = !k.hidden;"), "Hide everything is still shell-state's hidden");
         assert!(!code.contains("Mute (do not disturb)") && !code.contains("\"Hide the strip\""));
+    }
+
+    /// Milestone 9: the item only asks updater.rs to check (on its own thread); the tray
+    /// itself installs nothing.
+    #[test]
+    fn check_for_updates_only_starts_a_check() {
+        let src = include_str!("tray.rs");
+        let code = src.split("#[cfg(test)]").next().unwrap();
+        let arm = code.split("\"updates\" => {").nth(1).unwrap().split('}').next().unwrap();
+        assert!(arm.contains("crate::updater::check_in_background(app, crate::updater::Trigger::Tray);"));
+        assert!(!code.contains("download_and_install") && !code.contains("UpdaterExt"));
     }
 }
