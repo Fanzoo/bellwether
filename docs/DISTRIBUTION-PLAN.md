@@ -1033,6 +1033,312 @@ moves the plists back from `legacy/` and bootstraps them, and restores the setti
 file from the backup taken in step 5 (after the same sha256 check). It leaves
 Application Support in place.
 
+### D10. Dragging a sheep along the strip
+
+Added 2026-10-16 (deviation 129). It is built in M12.
+
+**What it does.**
+- Press on a sheep and move: the sheep is picked up and dangles under the cursor, playing
+  `carried`.
+- Let go: it falls to the ground of the strip under the cursor and plays `land`. Then it
+  carries on with whatever its session is doing, around that spot.
+- A plain click still makes it hop and brings its session's terminal forward.
+
+**The maintainer's decisions (2026-10-16):**
+- **Where it can be dropped:** along the strip only, left or right, including onto another
+  monitor's strip. It stays on the ground. It is never dropped mid-screen, and there is no
+  full-screen overlay.
+- **After the drop:** it stays and grazes around where it was dropped. When the app
+  restarts, or its session does, it goes back to normal placement. Nothing is persisted.
+- **Interaction:** press and move past a small threshold is a drag; a plain click focuses
+  the session as today. While carried it plays `carried`; on the drop, `land`, then it
+  carries on.
+
+**Code, not a model.** The whole feature is deterministic: player code (JavaScript, with
+`node --test`) and shell code (Rust, with `cargo test`). It needs:
+- no brain change (Node or Rust), no conformance change;
+- no new permission;
+- no new config key;
+- one new strip command.
+
+**Who owns what.**
+- **The pressed strip's webview owns the gesture:** the press, the threshold, the release.
+- **The shell (Rust) owns where the cursor is:** which monitor, which strip window, and the
+  x in that strip.
+- **The shell also owns the drop records.** `Places` gains `dropped`: identityKey →
+  `{monitor, centreX, seq}`, in memory only.
+  - Drop records are kept in the shell and not in a webview because webviews reload: a pet
+    change reloads every strip (deviation 64), and a strip opens and closes as sheep come
+    and go.
+- **The strip on the monitor under the cursor draws the carried sheep.** No other strip
+  draws it.
+
+**Press, click or drag.** This is a pure state machine in a new `player/drag.mjs`, tested
+with `node --test`.
+- **pointerdown on a sheep, primary button: a press.** Nothing visible happens yet: no hop.
+  The webview tells the shell (`sprite_drag` phase `press`), so the window keeps the mouse
+  (below).
+- **Moving more than `DRAG_THRESHOLD_PX` from the press point while pressed starts a
+  drag.** The threshold is a constant, 4 logical px. The webview sends phase `lift`, with
+  the sheep's id and its grab offset (cursor x − sprite left).
+- **pointerup before the threshold is a click,** the same as today: the hop and
+  `sprite_clicked`. A long press without moving is a click too.
+  - **Changed:** the click fires on release, not on press. This can't be avoided: a press
+    can't know yet whether it will be a drag.
+- **pointerup after the lift is a drop.** pointercancel, or any of the cancels below,
+  cancels the drag.
+- **Other buttons and modifier keys:** a right or middle press does what it does today. A
+  primary press with a modifier key is a drag or a click like any other.
+- **Lambs:** a press on a lamb is never a drag (see "Lambs follow" below).
+  - Released within the threshold, it is today's click: it brings the parent's terminal
+    forward.
+  - Moved past the threshold, nothing happens (no click, no drag), and the log says
+    `lamb drag ignored`.
+
+**Click-through during a drag.**
+- **Today:**
+  - every strip ignores the mouse except while the shell's poll finds the cursor over a
+    sprite's box (30 Hz near sprites);
+  - the webview reports its boxes at most 4 times a second.
+- **The problem:** a carried sheep would outrun its box. The poll would then make the window
+  click-through in the middle of the gesture.
+- **The hold.** From `press` until the gesture ends, the pressed strip window accepts the
+  mouse, whatever the boxes say. In `clickthrough.rs`, a window accepts while the cursor
+  is over a box **or** while the window holds the press. There is one hold at a time.
+- **What releases the hold:**
+  - the webview's `release` or `cancel`;
+  - **the fail-safe:** the shell sees no mouse button down for 250 ms. That covers a
+    release that was lost, a webview that reloaded and a crashed page. It counts as a
+    **cancel**;
+  - the window closing;
+  - a 2-minute ceiling.
+- **Why the fail-safe is a Done-when item, not a nicety:** a stuck hold makes the strip's
+  whole band (the monitor's width × `strip.heightPx`) swallow clicks.
+- **Pointer capture.** The webview captures the pointer on the canvas, so moves and the
+  release keep arriving while the cursor is outside the window. AppKit sends dragged and up
+  events to the window that received the mouse-down.
+  - **M12 step 1 proves this.** If it doesn't hold, the shell's cursor poll becomes the
+    source of the position and the release, and the webview owns only the press and the
+    threshold.
+
+**How the carried sheep is drawn.**
+- **Horizontally:** at the cursor x minus the grab offset, in the strip under the cursor,
+  clamped so the whole sprite stays on that strip.
+- **Vertically:** it dangles, with its top at the cursor's y inside the strip, clamped so
+  the sprite stays inside the strip window. With the cursor above the strip, it hangs at
+  the strip's top. It is never drawn outside a strip window.
+- **On top, at full opacity:**
+  - it is drawn last, above bubbles, labels and lambs;
+  - the cursor-near fade doesn't apply to it;
+  - it gets no hover label and no Show-labels label.
+- **Redraw rate.** While a sheep is carried, the strip drawing it redraws on every move, up
+  to the display rate, instead of the 150 ms cap. The cap returns at the drop.
+  - **Budget:** on the pressed strip, the sheep is within one redraw of the cursor. On
+    another monitor's strip, it is within 100 ms.
+  - The idle CPU budget is unchanged, because nothing changes while no sheep is carried.
+- **Its lambs stay on the ground and trot after it.** Their places already follow the
+  parent's x every frame. While the parent is drawn on another monitor, they wait where they
+  are.
+
+**Across monitors.**
+- **Mapping the cursor.** While a hold is active, the shell maps the global cursor to a
+  monitor at the fast poll rate. It then maps it into that monitor's strip window frame
+  (logical px, per-window scale), as `clickthrough.rs` already does.
+- **Which strip wins.** The monitor under the cursor wins, however the monitors are
+  arranged (side by side or stacked).
+- **Strips open at the lift.** The shell opens a strip on every connected monitor that
+  lacks one, so the hand-off is ready when the cursor gets there.
+  - `strips_needed` counts every connected monitor while a drag is active.
+  - After the drop, today's rule closes any strip left with no sheep.
+  - M12 step 1 times how long a new strip takes to show its first snapshot.
+- **Who draws.** While the cursor is on the pressed strip's monitor, that strip draws the
+  sheep from its own pointer events, with no round trip. Elsewhere, the shell publishes
+  `carry` in the shell view: `{label, id, x, y, grabDx}`, `label` being the strip that
+  draws it. The shell publishes only when the owner or the position changes, at most
+  30 times a second. The other strips wake through their existing long poll, as they do
+  for the fade.
+- **The gesture stays with the pressed strip.** It keeps receiving the gesture throughout;
+  only the drawing moves to another strip.
+
+**The drop.**
+- **What the shell records:**
+  - `dropped[identityKey] = {monitor, centreX, seq}`, where `centreX` is the centre in that
+    strip's logical px and `seq` goes up by one per drop;
+  - the sheep's placement moves to that monitor;
+  - `placement` is bumped, so the strips wake.
+- **`view_for`** routes the sheep to that monitor's strip and adds
+  `dropped: {centreX, seq, ghost}` to its flock entry. `ghost` is explained under slot
+  conflicts below.
+- **The receiving strip:**
+  - a new sprite starts at `centreX`, not at home and without `arrive`;
+  - a sprite already on that strip stays where it is;
+  - it falls from where it was held to the ground and plays `land`, once per `seq`;
+  - then it resumes its behaviour.
+- **The strip it left** removes it at once. It doesn't play `leave` and run off: it was
+  carried away. Its lambs leave that strip as they do on today's relocation, and trot out
+  of it again on the new strip.
+- **Its new home is the drop centre.** It wanders there by today's rules.
+  - "Grazes around" means it keeps doing whatever its session is doing, at that spot. It
+    isn't forced to graze (the maintainer's decision, 2026-10-16).
+  - Its wander is `homeWanderPx`, clipped so that its family stays clear of every other
+    family's reach.
+- **Placement leaves a dropped sheep alone.** `needs_locate` skips it: no relocation on the
+  `strip.relocateSec` timer, no move on a new alert, and no move back to its terminal's
+  monitor.
+- **Nothing is persisted.**
+  - `assign_slots` leaves a dropped sheep out of its report, so no `placed` control is ever
+    sent for it.
+  - Its brain `slot` and `slots` are unchanged.
+  - Nothing is written to `shell-state.json` or `state.json`.
+
+**Slot conflicts, including dropping onto another sheep.** This is a pure function,
+`dropHome`, in `layout.mjs`, tested with `node --test`.
+- **Slotted sheep never move for a dropped one.** Slots are the kept contract: colours and
+  slots survive restarts. A drop is a passing choice, so the dropped sheep is the one that
+  gives way.
+- **The ghost band.** If a sheep is dropped on the monitor where placement would put it
+  anyway, `ghost` is true. `familyHomes` then still counts its family at its slot, as an
+  empty band, so picking it up and dropping it moves nobody else.
+  - Dropped onto another monitor, it is a guest there and takes no band. On the strip it
+    left, the others spread out again, as when any sheep leaves (they walk; they never
+    jump).
+- **Reach.** A family's reach is its home ± wander, plus its extent.
+- **Dropped where its family fits clear of every other reach:** its home is the drop
+  centre. Its wander is `homeWanderPx`, cut to the room on the nearer side.
+- **Dropped onto another sheep's reach:** it lands where it was dropped, then walks to the
+  nearest centre where its family fits clear. On a tie, it goes the way it was being
+  carried.
+- **No room anywhere on that strip:** it stays where it was dropped, with wander 0, drawn
+  in front. The log says `no room`.
+- **Re-checked whenever the layout changes** (a sheep arrives, lambs come out): the dropped
+  sheep moves aside again if it must.
+- **Two dropped sheep** treat each other's reach like any other. The later drop gives way.
+- **With the Dock extent known (Accessibility):** the drop stands where it was dropped, on
+  the Dock or beside it, like an overflow family.
+
+**When a drop ends** and the sheep goes back to normal placement (it walks to its home; to
+another monitor, it moves as on today's relocation):
+- **the app restarts**, including `bellwether shell restart`: drop records live in memory
+  only;
+- **its session ends:** the sheep enters `leaving` or is gone from the flock (`/exit`, a
+  crash, reaping). The record is deleted then, so a new `claude` in the same pane that
+  takes the sheep over starts in normal placement;
+  - `/clear` and `/resume` keep the sheep (Decision 8: same pane, no `leaving`), so they
+    keep the drop (the maintainer's decision, 2026-10-16);
+- **the monitor it was dropped on is disconnected;**
+- **it is dragged again:** the new drop replaces the record.
+
+**How it works with the rest of the strip.**
+- **Alerts.**
+  - A sheep can be picked up while it alerts. That is one way to move it out of a crowd.
+  - While carried, it plays `carried` rather than the turn and bounce, and wears the "!"
+    badge instead of its bubble: the bubble layout skips it.
+  - On landing it plays `land`, then the alert's turn, hold and bounce, with its bubble.
+  - A confirmed escalation that arrives mid-carry plays after the landing.
+  - The `alert shown` log line is written when the badge is drawn, as it is for a badge
+    today.
+  - A new alert doesn't relocate a dropped sheep.
+- **Bubbles.** Other sheep's bubbles are laid out as usual, and the carried sheep is drawn
+  over them. A dropped sheep's bubble is laid out from its new x, like any other.
+- **The "lamb" tag.** A carried parent whose lamb is waiting still wears its tag.
+- **Quiet (alerts only).** There are no hitboxes, so nothing can be picked up. Quiet turned
+  on mid-drag cancels the drag. Existing drops stay, and are shown only as badges, as now.
+- **Hide everything, and the hide while sharing.** No pickup while hidden. A hide mid-drag
+  cancels the drag. Drops stay, and are shown again when the strip comes back.
+- **What a cancel does.** The sheep is set down where it was picked up, plays `land`, and
+  nothing is recorded. An earlier drop record, if there was one, stands.
+- **The cursor-near fade** never applies to the carried sheep. After the drop, it applies
+  as usual.
+- **Click to focus** is unchanged, except that it fires on release. A drag never focuses
+  anything.
+- **A pet change mid-drag** reloads the webviews. The fail-safe cancels the drag when the
+  button comes up. Drops survive the reload.
+- **A display change mid-drag** cancels the drag.
+
+**The session ends mid-drag.**
+- The sheep enters `leaving`, or vanishes from the flock, while it is held.
+- The drag ends at once and the hold is released, even with the button still down. The
+  window goes back to click-through. A later mouse-up lands on whatever is underneath,
+  which is harmless.
+- The sheep is set down on the strip under the cursor, at the cursor's x, and runs off as
+  `leave` does today. Its lambs leave with it. No drop is recorded.
+
+**Lambs follow their parent; they can't be dragged** (decided here):
+- A lamb is a subagent. It lives seconds to minutes, has no slot, and only makes sense
+  beside its parent:
+  - families never interleave;
+  - the "lamb" tag points from the parent to its lamb.
+- A lamb left on its own elsewhere would break that reading, and would usually be gone
+  before it mattered.
+- A lamb is 36 px wide. As a drag handle, it would make mis-drags likelier when you mean to
+  click it.
+- So lambs follow their parent: along the strip while it is carried, and to the new monitor
+  at the drop, where they trot out of it again.
+- Pressing a lamb and moving does nothing, so an attempted drag never brings a terminal
+  forward by surprise.
+
+**Keyboard and accessibility.**
+- The strip windows can't take focus and draw on a canvas. Nothing on the strip is reachable
+  by keyboard or VoiceOver today, and the drag doesn't change that.
+- Dragging is cosmetic: no function depends on it. Click to focus, Quiet, Hide and every
+  setting stay reachable as today, through the tray and the CLI.
+- **There is no Escape to cancel.** The strip never has key focus, and a global key watch
+  would need Input Monitoring. To undo a drag, drag the sheep back, or restart the strip.
+- **Pointer devices.** It works with the primary button only. Trackpad tap-to-click,
+  click-and-drag and three-finger drag send the same events; this is checked by hand.
+- **Reduced Motion.** No animation on the strip reads it today, and the drag follows suit.
+
+**Interfaces** (names the developer may keep or improve):
+- **One new strip command:** `sprite_drag {phase: press|lift|release|cancel, id, grabDx?}`.
+  - It goes in `strip.json`'s capability, which then lists seven commands.
+  - The tests that pin the lists move with it: `shell-config.test`, `tester-m3`,
+    `player.test` and `lib.rs`'s capability test.
+  - The id is filtered as `sprite_clicked` filters it.
+- **`ShellView.carry`:** which strip draws the carried sheep, and where. It travels in the
+  `shell` part of the snapshot.
+- **`dropped: {centreX, seq, ghost}`** on a flock entry in `view_for`'s output.
+- **`placement.rs`:** the drop table and its effects on `needs_locate`, `assign_slots` (no
+  report), `strips_needed` (every monitor while a drag is active, and the drop's monitor
+  after it) and `view_for`. It stays pure, tested with made-up monitors as today.
+- **`clickthrough.rs`:** "accepting = over a box, or held", and the fail-safe's decision,
+  both as pure functions.
+- **The player:**
+  - `drag.mjs`;
+  - `dropHome` in `layout.mjs`;
+  - `Sprite` gains a held state. While held:
+    - snapshot behaviour changes are kept but not shown;
+    - it plays `carried` through `idsFor`, which falls back to `walk`;
+    - on release it lands, plays `land` once per `seq`, then shows the kept behaviour.
+  - No DOM in any of it.
+- **A debug flag, `--demo-drag`, with `--demo`.** The webview runs a scripted gesture
+  through the same state machine:
+  1. press demo sheep 2;
+  2. lift it;
+  3. carry it 300 px over 2 s;
+  4. drop it onto sheep 4;
+  5. then click sheep 1 without moving.
+
+  Used with `--snapshot-every`, it is the offline view of the feature.
+- **Log lines**, with no bubble text:
+  - `sheep <id> picked up`;
+  - `sheep <id> dropped on <monitor> at x <n>` (`ghost` or `guest`; `no room` when that
+    applies);
+  - `drag cancelled: <reason>`;
+  - `drop for <id> ended: <reason>`;
+  - `lamb drag ignored`.
+
+**Decided (maintainer, 2026-10-16).** The four questions this design first left open
+were answered as the plan had assumed:
+1. **Where it goes in the order:** M12 runs after M11 and before M10b.
+2. **`/clear` and `/resume`** don't reset a drop: the sheep stays in its pane (Decision 8),
+   and so does the drop. No brain change is needed.
+3. **No "put the sheep back" item in the tray.** Restarting the strip is enough.
+4. **"Grazes around":** a dropped sheep carries on with its session's behaviours around its
+   new spot. It isn't forced to graze.
+
+He also kept the two decisions made here: lambs follow their parent and can't be dragged,
+and a dropped sheep gives way to slotted sheep.
+
 ---
 
 ## Auth and permissions
@@ -1143,6 +1449,9 @@ The order puts the riskiest unknowns first:
 The art (M10) is drawn by the developer agent from text sources in the repository (D8).
 It is split: M10a (the pipeline and the sheep) comes before M11 and 1.0; M10b (the
 aviator goose `brah`) comes after M11, in a later release.
+
+The drag (M12, D10) was added on 2026-10-16. It runs after M11 and before M10b, and ships
+after 1.0.
 
 ### M1. Signed skeleton: one binary, three modes, SMAppService brain
 
@@ -3847,6 +4156,203 @@ Builds:
 - `docs.test.mjs` is updated and green;
 - tag `v1.0.0` ships through M9's pipeline.
 
+### M12. Drag a sheep along the strip (after M11; ships after 1.0, before M10b)
+
+Added 2026-10-16 (deviation 129). The design is D10. The art is already drawn: M10a gave
+the sheep `carried` and `land` (deviation 123).
+
+**Where it goes in the order: after M11, and before M10b** (the maintainer's decision,
+2026-10-16; D10's decided items).
+- **1.0's non-goal is "no new features",** and M11 is the "nothing regressed" release that
+  proves the port. This milestone changes the click itself: it now fires on release, and a
+  held window accepts the mouse. Those are the two things whose failure is most visible:
+  - a click that doesn't focus;
+  - a strip band that swallows clicks.
+
+  They should not change just before the release that is meant to change nothing.
+- **It doesn't depend on M11, and M11 doesn't depend on it.** It has no brain change, so
+  nothing has to be built twice for Node and Rust parity. If one ever becomes necessary,
+  after M11 it is built once, in Rust.
+- **Before M10b,** so the goose's review rounds can see its own `carried` and `land`
+  playing in a real drag. build-pet already requires all 16 behaviours.
+- **Cost:** 1.0 ships the sheep's `carried` and `land` frames with nothing playing them.
+  That is two small animations in the sheet, which is harmless.
+- Running it before M11 was possible, with no dependency either way; the maintainer chose
+  after (2026-10-16).
+
+Builds:
+
+1. **Step 1: prove the gesture on the real window system, before anything else.** Use a
+   debug-only build or a throwaway branch, on the test build with a scratch home. Answer
+   each question, and record the answers in M12's status before building the rest:
+   - (a) After a press on a sheep, with the hold keeping the window's mouse, does the
+     webview keep getting pointer moves and the release with the cursor outside the strip
+     window on the same monitor?
+   - (b) The same, with the cursor on a second monitor?
+   - (c) Does an `ignoresMouseEvents` change mid-gesture break it? (Turn the hold off on
+     purpose to find out.)
+   - (d) Can the shell read whether a mouse button is down (`NSEvent.pressedMouseButtons`,
+     or `CGEventSourceButtonState`) with **no** grants? Check it on the spare account, or
+     after `tccutil reset All` for the test bundle id only.
+   - (e) How long does a new strip take from `open` to drawing its first snapshot?
+
+   **Fallbacks:**
+   - (a) or (b) fails: the shell's cursor poll is the source of the position and the
+     release (D10).
+   - (d) needs a permission: the fail-safe becomes "no pointer event for 10 s, then cancel".
+   - (e) is over 300 ms: the carried sheep stays drawn at the pressed strip's edge until
+     the other strip is ready.
+2. **The player:**
+   - `drag.mjs`, the press, click or drag state machine;
+   - `Sprite`'s held state, `carried`, and `land` once per drop;
+   - `dropHome` in `layout.mjs`, with the ghost band;
+   - in `main.js`:
+     - the click on release;
+     - pointer capture;
+     - the carried sheep drawn last, at full opacity, with a badge and no bubble;
+     - the fast redraw while carrying;
+     - the cancel paths;
+     - lambs that follow and can't be dragged.
+3. **The shell:**
+   - `sprite_drag` and the strip capability's seventh entry;
+   - the hold and its fail-safe in `clickthrough.rs`;
+   - the cursor-to-strip mapping;
+   - `ShellView.carry`;
+   - the drop table in `Places`, with its effects in `placement.rs`: `needs_locate`, no
+     `placed` report, `strips_needed`, `view_for`;
+   - strips opened at the lift;
+   - the log lines.
+4. **`--demo-drag`** (D10).
+5. **The README:**
+   - "Moving a sheep" under "Which monitor, and clicking a sheep": how to drag, where a
+     drop can go, how long it lasts, and that lambs follow;
+   - the click now fires on release;
+   - section 8 gets the by-hand checks below.
+6. **The tests below.**
+
+**Done when:**
+
+- **Click.** A press and release within 4 px on a sheep makes it hop and brings its
+  terminal forward, as before. On a lamb, it brings its parent's terminal forward. Checked
+  by hand with a real session.
+- **Pickup.** A press and a move of 4 px or more: the sheep plays `carried` and dangles
+  under the cursor along the strip, above any bubble, at full opacity. No terminal comes
+  forward.
+- **Drop.**
+  - On release, it falls to the ground at the cursor's x and plays `land`, then its
+    session's behaviour.
+  - It wanders around that spot, within `homeWanderPx` and clear of its neighbours.
+  - It stays there through at least 5 minutes of busy and idle turns, a full
+    `strip.relocateSec` cycle, and a new alert.
+- **Onto another sheep.**
+  - It lands, then walks to the nearest clear spot, and the other sheep doesn't move.
+  - On a strip with no room left, it stays in front and the log says `no room`.
+- **Nobody else moves.** Picking up a sheep and dropping it on its own strip moves no
+  other sheep's home. Checked with the `--demo-drag` snapshots and the layout tests.
+- **Two monitors.**
+  - Carried across, the sheep is drawn on the strip of the monitor under the cursor
+    within 100 ms. That strip is opened at the lift if there was none.
+  - Dropped there, it lives there, and its lambs follow it there.
+  - A strip left with no sheep closes, as today.
+- **Nothing persisted.**
+  - No `placed` control is ever sent for a dropped sheep (unit test, and the brain's log
+    on the by-hand run).
+  - The brain's identity slots and `shell-state.json` are unchanged by drops.
+  - `bellwether shell restart` puts every sheep back in its slot, on its terminal's
+    monitor.
+- **The session ends.**
+  - `/exit` in a dropped sheep's session: the sheep leaves, and a new `claude` in the same
+    tab comes back in its normal slot.
+  - `/clear` and `/resume` keep the drop (the maintainer's decision, 2026-10-16).
+- **Click-through never sticks.** After every way a drag can end, a click on the empty
+  strip band reaches the app underneath within 250 ms of the button coming up. The ways it
+  can end:
+  - a drop;
+  - a cancel;
+  - Quiet turned on mid-drag;
+  - a hide mid-drag;
+  - a pet change mid-drag;
+  - the session ending mid-drag;
+  - a release the webview never saw (simulated by reloading the strip mid-drag).
+- **Quiet and Hide everything.** Nothing can be picked up while either is on. Turned on
+  mid-drag, either one cancels the drag, and the sheep is back where it was picked up.
+- **An imported esheep64** drags with its walk frames and no land, and logs no
+  missing-animation warning.
+- **The log** has a line for each pickup, drop (monitor and x), cancel (reason) and drop
+  end (reason), with no bubble text.
+- **CPU.** The idle budget is unchanged: with no drag under way, the strip uses the same
+  redraw cap as before.
+- **The suites.** `npm test`, `npm run test:cargo`, `npm run test:rust` and `npm run
+  differential` are green. The capability tests list seven strip commands.
+
+**Testing without a live account:**
+
+- **Automated, in `node --test`:**
+  - **`drag.mjs`:**
+    - the threshold boundary (3.9 px is a click, 4.0 px a drag);
+    - a long press is a click;
+    - a lamb press: a click within the threshold, nothing beyond it;
+    - a right press keeps today's behaviour;
+    - a release before the lift is a click;
+    - every cancel path.
+  - **`dropHome`:**
+    - a clear spot;
+    - onto a sheep: the nearest clear spot, and ties going the way it was carried;
+    - no room;
+    - the ghost band;
+    - a guest on another strip;
+    - the Dock extent;
+    - the strip's edges;
+    - a re-check when a new family arrives;
+    - two dropped sheep.
+  - **`Sprite`:**
+    - held keeps snapshot behaviours but doesn't show them;
+    - `carried` falls back to `walk` for a pet without it;
+    - `land` plays once per `seq`;
+    - an alert that arrives while held starts after the landing;
+    - `leave` while held.
+  - **`main.js` source pins** (the existing pattern):
+    - the click handler is on pointerup;
+    - the carried sheep is drawn after the bubbles;
+    - it is exempt from the fade.
+- **Automated, in `cargo test`:**
+  - **`placement.rs`:**
+    - `needs_locate` skips a dropped sheep;
+    - `assign_slots` reports nothing for one;
+    - `strips_needed` with a drag under way, and after a drop;
+    - `view_for` routes the sheep and adds `dropped` and `ghost`;
+    - the drop ends on `leaving`, when the sheep is gone, and when its monitor is
+      disconnected.
+  - **`clickthrough.rs`:**
+    - the window accepts while held;
+    - the fail-safe cancels after 250 ms with no button down;
+    - the 2-minute ceiling.
+  - **The cursor mapping** with made-up monitors: side by side, stacked, scales 1 and 2
+    mixed, a Dock on the left.
+  - **The capability lists.**
+- **Offline view:** `--demo --demo-drag --snapshot-every 1` on the test build
+  (`build-app.mjs --test-port <free> --test-home <scratch>`), with a scratch
+  `BELLWETHER_HOME`. The snapshots show the lift, the carry, the landing and the walk to
+  the nearest clear spot, and every other sheep's x unchanged.
+- **By hand** (the maintainer, about 20 minutes):
+  - **Setup:**
+    - use the test build on a free port with a scratch home, as in M5's by-hand checks;
+    - make sheep with `bellwether replay <fixture> --tag <name>` against that port;
+    - start one real session with `claude --settings <scratch hooks file>` for the click
+      check;
+    - never touch the real `~/.claude/settings.json` or the live strip.
+  - **The checks:**
+    1. Click versus drag, with a mouse and with a trackpad (tap, click-and-drag,
+       three-finger drag).
+    2. A drop onto empty ground, onto another sheep, and onto a full strip.
+    3. A drop while alerting: the badge while carried, then the bubble after landing.
+    4. Quiet and Hide everything mid-drag.
+    5. Two monitors: carry across, drop, carry back. A strip appears and goes.
+    6. The fail-safe: reload the strip mid-drag (a pet change in the setup window), then
+       click a Finder icon under the strip.
+    7. `/exit` and `/clear` on a dropped sheep's session.
+    8. `shell restart` puts everything back.
+
 ## Test plan
 
 | Milestone | What the tester verifies | How, without touching a live account |
@@ -3862,6 +4368,7 @@ Builds:
 | M9 | pipeline | rc tags on a draft release; the updater tested against a `latest.json` on a draft or a local static server via an endpoint override available only in debug builds |
 | M10a, M10b | art: the sheep (before 1.0), then the goose | D8 (a)–(e) and the (h) tripwire in `npm test` and CI on the committed sources; `build-pet review` sheets made offline; a `--demo --snapshot` strip from a test build with a scratch home; the maintainer's review rounds (f) |
 | M11 | nothing regressed | the full suite; a clean install on a fresh account; one migration run |
+| M12 | drag: click versus drag, drops, nothing persisted, click-through never stuck | `drag.mjs`, `dropHome` and `Sprite` in `node --test`; `placement.rs` and `clickthrough.rs` pure tests with made-up monitors in cargo; `--demo --demo-drag --snapshot-every 1` from a test build with a scratch home; by hand on that build with `replay --tag` sheep and one `claude --settings <tmp>` session, never the live strip or settings |
 
 Fixtures and offline modes the developer must provide:
 
@@ -5036,3 +5543,45 @@ Recorded by the developer while fixing BR-3K's M10a review (2026-10-16).
 128. **Script entry guards compare realpaths** (`build-pet`, `build-app`, `release`,
      `third-party`, `test/conformance.mjs`). Before, a symlinked path ran nothing and
      exited 0.
+
+Recorded by the planner for the drag milestone (2026-10-16).
+
+129. **Plan change: a new milestone, M12, lets users drag a sheep along the strip, with
+     its design in D10.**
+     - Plan: the milestones ended at M11, with M10b after it. The Non-goals rule out new
+       features, and no milestone played the `carried` and `land` animations that
+       deviation 123 drew.
+     - True: the maintainer wants a sheep that can be picked up and dropped along the
+       strip, including onto another monitor's strip. It stays where it is dropped until
+       the app or its session restarts, and nothing is persisted (his decisions,
+       2026-10-16, in D10).
+     - Done (planning only; no code):
+       - D10 records the design. It covers:
+         - press, click or drag;
+         - the hold over click-through, and its fail-safe;
+         - the hand-off between monitors;
+         - drops kept in the shell's memory only;
+         - slot conflicts;
+         - alerts, Quiet and Hide;
+         - lambs, which follow their parent and can't be dragged;
+         - keyboard and accessibility.
+       - M12 records the build, with step 1 proving the gesture on the real window system
+         first.
+       - A Test plan row is added.
+     - **Where it goes:** M12 runs after M11 and before M10b. The "no new features"
+       non-goal still holds for 1.0.
+     - **The maintainer's decisions (2026-10-16)** on the four questions D10 first left
+       open, each as the plan had assumed: M12 after M11 and before M10b; `/clear` and
+       `/resume` don't reset a drop; no "put the sheep back" tray item (restarting is
+       enough); a dropped sheep carries on with its session's behaviours around its new
+       spot. He kept D10's own decisions on lambs (they follow, and can't be dragged) and
+       on giving way (a dropped sheep yields to slotted sheep).
+     - **What changes for users:** a click on a sheep now fires on release instead of on
+       press, which a drag needs.
+     - **What doesn't change:**
+       - the brain (Node or Rust) and the conformance contract;
+       - persistence;
+       - the permissions;
+       - `config.json`.
+
+       Only the strip capability gains a seventh command, `sprite_drag`.
