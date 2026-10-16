@@ -175,10 +175,14 @@ describe('M9 release check: the updater key', () => {
     assert.match(problems[0], /SECRET key/);
   });
 
-  test('the CLI exits 1 and names the cause for the repository as it stands', () => {
-    const r = spawnSync(process.execPath, [path.join(AGENT_DIR, 'scripts', 'release.mjs'), 'check', 'v0.1.0'], { encoding: 'utf8' });
+  test('the CLI passes the repository as it stands, and exits 1 naming the cause for a wrong tag', () => {
+    const script = path.join(AGENT_DIR, 'scripts', 'release.mjs');
+    const version = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'package.json'), 'utf8')).version;
+    const ok = spawnSync(process.execPath, [script, 'check', `v${version}`], { encoding: 'utf8' });
+    assert.equal(ok.status, 0, ok.stderr);
+    const r = spawnSync(process.execPath, [script, 'check', 'v9.9.9'], { encoding: 'utf8' });
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /no updater public key/);
+    assert.match(r.stderr, /the tag says 9\.9\.9/);
   });
 
   test('assets refuses with no updater signing key, naming the variable', () => {

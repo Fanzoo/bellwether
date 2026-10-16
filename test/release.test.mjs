@@ -146,11 +146,16 @@ describe('scripts/release.mjs', () => {
       fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
       fs.copyFileSync(path.join(AGENT_DIR, f), path.join(root, f));
     }
+    // Start from the placeholder key, whatever the repository holds now.
+    const distPath = path.join(root, 'shell/src-tauri/tauri.dist.conf.json');
+    const placeholder = JSON.parse(fs.readFileSync(distPath, 'utf8'));
+    placeholder.plugins.updater.pubkey = 'SET-ME: the public key printed by `npx tauri signer generate` (docs/RELEASING.md, one-time setup)';
+    fs.writeFileSync(distPath, JSON.stringify(placeholder, null, 2) + '\n');
     const was = Object.values(versions(root))[0];
     const now = setVersion('0.2.0-rc.1', root);
     assert.ok(Object.values(now).every((v) => v === '0.2.0-rc.1'));
     for (const f of files) {
-      const before = read(f).split('\n');
+      const before = (f === 'shell/src-tauri/tauri.dist.conf.json' ? JSON.stringify(placeholder, null, 2) + '\n' : read(f)).split('\n');
       const after = fs.readFileSync(path.join(root, f), 'utf8').split('\n');
       assert.equal(after.length, before.length, f);
       const changed = before.map((l, i) => [l, after[i]]).filter(([a, b]) => a !== b);

@@ -4,7 +4,7 @@
   "mainBinaryName": "Bellwether",
   "plugins": {
     "updater": {
-      "pubkey": "SET-ME: the public key printed by `npx tauri signer generate` (docs/RELEASING.md, one-time setup)",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBCMTRGN0Y4NTZCQkRFREMKUldUYzNydFcrUGNVQ3htOVh5QWkzK2dkMThid0RYZFlEZ0kzWEluU01NcWxUQms5aDF1QnRiWDEK",
       "endpoints": ["https://github.com/Fanzoo/bellwether/releases/latest/download/latest.json"],
       "requireSignedVersion": true
     }
