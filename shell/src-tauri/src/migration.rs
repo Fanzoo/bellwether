@@ -4,15 +4,17 @@
 //!
 //! Which host, decided before anything is read ([`choose`]):
 //! - **the real HOME** (the passwd entry's): [`Real`] — `/bin/launchctl`, SMAppService
-//!   through `login_items`, signals by exact pid. Refused in a test process (the test
-//!   preload's `BELLWETHER_TEST_ROOT` is set), and refused when a test stand-in is named;
-//! - **any other HOME** (a test): [`Stubbed`] — launchctl and the login items only through
-//!   the stand-in programs named by `BELLWETHER_LAUNCHCTL` and `BELLWETHER_LOGIN_ITEMS` (never
-//!   `/bin/launchctl` itself); without them, neither is called at all, and no new brain is
-//!   waited for.
+//!   through `login_items`, signals by exact pid, and this bundle's strip started and quit as
+//!   `bellwether shell start` / `stop` do (`open -g -a`, SIGTERM by exact pid). Refused in a
+//!   test process (the test preload's `BELLWETHER_TEST_ROOT` is set), and refused when a test
+//!   stand-in is named;
+//! - **any other HOME** (a test): [`Stubbed`] — launchctl, the login items and the strip only
+//!   through the stand-in programs named by `BELLWETHER_LAUNCHCTL`, `BELLWETHER_LOGIN_ITEMS`
+//!   and `BELLWETHER_STRIP` (never `/bin/launchctl` or `/usr/bin/open` themselves); without
+//!   them, none is called at all, and no new brain is waited for.
 //!
-//! So nothing a test does can reach the real launchd or the real login items, and the real
-//! ones are reached only for the real HOME, from Bellwether.app.
+//! So nothing a test does can reach the real launchd, the real login items or a real strip,
+//! and the real ones are reached only for the real HOME, from Bellwether.app.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -27,7 +29,7 @@ use crate::login_items::{self, Service};
 #[derive(Debug, PartialEq, Eq)]
 pub enum Kind {
     Real,
-    Stubbed { launchctl: Option<PathBuf>, login_items: Option<PathBuf> },
+    Stubbed { launchctl: Option<PathBuf>, login_items: Option<PathBuf>, strip: Option<PathBuf> },
 }
 
 /// What this executable is, for the real host: a release Bellwether.app (the permanent id,
@@ -66,14 +68,14 @@ pub fn classify(bundle: &Path, exe: Option<&Path>, id: &str, overrides: (Option<
 /// home, whether this is a test process (`BELLWETHER_TEST_ROOT`), the stand-ins named, and
 /// (for the real home) what this executable is: only a release Bellwether.app may act on,
 /// or even preview, the real home (BR-3K's M8 item: a stale development binary did read it).
-pub fn choose(real_home: bool, test_process: bool, launchctl: Option<&str>, login_items: Option<&str>, build: impl FnOnce() -> AppBuild) -> Result<Kind, String> {
-    let named = launchctl.is_some_and(|s| !s.is_empty()) || login_items.is_some_and(|s| !s.is_empty());
+pub fn choose(real_home: bool, test_process: bool, launchctl: Option<&str>, login_items: Option<&str>, strip: Option<&str>, build: impl FnOnce() -> AppBuild) -> Result<Kind, String> {
+    let named = [launchctl, login_items, strip].iter().any(|v| v.is_some_and(|s| !s.is_empty()));
     if real_home {
         if test_process {
             return Err("refused: this is a test process (BELLWETHER_TEST_ROOT is set) with your real HOME. A migration from a test only ever runs under a temp HOME; nothing was read or changed".into());
         }
         if named {
-            return Err("refused: BELLWETHER_LAUNCHCTL and BELLWETHER_LOGIN_ITEMS are test stand-ins, honoured only under a temp HOME; unset them. Nothing was read or changed".into());
+            return Err("refused: BELLWETHER_LAUNCHCTL, BELLWETHER_LOGIN_ITEMS and BELLWETHER_STRIP are test stand-ins, honoured only under a temp HOME; unset them. Nothing was read or changed".into());
         }
         return match build() {
             AppBuild::Release => Ok(Kind::Real),
@@ -90,18 +92,21 @@ pub fn choose(real_home: bool, test_process: bool, launchctl: Option<&str>, logi
         if real == Path::new("/bin/launchctl") || real.file_name().is_some_and(|n| n == "launchctl") {
             return Err(format!("refused: {var} names launchctl itself ({v}); it must be a stand-in"));
         }
+        if real == Path::new("/usr/bin/open") || real.file_name().is_some_and(|n| n == "open") {
+            return Err(format!("refused: {var} names open itself ({v}); it must be a stand-in"));
+        }
         Ok(Some(p))
     };
-    Ok(Kind::Stubbed { launchctl: stand_in("BELLWETHER_LAUNCHCTL", launchctl)?, login_items: stand_in("BELLWETHER_LOGIN_ITEMS", login_items)? })
+    Ok(Kind::Stubbed { launchctl: stand_in("BELLWETHER_LAUNCHCTL", launchctl)?, login_items: stand_in("BELLWETHER_LOGIN_ITEMS", login_items)?, strip: stand_in("BELLWETHER_STRIP", strip)? })
 }
 
 /// The host for this process and `user_home`.
 pub fn host_for(user_home: &Path) -> Result<Box<dyn Host + Send>, String> {
     let env = |k: &str| std::env::var(k).ok();
-    let kind = choose(bellwether_brain::migrate::is_real_home(user_home), env("BELLWETHER_TEST_ROOT").is_some_and(|v| !v.is_empty()), env("BELLWETHER_LAUNCHCTL").as_deref(), env("BELLWETHER_LOGIN_ITEMS").as_deref(), this_build)?;
+    let kind = choose(bellwether_brain::migrate::is_real_home(user_home), env("BELLWETHER_TEST_ROOT").is_some_and(|v| !v.is_empty()), env("BELLWETHER_LAUNCHCTL").as_deref(), env("BELLWETHER_LOGIN_ITEMS").as_deref(), env("BELLWETHER_STRIP").as_deref(), this_build)?;
     Ok(match kind {
         Kind::Real => Box::new(Real),
-        Kind::Stubbed { launchctl, login_items } => Box::new(Stubbed { launchctl, login_items }),
+        Kind::Stubbed { launchctl, login_items, strip } => Box::new(Stubbed { launchctl, login_items, strip }),
     })
 }
 
@@ -205,6 +210,16 @@ impl Host for Real {
             let mut lines = Vec::new();
             let mut failed = Vec::new();
             for s in [Service::MainApp, Service::Brain] {
+                // Already off (an undo that stopped after this step, run again): SMAppService
+                // would answer an error for an item it has no registration of (deviation 134).
+                // Only NotRegistered: NotFound says SMAppService couldn't find the service (its
+                // plist missing from the bundle, say), which doesn't prove there is no stale
+                // registration, so it goes to unregister and its error names the cause.
+                let now = login_items::status(s);
+                if now == login_items::Status::NotRegistered {
+                    lines.push(login_items::advice(s, now));
+                    continue;
+                }
                 match login_items::unregister(s) {
                     Ok(st) => lines.push(login_items::advice(s, st)),
                     Err(e) => failed.push(format!("{}: {e}", s.name())),
@@ -237,15 +252,50 @@ impl Host for Real {
     fn doctor(&self, home: &Path, settings: &Path, port: u16) -> Vec<String> {
         doctor_lines(home, settings, port)
     }
+    fn strip_acts(&self) -> bool {
+        true
+    }
+    fn start_strip(&mut self) -> Result<String, String> {
+        #[cfg(test)]
+        panic!("a unit test reached the real strip (open)");
+        #[cfg(not(test))]
+        {
+            let bundle = crate::identity::bundle_path().ok_or("not part of Bellwether.app")?;
+            crate::cli::start_strip(&bundle, false).map_err(|(e, _)| e)
+        }
+    }
+    fn stop_strip(&mut self) -> Result<Vec<String>, String> {
+        #[cfg(test)]
+        panic!("a unit test reached the real strip (SIGTERM)");
+        #[cfg(not(test))]
+        {
+            // What `stop_own_instances` printed after an undo before deviation 131: anything of
+            // this bundle still running once the login items went (deviation 134).
+            let quit = crate::cli::quit_strips().map(|(said, _)| said);
+            let rest = crate::cli::stragglers(true);
+            match quit {
+                Ok(mut said) => {
+                    if said.is_empty() && !rest.is_empty() {
+                        said.push("the app's strip wasn't running".into());
+                    }
+                    said.extend(rest);
+                    Ok(said)
+                }
+                Err(e) => Err(std::iter::once(e).chain(rest).collect::<Vec<_>>().join("\n")),
+            }
+        }
+    }
 }
 
 /// What a temp HOME says instead of asking port 47417.
 pub const LIVE_PORT_REFUSAL: &str = "whatever it is: a temp HOME never asks the live port (a test never touches 47417; give the test install another port in its config.json)";
 
-/// A temp HOME: launchctl and the login items only through the stand-ins (tests).
+/// A temp HOME: launchctl, the login items and the strip only through the stand-ins (tests).
+/// The strip's answers `start` and `stop` with what it did, one line each.
 pub struct Stubbed {
     launchctl: Option<PathBuf>,
     login_items: Option<PathBuf>,
+    strip: Option<PathBuf>,
 }
 
 impl Host for Stubbed {
@@ -319,6 +369,24 @@ impl Host for Stubbed {
         // A test may shorten the wait; the real host always waits D9's 10 s.
         std::env::var("BELLWETHER_TEST_VERIFY_MS").ok().and_then(|v| v.parse().ok()).map(Duration::from_millis).unwrap_or(toapp::VERIFY_LIMIT)
     }
+    fn strip_acts(&self) -> bool {
+        self.strip.is_some()
+    }
+    fn strip_why_not(&self) -> String {
+        "HOME is not your real home directory (a test), and no stand-in for the strip is set".into()
+    }
+    fn start_strip(&mut self) -> Result<String, String> {
+        match &self.strip {
+            Some(p) => run(p, &["start".into()]),
+            None => Err("no strip stand-in".into()),
+        }
+    }
+    fn stop_strip(&mut self) -> Result<Vec<String>, String> {
+        match &self.strip {
+            Some(p) => run(p, &["stop".into()]).map(|o| o.lines().filter(|l| !l.trim().is_empty()).map(str::to_string).collect()),
+            None => Err("no strip stand-in".into()),
+        }
+    }
 }
 
 /// Before a real `--write`: what would make registering the login items fail, checked while
@@ -370,14 +438,13 @@ pub fn command(args: &[String]) -> Result<i32, (String, i32)> {
         force: a.has("force"),
         home,
         user_home,
+        // The CLI looks after the strip: started at the end of a migration, quit by an undo.
+        strip: true,
     };
     let r = if a.has("undo") { toapp::undo(&o, host.as_mut()) } else { toapp::to_app(&o, host.as_mut()) };
     match r {
         Ok(out) => {
             bellwether_brain::cli::out(&(out.lines.join("\n") + "\n"));
-            if a.has("undo") && out.wrote && real {
-                crate::cli::stop_own_instances(true);
-            }
             Ok(exit::OK)
         }
         Err(e) => Err((e.message, e.code)),
@@ -396,12 +463,12 @@ mod tests {
     fn the_real_home_only_from_an_installed_release_app() {
         // Spoofed builds only: nothing here runs as an app or reads the real home.
         let not_app = || AppBuild::NotTheApp("/x/target-dev/release-check/release/bellwether-shell isn't inside an app bundle".into());
-        let e = choose(true, false, None, None, not_app).unwrap_err();
+        let e = choose(true, false, None, None, None, not_app).unwrap_err();
         assert!(e.contains("only from an installed Bellwether.app") && e.contains("Nothing was read or changed") && e.contains("release-check"), "{e}");
-        let e = choose(true, false, None, None, || AppBuild::TestBuild("/x/Bellwether.app is a test build (port 47431)".into())).unwrap_err();
+        let e = choose(true, false, None, None, None, || AppBuild::TestBuild("/x/Bellwether.app is a test build (port 47431)".into())).unwrap_err();
         assert!(e.contains("test build"), "{e}");
         // A temp HOME never asks what the build is (stand-ins only).
-        assert_eq!(choose(false, false, None, None, || panic!("not asked")), Ok(Kind::Stubbed { launchctl: None, login_items: None }));
+        assert_eq!(choose(false, false, None, None, None, || panic!("not asked")), Ok(Kind::Stubbed { launchctl: None, login_items: None, strip: None }));
         // What counts: Bellwether.app's own executable (resolved), the permanent id, no test flags.
         let b = Path::new("/Applications/Bellwether.app");
         let exe = b.join("Contents/MacOS/Bellwether");
@@ -418,38 +485,48 @@ mod tests {
 
     #[test]
     fn the_real_machine_only_for_the_real_home_and_never_from_a_test() {
-        assert_eq!(choose(true, false, None, None, release), Ok(Kind::Real));
-        assert!(choose(true, true, None, None, release).unwrap_err().contains("test process"), "a test with the real HOME is refused");
-        assert!(choose(true, false, Some("/tmp/fake"), None, release).unwrap_err().contains("only under a temp HOME"));
-        assert!(choose(true, false, None, Some("/tmp/fake"), release).is_err());
+        assert_eq!(choose(true, false, None, None, None, release), Ok(Kind::Real));
+        assert!(choose(true, true, None, None, None, release).unwrap_err().contains("test process"), "a test with the real HOME is refused");
+        assert!(choose(true, false, Some("/tmp/fake"), None, None, release).unwrap_err().contains("only under a temp HOME"));
+        assert!(choose(true, false, None, Some("/tmp/fake"), None, release).is_err());
         // A temp HOME: stand-ins only, and never launchctl itself.
-        assert_eq!(choose(false, true, None, None, release), Ok(Kind::Stubbed { launchctl: None, login_items: None }));
-        assert!(choose(false, false, Some("/bin/launchctl"), None, release).unwrap_err().contains("launchctl itself"));
-        assert!(choose(false, false, Some("relative/fake"), None, release).unwrap_err().contains("absolute path"));
-        assert!(choose(false, false, Some("/nonexistent/fake"), None, release).is_err());
+        assert_eq!(choose(false, true, None, None, None, release), Ok(Kind::Stubbed { launchctl: None, login_items: None, strip: None }));
+        assert!(choose(false, false, Some("/bin/launchctl"), None, None, release).unwrap_err().contains("launchctl itself"));
+        assert!(choose(false, false, Some("relative/fake"), None, None, release).unwrap_err().contains("absolute path"));
+        assert!(choose(false, false, Some("/nonexistent/fake"), None, None, release).is_err());
         let dir = std::env::temp_dir().join(format!("bw-migration-choose-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let fake = dir.join("fake-launchctl");
         std::fs::write(&fake, "#!/bin/sh\n").unwrap();
         let named = dir.join("launchctl");
         std::fs::write(&named, "#!/bin/sh\n").unwrap();
-        assert!(choose(false, false, named.to_str(), None, release).unwrap_err().contains("launchctl itself"), "not even a copy named launchctl");
+        assert!(choose(false, false, named.to_str(), None, None, release).unwrap_err().contains("launchctl itself"), "not even a copy named launchctl");
         let link = dir.join("link");
         let _ = std::fs::remove_file(&link);
         std::os::unix::fs::symlink("/bin/launchctl", &link).unwrap();
-        assert!(choose(false, false, link.to_str(), None, release).unwrap_err().contains("launchctl itself"), "not through a symlink");
-        assert_eq!(choose(false, false, fake.to_str(), fake.to_str(), release), Ok(Kind::Stubbed { launchctl: Some(fake.clone()), login_items: Some(fake.clone()) }));
+        assert!(choose(false, false, link.to_str(), None, None, release).unwrap_err().contains("launchctl itself"), "not through a symlink");
+        assert_eq!(choose(false, false, fake.to_str(), fake.to_str(), None, release), Ok(Kind::Stubbed { launchctl: Some(fake.clone()), login_items: Some(fake.clone()), strip: None }));
+        // The strip's stand-in: refused with the real HOME, and never open (or launchctl) itself.
+        assert!(choose(true, false, None, None, Some("/tmp/fake"), release).unwrap_err().contains("BELLWETHER_STRIP"));
+        assert!(choose(false, false, None, None, Some("/usr/bin/open"), release).unwrap_err().contains("open itself"));
+        let open_copy = dir.join("open");
+        std::fs::write(&open_copy, "#!/bin/sh\n").unwrap();
+        assert!(choose(false, false, None, None, open_copy.to_str(), release).unwrap_err().contains("open itself"), "not even a copy named open");
+        assert!(choose(false, false, None, None, link.to_str(), release).unwrap_err().contains("launchctl itself"));
+        assert_eq!(choose(false, false, fake.to_str(), fake.to_str(), fake.to_str(), release), Ok(Kind::Stubbed { launchctl: Some(fake.clone()), login_items: Some(fake.clone()), strip: Some(fake.clone()) }));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_temp_home_without_stand_ins_calls_nothing() {
-        let mut h = Stubbed { launchctl: None, login_items: None };
+        let mut h = Stubbed { launchctl: None, login_items: None, strip: None };
         assert!(!h.acts());
         assert_eq!(h.loaded("local.bellwether.brain"), Loaded::NotAsked);
         assert!(h.launchctl(&["bootout".into(), "gui/501/local.bellwether.brain".into()]).is_err());
         assert!(h.register().is_err());
         assert!(h.unregister().is_err());
+        assert!(!h.strip_acts());
+        assert!(h.start_strip().is_err() && h.stop_strip().is_err());
         // The live port is never asked under a temp HOME.
         assert_eq!(h.port_holder(47417), Holder::Other { pid: None, command: Some(LIVE_PORT_REFUSAL.into()) });
         let e = toapp::port_verdict(47417, &h.port_holder(47417), &[], None).unwrap_err();
@@ -462,7 +539,7 @@ mod tests {
         // test build, so no unit test can reach launchctl or SMAppService through it.
         let src = include_str!("migration.rs");
         let real = src.split("impl Host for Real {").nth(1).unwrap().split("\n}\n").next().unwrap();
-        for f in ["fn launchctl(", "fn register(", "fn unregister("] {
+        for f in ["fn launchctl(", "fn register(", "fn unregister(", "fn start_strip(", "fn stop_strip("] {
             let body = real.split(f).nth(1).unwrap_or_else(|| panic!("{f}"));
             let first = body.split('{').nth(1).unwrap().trim_start();
             assert!(first.starts_with("#[cfg(test)]\n        panic!("), "{f} must panic first in a test build");
@@ -472,5 +549,8 @@ mod tests {
         let body = src.split("pub fn command(").nth(1).unwrap();
         assert!(body.find("host_for(&user_home)").unwrap() < body.find("home::dir()").unwrap());
         assert!(body.find("real_write_refusal()").unwrap() < body.find("toapp::to_app").unwrap());
+        // The CLI looks after the strip (step 8, and undo); the setup window never does.
+        assert!(body.contains("strip: true,"));
+        assert!(include_str!("onboarding.rs").split("fn migration_options(").nth(1).unwrap().split("\n    }\n").next().unwrap().contains("strip: false"));
     }
 }

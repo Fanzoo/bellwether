@@ -191,8 +191,10 @@ impl Onboarding {
 
     // ------------------------------------------------------------ step 1: the move (D9)
 
+    /// `strip: false`: this window is the strip, already running, so the run neither starts
+    /// one at the end (the CLI's step 8) nor lists that step.
     fn migration_options(&self, write: bool) -> bellwether_brain::toapp::Options {
-        bellwether_brain::toapp::Options { from: None, env_from: None, settings: self.ctx.settings_file(), write, force: false, home: self.ctx.home.clone(), user_home: self.ctx.user_home.clone() }
+        bellwether_brain::toapp::Options { from: None, env_from: None, settings: self.ctx.settings_file(), write, force: false, home: self.ctx.home.clone(), user_home: self.ctx.user_home.clone(), strip: false }
     }
 
     /// What a preview was worked out from: if any of it differs at Confirm, the user sees a
@@ -1224,6 +1226,18 @@ mod tests {
         fn verify_limit(&self) -> Duration {
             Duration::from_secs(3)
         }
+        // A host that could start the strip: the window still never asks it to (it is the strip).
+        fn strip_acts(&self) -> bool {
+            true
+        }
+        fn start_strip(&mut self) -> Result<String, String> {
+            self.calls.lock().unwrap().push("start strip".into());
+            Ok("started the strip (pid 5150)".into())
+        }
+        fn stop_strip(&mut self) -> Result<Vec<String>, String> {
+            self.calls.lock().unwrap().push("stop strip".into());
+            Ok(vec![])
+        }
     }
 
     #[test]
@@ -1261,6 +1275,7 @@ mod tests {
         let text = p["text"].as_str().unwrap();
         assert!(text.contains("- copy the token from") && text.contains("- rewrite 16 pasture entries") && text.contains("local.bellwether.brain.plist to"), "{text}");
         assert!(!text.contains(T), "masked");
+        assert!(!text.contains("8. The strip"), "the window is the strip: no step 8 in its preview");
         assert!(calls.lock().unwrap().is_empty(), "a preview calls nothing");
         // The settings file changes after the preview: a fresh preview, nothing done.
         std::fs::write(&settings, pasture.replacen("{", "{ ", 1)).unwrap();
@@ -1271,9 +1286,10 @@ mod tests {
         let fresh = r["preview"]["planId"].as_str().unwrap().to_string();
         let done = ob.migration_apply(&fresh).unwrap();
         assert_eq!(done["outcome"], "applied", "{done}");
-        assert_eq!(*calls.lock().unwrap(), ["launchctl bootout gui/501/local.bellwether.brain", "register"]);
+        assert_eq!(*calls.lock().unwrap(), ["launchctl bootout gui/501/local.bellwether.brain", "register"], "no strip started from the window");
         let text = done["text"].as_str().unwrap();
         assert!(text.contains("the new brain answers on port") && !text.contains(T), "{text}");
+        assert!(!text.contains("8. The strip"), "{text}");
         assert!(!agents.join("local.bellwether.brain.plist").exists() && ob.ctx.home.join("legacy").join("local.bellwether.brain.plist").exists());
         assert!(!std::fs::read_to_string(&settings).unwrap().contains("X-Pasture-"));
         assert_eq!(ob.migration_preview().unwrap()["found"], false, "a second look: nothing to migrate");

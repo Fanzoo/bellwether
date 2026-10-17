@@ -127,7 +127,11 @@ describe('M9 cask: nothing outside Bellwether\'s own', () => {
     assert.throws(() => renderCask('1.0.0-$&', 'a'.repeat(64), cask));
     assert.throws(() => renderCask('1.0.0', "$&".repeat(32), cask));
     const out = renderCask('1.0.0', 'b'.repeat(64), cask);
-    assert.equal(out.split('\n').length, cask.split('\n').length);
+    // The template's comment gives way to a two-line header; the cask itself keeps its lines.
+    const body = (t) => t.slice(t.indexOf('cask "bellwether" do')).split('\n').length;
+    assert.equal(body(out), body(cask));
+    assert.equal(out.indexOf('cask "bellwether" do'), out.split('\n').slice(0, 2).join('\n').length + 1);
+    assert.doesNotMatch(out, /\$&/);
   });
 
   test('dmgSha refuses a SHA256SUMS that lists the DMG under a path or with a different name', () => {

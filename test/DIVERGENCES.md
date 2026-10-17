@@ -363,10 +363,13 @@ does, what Rust does and why, and names the test.
   entries alone, into the app (plan D9, milestone 8): the token, the files, a port check, the
   old agents booted out and their plists moved to `legacy/`, the app's login items
   registered and the new brain verified (undone on failure), the hook entries rewritten,
-  doctor. `--undo` puts the agents and the settings file back. `migrate` without either
-  flag is entry 17's, unchanged. Under a HOME that isn't the real home, launchctl and the
-  login items are reached only through test stand-ins (`BELLWETHER_LAUNCHCTL`,
-  `BELLWETHER_LOGIN_ITEMS`), and port 47417 is never asked.
+  doctor, and (from the CLI) the app's strip started unless it runs already. `--undo` puts
+  the agents and the settings file back and quits the app's strip once its login items are
+  unregistered (a strip that won't quit stops it before the old agents start; plan
+  deviation 134). `migrate` without either flag is entry 17's, unchanged. Under a HOME that
+  isn't the real home, launchctl, the login items and the strip are reached only through
+  test stand-ins (`BELLWETHER_LAUNCHCTL`, `BELLWETHER_LOGIN_ITEMS`, `BELLWETHER_STRIP`), and
+  port 47417 is never asked.
 - **Pinned by:** `crates/brain/src/toapp.rs` (a recording host), `shell/src-tauri/tests/migration_fixtures.rs`
   (the three fixture HOMEs through the binary, the held port, the undone swap),
   `shell/src-tauri/src/migration.rs` (which host, and the refusals), and onboarding.rs's

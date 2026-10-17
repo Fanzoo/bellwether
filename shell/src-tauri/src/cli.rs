@@ -322,25 +322,38 @@ fn stop_strips(strips: &[i32]) -> Vec<(i32, bool)> {
 /// was removed), then report anything of this bundle still running. Only processes whose
 /// executable is this exact bundle's, never this process or the ones that started it.
 pub(crate) fn stop_own_instances(app_removed: bool) {
-    let me = std::process::id() as i32;
-    let parent = unsafe { libc::getppid() };
     if app_removed {
         for (pid, stopped) in stop_strips(&own_strips()) {
             if stopped {
                 println!("stopped the running strip (pid {pid})");
             } else {
-                println!("the strip (pid {pid}) didn't quit within 5 s; quit it from the menu-bar sheep, or `kill {pid}`");
+                println!("{}", stuck(pid));
             }
         }
     }
+    stragglers(app_removed).iter().for_each(|x| println!("{x}"));
+}
+
+/// What is still running of this bundle after its login items went (`autostart uninstall`,
+/// `migrate --undo`), 300 ms on: a strip only when the app item stayed, and any other
+/// process but `--action` runs. Never this process or the ones that started it.
+pub(crate) fn stragglers(app_removed: bool) -> Vec<String> {
+    let me = std::process::id() as i32;
+    let parent = unsafe { libc::getppid() };
     std::thread::sleep(Duration::from_millis(300));
+    let mut out = Vec::new();
     for (pid, ppid, args) in crate::identity::bundle_processes().into_iter().filter(|(pid, _, _)| *pid != me && *pid != parent) {
         if !app_removed && is_app_mode(&args) {
-            println!("still running: the strip (pid {pid}); `autostart uninstall --write` without --brain-only stops it");
+            out.push(format!("still running: the strip (pid {pid}); `autostart uninstall --write` without --brain-only stops it"));
         } else if !is_app_mode(&args) && !args.contains("--action") {
-            println!("still running: pid {pid} ({args}, parent {ppid}); it wasn't started by the login item, so it was left alone");
+            out.push(format!("still running: pid {pid} ({args}, parent {ppid}); it wasn't started by the login item, so it was left alone"));
         }
     }
+    out
+}
+
+fn stuck(pid: i32) -> String {
+    format!("the strip (pid {pid}) didn't quit within 5 s; quit it from the menu-bar sheep, or `kill {pid}`")
 }
 
 /// Hands one action to the app through LaunchServices and waits up to 30 s for its
@@ -402,25 +415,48 @@ fn shell_control(sub: &str) -> CliResult {
         return Err(("`bellwether shell start|stop|restart` controls Bellwether.app's strip, and this is a development binary outside the app. In a checkout, the repository's strip is `./bellwether shell start|stop|restart`".into(), exit::NOT_RUNNING));
     };
     if sub != "start" {
-        let running = own_strips();
-        for (pid, stopped) in stop_strips(&running) {
-            if !stopped {
-                return Err((format!("the strip (pid {pid}) didn't quit within 5 s; quit it from the menu-bar sheep, or `kill {pid}`"), exit::UNEXPECTED));
-            }
-            println!("stopped the strip (pid {pid})");
-        }
+        let (said, running) = quit_strips().map_err(|e| (e, exit::UNEXPECTED))?;
+        said.iter().for_each(|x| println!("{x}"));
         if sub == "stop" {
-            if running.is_empty() {
+            if !running {
                 println!("the strip was not running");
             }
             return Ok(exit::OK);
         }
-    } else if let Some(pid) = own_strips().first() {
-        println!("the strip is already running (pid {pid})");
-        return Ok(exit::OK);
+    }
+    println!("{}", start_strip(&bundle, sub == "restart")?);
+    Ok(exit::OK)
+}
+
+/// SIGTERM to this bundle's running strips (`shell stop`, and `migrate --undo --write`): what
+/// was stopped, and whether any ran; Err when one didn't quit within 5 s.
+pub(crate) fn quit_strips() -> Result<(Vec<String>, bool), String> {
+    let running = own_strips();
+    quit_lines(&stop_strips(&running)).map(|said| (said, !running.is_empty()))
+}
+
+/// Each strip's outcome, in order: Ok with the "stopped" lines, or Err with every line, one
+/// per line, the stopped ones included (deviation 134: they were dropped when a later one
+/// failed).
+fn quit_lines(outcomes: &[(i32, bool)]) -> Result<Vec<String>, String> {
+    let said: Vec<String> = outcomes.iter().map(|&(pid, stopped)| if stopped { format!("stopped the strip (pid {pid})") } else { stuck(pid) }).collect();
+    if outcomes.iter().all(|&(_, stopped)| stopped) {
+        Ok(said)
+    } else {
+        Err(said.join("\n"))
+    }
+}
+
+/// Starts `bundle`'s strip through LaunchServices unless one runs already (`shell start` and
+/// `restart`, and the end of `migrate --to-app --write`): what happened.
+pub(crate) fn start_strip(bundle: &Path, restart: bool) -> Result<String, (String, i32)> {
+    if !restart {
+        if let Some(pid) = own_strips().first() {
+            return Ok(format!("the strip is already running (pid {pid})"));
+        }
     }
     let mut cmd = std::process::Command::new("/usr/bin/open");
-    cmd.args(["-g", "-a"]).arg(&bundle);
+    cmd.args(["-g", "-a"]).arg(bundle);
     if let Some(h) = std::env::var_os("BELLWETHER_HOME").filter(|h| !h.is_empty()) {
         let mut kv = std::ffi::OsString::from("BELLWETHER_HOME=");
         kv.push(h);
@@ -440,15 +476,14 @@ fn shell_control(sub: &str) -> CliResult {
         if let Some(&pid) = fresh.first() {
             std::thread::sleep(Duration::from_millis(1500));
             if unsafe { libc::kill(pid, 0) } == 0 {
-                println!("{} the strip (pid {pid}); it starts a brain of its own only if none answers", if sub == "restart" { "restarted" } else { "started" });
-                return Ok(exit::OK);
+                return Ok(format!("{} the strip (pid {pid}); it starts a brain of its own only if none answers", if restart { "restarted" } else { "started" }));
             }
             quit.push(pid);
             continue;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    Err((start_failure(&bundle, &quit), exit::NOT_RUNNING))
+    Err((start_failure(bundle, &quit), exit::NOT_RUNNING))
 }
 
 /// What `shell start` says when no strip stayed up.
@@ -888,8 +923,18 @@ mod tests {
         assert!(start_failure(b, &[30100]).starts_with("the strip started (pid 30100) but quit at once"));
         assert!(start_failure(b, &[]).contains("no strip of it is running after 10 s"));
         let src = include_str!("cli.rs");
-        let body = src.split("fn shell_control(").nth(1).unwrap().split("\nfn ").next().unwrap();
-        assert!(body.find("libc::kill(pid, 0)").unwrap() < body.find("println!(\"{} the strip (pid {pid})").unwrap(), "alive is checked before success is printed");
+        let body = src.split("fn start_strip(").nth(1).unwrap().split("\nfn ").next().unwrap();
+        assert!(body.find("libc::kill(pid, 0)").unwrap() < body.find("Ok(format!(\"{} the strip (pid {pid})").unwrap(), "alive is checked before success is said");
         assert_eq!(command_result("shell", &s(&["start", "--dev"])).unwrap_err().1, exit::BAD_CONFIG);
+    }
+
+    /// Deviation 134: a strip that won't quit no longer hides the ones that did.
+    #[test]
+    fn every_strip_is_reported_when_one_does_not_quit() {
+        assert_eq!(quit_lines(&[]), Ok(vec![]));
+        assert_eq!(quit_lines(&[(11, true), (12, true)]), Ok(vec!["stopped the strip (pid 11)".to_string(), "stopped the strip (pid 12)".to_string()]));
+        let e = quit_lines(&[(11, true), (12, false), (13, true)]).unwrap_err();
+        assert_eq!(e.lines().collect::<Vec<_>>(), ["stopped the strip (pid 11)", &stuck(12), "stopped the strip (pid 13)"]);
+        assert!(stuck(12).contains("didn't quit within 5 s") && stuck(12).contains("`kill 12`"));
     }
 }

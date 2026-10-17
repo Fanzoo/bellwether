@@ -19,12 +19,20 @@
 //!    step 4 is undone (unregister, plists back, old agents bootstrapped) and the run stops;
 //! 5. the hook entries rewritten to the current header names (a backup first);
 //! 6. a word on the old strip's Accessibility entry;
-//! 7. doctor.
+//! 7. doctor;
+//! 8. from the CLI ([`Options::strip`]), the app's strip started, unless it runs already, so
+//!    the sheep show now rather than at the next login. Not from the setup window: the strip
+//!    is the one running it. Not after a run that stopped or undid itself (the old setup,
+//!    with its own strip, keeps running), and not when there was nothing to migrate.
 //!
 //! The repository itself is never changed. `<home>/legacy/migration.json` records what
 //! steps 4 and 5 did, for `--undo`: unregister, plists back and bootstrapped (those that
 //! were loaded), and the settings file restored from step 5's backup, only if it is still
-//! byte for byte what step 5 wrote. Application Support stays.
+//! byte for byte what step 5 wrote. Application Support stays. From the CLI, once the login
+//! items are unregistered, undo also quits the app's strip: the old agents bring their own
+//! back, and a strip left running would be a second one, starting a brain of its own on the
+//! port once the app's stopped. A strip that won't quit stops the undo there, before the old
+//! agents start; the record is kept, and the same command finishes it once the strip is quit.
 //!
 //! Everything launchd, SMAppService and processes is behind [`Host`]: the app's own (the
 //! shell crate, `migration.rs`) acts only for the real HOME; under any other HOME it acts
@@ -96,6 +104,25 @@ pub trait Host {
     fn verify_limit(&self) -> Duration {
         VERIFY_LIMIT
     }
+    /// Whether this host starts and quits the app's strip (step 8, and undo). A host that
+    /// doesn't know the strip never touches it.
+    fn strip_acts(&self) -> bool {
+        false
+    }
+    /// Why not, in a few words, when [`Host::strip_acts`] is false.
+    fn strip_why_not(&self) -> String {
+        "this host doesn't start or quit the strip".into()
+    }
+    /// Starts the app's strip unless one runs already (as `bellwether shell start`): what
+    /// happened, or why it didn't start.
+    fn start_strip(&mut self) -> Result<String, String> {
+        Err(self.strip_why_not())
+    }
+    /// Quits the app's running strip (as `bellwether shell stop`): what happened (nothing
+    /// when none ran), or, one per line, what it stopped and what didn't quit.
+    fn stop_strip(&mut self) -> Result<Vec<String>, String> {
+        Err(self.strip_why_not())
+    }
 }
 
 /// One of the old LaunchAgents.
@@ -161,6 +188,9 @@ pub struct Options {
     pub home: PathBuf,
     /// The user's home directory.
     pub user_home: PathBuf,
+    /// Whether the run looks after the app's strip: a migration starts it at the end (step 8),
+    /// an undo quits it. True from the CLI; false from the setup window, which is the strip.
+    pub strip: bool,
 }
 
 /// Where the token comes from.
@@ -749,6 +779,13 @@ pub fn preview(o: &Options, s: &Survey, host: &dyn Host) -> Vec<String> {
     line(&mut l, "6. Accessibility");
     line(&mut l, "   = the old strip's entry (bellwether-shell or pasture-shell) may stay in System Settings > Privacy & Security > Accessibility: remove it there if you like. Bellwether.app asks for its own");
     line(&mut l, "7. `bellwether doctor` runs at the end");
+    if o.strip {
+        line(&mut l, "8. The strip");
+        match strip_why_not(host) {
+            None => line(&mut l, "   - start Bellwether.app's strip and its menu-bar sheep, unless it runs already (as `bellwether shell start` does), so the sheep show now rather than at your next login"),
+            Some(why) => line(&mut l, format!("   = left alone here: {why}")),
+        }
+    }
     line(&mut l, "");
     match s.source.as_ref().and_then(|x| x.root.as_ref()) {
         Some(r) => line(&mut l, format!("Stays as it is: the repository at {} (its .env, config.json and data/ are never changed or deleted).", r.display())),
@@ -910,9 +947,34 @@ fn apply(o: &Options, s: Survey, host: &mut dyn Host) -> Result<Vec<String>, Bra
     for d in host.doctor(&o.home, &o.settings, s.port) {
         line(&mut l, format!("   {}", mask(&d, Some(&token))));
     }
+
+    // 8. The strip (from the CLI): the sheep now, not at the next login. Only here, after a
+    // run that finished; one that stopped or undid itself returned above.
+    if o.strip {
+        line(&mut l, "8. The strip");
+        match strip_why_not(host) {
+            None => match host.start_strip() {
+                Ok(said) => said.lines().filter(|x| !x.trim().is_empty()).for_each(|x| line(&mut l, format!("   {}", x.trim()))),
+                Err(e) => line(&mut l, format!("   not started: {e}. The migration itself is done; `bellwether shell start` starts the strip, and it starts at your next login anyway")),
+            },
+            Some(why) => line(&mut l, format!("   left alone: {why}")),
+        }
+    }
     line(&mut l, "");
     line(&mut l, "Done. `bellwether migrate --undo` shows how to put the old setup back.");
     Ok(l)
+}
+
+/// Why the app's strip is left alone by this host (None: it is started and quit). Only a host
+/// that acts on launchd and the login items acts on the strip.
+fn strip_why_not(host: &dyn Host) -> Option<String> {
+    if !host.acts() {
+        Some(host.why_not())
+    } else if !host.strip_acts() {
+        Some(host.strip_why_not())
+    } else {
+        None
+    }
 }
 
 fn copy_item(home: &Path, item: &Item, force: bool) -> Result<(), BrainError> {
@@ -1336,7 +1398,30 @@ pub fn undo(o: &Options, host: &mut dyn Host) -> Result<Outcome, BrainError> {
         line(&mut l, format!("   = left alone: {}", host.why_not()));
     } else if w {
         match host.unregister() {
-            Ok(lines) => lines.into_iter().for_each(|x| line(&mut l, format!("   {x}"))),
+            Ok(lines) => {
+                lines.into_iter().for_each(|x| line(&mut l, format!("   {x}")));
+                // The app is no longer set up, so its strip goes too, before the old agents
+                // (with their own strip) start: never two strips, and none left to start a
+                // brain of its own on the port.
+                if o.strip {
+                    match strip_why_not(host) {
+                        None => match host.stop_strip() {
+                            Ok(said) if said.is_empty() => line(&mut l, "   the app's strip wasn't running"),
+                            Ok(said) => said.into_iter().for_each(|x| line(&mut l, format!("   {x}"))),
+                            // A strip still running would be a second one next to the old
+                            // agents' (deviation 134): stop here, before step 3 starts them.
+                            Err(e) => {
+                                e.lines().filter(|x| !x.trim().is_empty()).for_each(|x| line(&mut l, format!("   {}", x.trim())));
+                                line(&mut l, "   STOP: the app's strip is still running, so the old agents were not started (that would make two strips). Quit Bellwether from its menu-bar sheep (Quit Bellwether), then run `bellwether migrate --undo --write` again");
+                                line(&mut l, "");
+                                line(&mut l, format!("Not finished: the plists are back in {}, the app's login items are unregistered and the old agents are not running. The settings file still has the hook entries the migration wrote (step 4 restores them on the next run). The record is kept, so the same command finishes it.", agents_dir.display()));
+                                return Err(BrainError::new(l.join("\n"), exit::UNEXPECTED));
+                            }
+                        },
+                        Some(why) => line(&mut l, format!("   the app's strip: left alone ({why})")),
+                    }
+                }
+            }
             Err(e) => {
                 line(&mut l, format!("   couldn't unregister them ({e})"));
                 left.push("the app's login items are still registered: `bellwether autostart uninstall --write`, then run this again (the old agents are started after that)".into());
@@ -1344,6 +1429,12 @@ pub fn undo(o: &Options, host: &mut dyn Host) -> Result<Outcome, BrainError> {
         }
     } else {
         line(&mut l, "   - unregister the brain agent and the app at login (the app's brain stops)");
+        if o.strip {
+            match strip_why_not(host) {
+                None => line(&mut l, "   - quit the app's strip, if it runs (the old agents bring their own back)"),
+                Some(why) => line(&mut l, format!("   = the app's strip: left alone here ({why})")),
+            }
+        }
     }
 
     line(&mut l, "3. Start the old agents that were running");
@@ -1463,6 +1554,7 @@ mod tests {
         loaded: Vec<(String, Loaded)>,
         holder: Holder,
         register_fails: bool,
+        strip_fails: bool,
     }
 
     impl Host for Rec {
@@ -1510,6 +1602,21 @@ mod tests {
         fn verify_limit(&self) -> Duration {
             Duration::from_millis(300)
         }
+        fn strip_acts(&self) -> bool {
+            true
+        }
+        fn start_strip(&mut self) -> Result<String, String> {
+            self.calls.borrow_mut().push("start strip".into());
+            if self.strip_fails {
+                Err("asked macOS to open /x/Bellwether.app, but no strip of it is running after 10 s".into())
+            } else {
+                Ok("started the strip (pid 5150); it starts a brain of its own only if none answers".into())
+            }
+        }
+        fn stop_strip(&mut self) -> Result<Vec<String>, String> {
+            self.calls.borrow_mut().push("stop strip".into());
+            Ok(vec!["stopped the strip (pid 5150)".into()])
+        }
     }
 
     fn temp(name: &str) -> PathBuf {
@@ -1537,7 +1644,7 @@ mod tests {
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         let block = bellwether_core::lossless::stringify(&installer::hook_block(port, T), "  ") + "\n";
         std::fs::write(&settings, block.replace("X-Bellwether-Token", "X-Pasture-Token")).unwrap();
-        Options { from: None, env_from: None, settings, write: false, force: false, home: base.join("app"), user_home: user }
+        Options { from: None, env_from: None, settings, write: false, force: false, home: base.join("app"), user_home: user, strip: false }
     }
 
     fn free_port() -> u16 {
@@ -1555,7 +1662,7 @@ mod tests {
         let port = free_port();
         let o = world(&base, port);
         let before = std::fs::read(&o.settings).unwrap();
-        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![("local.bellwether.brain".into(), Loaded::Running(4242))], holder: Holder::Free, register_fails: false };
+        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![("local.bellwether.brain".into(), Loaded::Running(4242))], holder: Holder::Free, register_fails: false, strip_fails: false };
         let out = to_app(&o, &mut h).unwrap();
         assert!(!out.wrote);
         let actions: Vec<&String> = out.lines.iter().filter(|l| l.starts_with("   - ")).collect();
@@ -1581,7 +1688,7 @@ mod tests {
         let port = free_port();
         let mut o = world(&base, port);
         o.write = true;
-        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![("local.bellwether.brain".into(), Loaded::Running(4242))], holder: Holder::Other { pid: Some(777), command: Some("/usr/bin/python3 -m http.server".into()) }, register_fails: false };
+        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![("local.bellwether.brain".into(), Loaded::Running(4242))], holder: Holder::Other { pid: Some(777), command: Some("/usr/bin/python3 -m http.server".into()) }, register_fails: false, strip_fails: false };
         let e = to_app(&o, &mut h).err().unwrap();
         assert_eq!(e.code, exit::NOT_RUNNING);
         assert!(e.message.contains(&format!("port {port} is held by pid 777 (python3)")) && e.message.contains("the old setup keeps running"), "{}", e.message);
@@ -1603,7 +1710,7 @@ mod tests {
         let mut o = world(&base, port);
         o.write = true;
         let settings_before = std::fs::read(&o.settings).unwrap();
-        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![("local.bellwether.brain".into(), Loaded::Running(4242)), ("local.bellwether.shell".into(), Loaded::Running(4243))], holder: Holder::Free, register_fails: false };
+        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![("local.bellwether.brain".into(), Loaded::Running(4242)), ("local.bellwether.shell".into(), Loaded::Running(4243))], holder: Holder::Free, register_fails: false, strip_fails: false };
         let e = to_app(&o, &mut h).err().unwrap();
         assert!(e.message.contains("didn't work") && e.message.contains("back as they were"), "{}", e.message);
         let calls = h.calls.borrow().clone();
@@ -1624,7 +1731,7 @@ mod tests {
         let r: Value = serde_json::from_str(&std::fs::read_to_string(record_file(&o.home)).unwrap()).unwrap();
         assert_eq!(r["plists"], json!([]), "the record no longer lists moved plists");
         // Approval pending: the same undo, at once.
-        let mut h2 = Rec { calls: RefCell::new(vec![]), loaded: vec![], holder: Holder::Free, register_fails: true };
+        let mut h2 = Rec { calls: RefCell::new(vec![]), loaded: vec![], holder: Holder::Free, register_fails: true, strip_fails: false };
         let e = to_app(&o, &mut h2).err().unwrap();
         assert!(e.message.contains("waiting for your approval"), "{}", e.message);
         assert!(!h2.calls.borrow().contains(&"unregister".to_string()), "nothing was registered");
@@ -1653,7 +1760,7 @@ mod tests {
             fn doctor(&self, _: &Path, _: &Path, _: u16) -> Vec<String> { vec![] }
             fn verify_limit(&self) -> Duration { Duration::from_millis(200) }
         }
-        let rec = Rec { calls: RefCell::new(vec![]), loaded: vec![("local.bellwether.brain".into(), Loaded::Running(4242))], holder: Holder::Free, register_fails: false };
+        let rec = Rec { calls: RefCell::new(vec![]), loaded: vec![("local.bellwether.brain".into(), Loaded::Running(4242))], holder: Holder::Free, register_fails: false, strip_fails: false };
         let mut h = Watch(rec, o.home.clone(), RefCell::new(vec![]));
         assert!(to_app(&o, &mut h).is_err(), "no brain answers on the free port: undone");
         assert_eq!(*h.2.borrow(), [true, true, true], "set while booting out, registering and (undoing) bootstrapping");
@@ -1676,7 +1783,7 @@ mod tests {
     }
 
     fn rec(loaded: Vec<(String, Loaded)>) -> Rec {
-        Rec { calls: RefCell::new(vec![]), loaded, holder: Holder::Free, register_fails: false }
+        Rec { calls: RefCell::new(vec![]), loaded, holder: Holder::Free, register_fails: false, strip_fails: false }
     }
 
     #[test]
@@ -1714,7 +1821,7 @@ mod tests {
     }
 
     fn world_opts(o: &Options) -> Options {
-        Options { from: o.from.clone(), env_from: o.env_from.clone(), settings: o.settings.clone(), write: o.write, force: o.force, home: o.home.clone(), user_home: o.user_home.clone() }
+        Options { from: o.from.clone(), env_from: o.env_from.clone(), settings: o.settings.clone(), write: o.write, force: o.force, home: o.home.clone(), user_home: o.user_home.clone(), strip: o.strip }
     }
 
     #[test]
@@ -1915,8 +2022,8 @@ mod tests {
     #[test]
     fn nothing_found_is_nothing_to_migrate() {
         let base = temp("nothing");
-        let o = Options { from: None, env_from: None, settings: base.join("settings.json"), write: true, force: false, home: base.join("app"), user_home: base.join("user") };
-        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![], holder: Holder::Free, register_fails: false };
+        let o = Options { from: None, env_from: None, settings: base.join("settings.json"), write: true, force: false, home: base.join("app"), user_home: base.join("user"), strip: true };
+        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![], holder: Holder::Free, register_fails: false, strip_fails: false };
         let out = to_app(&o, &mut h).unwrap();
         assert!(!out.wrote);
         assert!(out.lines[0].starts_with("Nothing to migrate"), "{:?}", out.lines);
@@ -1978,6 +2085,215 @@ mod tests {
         assert_eq!(stray_strip(&src, &P(None)), None, "not running");
         std::fs::write(repo.join("data/shell.pid"), "1\n").unwrap();
         assert_eq!(stray_strip(&src, &P(Some(repo.join("shell/src-tauri/target/release/bellwether-shell")))), None, "never pid 1");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A brain on `port` that takes `T`, playing the app's brain agent once registered (the
+    /// recorder starts nothing); stopped by dropping the sender.
+    fn app_brain(port: u16) -> tokio::sync::oneshot::Sender<()> {
+        let bound = crate::bind(port).unwrap();
+        let opts = crate::Options::new(T.into(), crate::Mode::Normal, crate::Logger::stderr_only());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = crate::serve(bound, opts, Some(rx));
+        });
+        tx
+    }
+
+    /// The fix after the maintainer's rc.1 migration: from the CLI, a migration that finishes
+    /// starts the app's strip (step 8), after everything else; the preview lists it. From the
+    /// setup window (`strip: false`) neither, and the preview has no step 8.
+    #[test]
+    fn a_migration_that_finishes_starts_the_strip_from_the_cli_only() {
+        for strip in [true, false] {
+            let base = temp("cli-only");
+            let port = free_port();
+            let mut o = world(&base, port);
+            o.strip = strip;
+            let mut h = rec(vec![("local.bellwether.brain".into(), Loaded::Running(4242))]);
+            let preview = to_app(&o, &mut h).unwrap().lines.join("\n");
+            assert_eq!(preview.contains("8. The strip\n   - start Bellwether.app's strip and its menu-bar sheep, unless it runs already"), strip, "{preview}");
+            assert!(h.calls.borrow().is_empty(), "a preview starts nothing");
+            let stop = app_brain(port);
+            o.write = true;
+            let out = to_app(&o, &mut h).unwrap();
+            assert!(out.wrote);
+            let text = out.lines.join("\n");
+            assert!(text.contains("the new brain answers on port"), "{text}");
+            let calls = h.calls.borrow().clone();
+            if strip {
+                assert_eq!(calls, ["launchctl bootout gui/501/local.bellwether.brain", "register", "start strip"], "the strip last, once the new brain answers");
+                let at = text.find("8. The strip").expect("step 8 is said");
+                assert!(text.find("7. Doctor").unwrap() < at && text[at..].contains("   started the strip (pid 5150)"), "{text}");
+            } else {
+                assert_eq!(calls, ["launchctl bootout gui/501/local.bellwether.brain", "register"]);
+                assert!(!text.contains("8. The strip"), "{text}");
+            }
+            // A second run (the new brain still answering) finds nothing to migrate and starts
+            // nothing.
+            let mut again_host = rec(vec![]);
+            let again = to_app(&o, &mut again_host).unwrap();
+            drop(stop);
+            assert!(!again.wrote && again.lines[0].starts_with("Nothing to migrate"), "{:?}", again.lines);
+            assert!(again_host.calls.borrow().is_empty());
+            let _ = std::fs::remove_dir_all(&base);
+        }
+    }
+
+    /// A strip that doesn't start doesn't fail a migration that worked: it says so and how.
+    #[test]
+    fn a_strip_that_does_not_start_is_said_and_the_migration_still_succeeds() {
+        let base = temp("no-start");
+        let port = free_port();
+        let mut o = world(&base, port);
+        o.strip = true;
+        o.write = true;
+        let mut h = Rec { calls: RefCell::new(vec![]), loaded: vec![], holder: Holder::Free, register_fails: false, strip_fails: true };
+        let stop = app_brain(port);
+        let out = to_app(&o, &mut h).unwrap();
+        drop(stop);
+        assert!(out.wrote);
+        let text = out.lines.join("\n");
+        assert!(text.contains("   not started: asked macOS to open") && text.contains("`bellwether shell start` starts the strip"), "{text}");
+        assert!(text.ends_with("Done. `bellwether migrate --undo` shows how to put the old setup back."), "{text}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A run that stops (the port held) or undoes itself (no new brain) starts no strip: the
+    /// old setup keeps running, with its own.
+    #[test]
+    fn a_run_that_stops_or_undoes_itself_starts_no_strip() {
+        let base = temp("stopped");
+        let port = free_port();
+        let mut o = world(&base, port);
+        o.strip = true;
+        o.write = true;
+        let mut held = rec(vec![]);
+        held.holder = Holder::Other { pid: Some(777), command: Some("/usr/bin/python3".into()) };
+        assert!(to_app(&o, &mut held).is_err());
+        assert!(held.calls.borrow().is_empty());
+        let mut h = rec(vec![("local.bellwether.brain".into(), Loaded::Running(4242)), ("local.bellwether.shell".into(), Loaded::Running(4243))]);
+        let e = to_app(&o, &mut h).err().unwrap();
+        assert!(e.message.contains("didn't work"), "{}", e.message);
+        let calls = h.calls.borrow().clone();
+        assert!(calls.contains(&"unregister".to_string()) && !calls.iter().any(|c| c == "start strip"), "{calls:?}");
+        assert!(!e.message.contains("8. The strip"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A rerun that finishes an interrupted migration is a migration that finishes: it starts
+    /// the strip too.
+    #[test]
+    fn a_rerun_that_finishes_an_interrupted_migration_starts_the_strip() {
+        let base = temp("rerun");
+        let port = free_port();
+        let mut o = world(&base, port);
+        o.strip = true;
+        o.write = true;
+        // As a run killed during step 4 leaves it: both plists moved, the record says started.
+        let agents = o.user_home.join("Library").join("LaunchAgents");
+        let legacy = legacy_dir(&o.home);
+        std::fs::create_dir_all(&legacy).unwrap();
+        for l in ["local.bellwether.brain", "local.bellwether.shell"] {
+            std::fs::rename(agents.join(format!("{l}.plist")), legacy.join(format!("{l}.plist"))).unwrap();
+        }
+        update_record(&o.home, |r| r["swap"] = Value::from("started")).unwrap();
+        let mut h = rec(vec![]);
+        let preview = to_app(&Options { write: false, ..world_opts(&o) }, &mut h).unwrap().lines.join("\n");
+        assert!(preview.contains("didn't finish") && preview.contains("- start Bellwether.app's strip"), "{preview}");
+        let stop = app_brain(port);
+        let out = to_app(&o, &mut h).unwrap();
+        drop(stop);
+        assert!(out.wrote);
+        assert_eq!(h.calls.borrow().last().map(String::as_str), Some("start strip"), "{:?}", h.calls.borrow());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Undo from the CLI quits the app's strip once its login items are unregistered and
+    /// before the old agents start (they bring their own): never two strips. Not when the
+    /// login items couldn't be unregistered (the app is still the setup).
+    #[test]
+    fn undo_quits_the_strip_before_the_old_agents_start() {
+        let base = temp("undo-quits");
+        let port = free_port();
+        let mut o = world(&base, port);
+        o.strip = true;
+        o.write = true;
+        let mut h = rec(vec![("local.bellwether.brain".into(), Loaded::Running(4242)), ("local.bellwether.shell".into(), Loaded::Running(4243))]);
+        let stop = app_brain(port);
+        assert!(to_app(&o, &mut h).unwrap().wrote);
+        drop(stop);
+        let preview = undo(&Options { write: false, ..world_opts(&o) }, &mut rec(vec![])).unwrap().lines.join("\n");
+        assert!(preview.contains("   - unregister the brain agent and the app at login (the app's brain stops)\n   - quit the app's strip, if it runs (the old agents bring their own back)"), "{preview}");
+        let preview = undo(&Options { write: false, strip: false, ..world_opts(&o) }, &mut rec(vec![])).unwrap().lines.join("\n");
+        assert!(!preview.contains("the app's strip"), "{preview}");
+        // An unregister that fails: the strip stays.
+        struct NoUnregister(Rec);
+        impl Host for NoUnregister {
+            fn acts(&self) -> bool { true }
+            fn domain(&self) -> String { self.0.domain() }
+            fn loaded(&self, l: &str) -> Loaded { self.0.loaded(l) }
+            fn app_agent(&self) -> Option<i32> { None }
+            fn launchctl(&mut self, a: &[String]) -> Result<(), String> { self.0.launchctl(a) }
+            fn register(&mut self) -> Result<Vec<String>, String> { self.0.register() }
+            fn unregister(&mut self) -> Result<Vec<String>, String> { self.0.calls.borrow_mut().push("unregister".into()); Err("SMAppService said no".into()) }
+            fn port_holder(&self, p: u16) -> Holder { self.0.port_holder(p) }
+            fn process_path(&self, _: i32) -> Option<PathBuf> { None }
+            fn terminate(&mut self, _: i32) -> bool { true }
+            fn doctor(&self, _: &Path, _: &Path, _: u16) -> Vec<String> { vec![] }
+            fn strip_acts(&self) -> bool { true }
+            fn start_strip(&mut self) -> Result<String, String> { self.0.start_strip() }
+            fn stop_strip(&mut self) -> Result<Vec<String>, String> { self.0.stop_strip() }
+        }
+        let mut nu = NoUnregister(rec(vec![]));
+        assert!(undo(&o, &mut nu).is_err());
+        assert_eq!(*nu.0.calls.borrow(), ["unregister"], "the strip stays while the app is still set up");
+        // Fixed: the strip quits after the unregister, before the old agents start.
+        let mut u = rec(vec![]);
+        let text = undo(&o, &mut u).unwrap().lines.join("\n");
+        assert!(text.contains("   brain agent: off\n   stopped the strip (pid 5150)"), "{text}");
+        let agents = o.user_home.join("Library").join("LaunchAgents");
+        assert_eq!(
+            *u.calls.borrow(),
+            [
+                "unregister".to_string(),
+                "stop strip".to_string(),
+                format!("launchctl bootstrap gui/501 {}", agents.join("local.bellwether.brain.plist").display()),
+                format!("launchctl bootstrap gui/501 {}", agents.join("local.bellwether.shell.plist").display()),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A host that doesn't act (a temp HOME without stand-ins) leaves the strip alone and says so.
+    #[test]
+    fn a_host_that_does_not_act_leaves_the_strip_alone() {
+        let base = temp("idle");
+        let port = free_port();
+        let mut o = world(&base, port);
+        o.strip = true;
+        struct Idle;
+        impl Host for Idle {
+            fn acts(&self) -> bool { false }
+            fn domain(&self) -> String { "gui/501".into() }
+            fn loaded(&self, _: &str) -> Loaded { Loaded::NotAsked }
+            fn app_agent(&self) -> Option<i32> { None }
+            fn launchctl(&mut self, _: &[String]) -> Result<(), String> { panic!("launchctl") }
+            fn register(&mut self) -> Result<Vec<String>, String> { panic!("register") }
+            fn unregister(&mut self) -> Result<Vec<String>, String> { panic!("unregister") }
+            fn port_holder(&self, _: u16) -> Holder { Holder::Free }
+            fn process_path(&self, _: i32) -> Option<PathBuf> { None }
+            fn terminate(&mut self, _: i32) -> bool { panic!("terminate") }
+            fn doctor(&self, _: &Path, _: &Path, _: u16) -> Vec<String> { vec![] }
+            fn strip_acts(&self) -> bool { true }
+            fn start_strip(&mut self) -> Result<String, String> { panic!("start strip") }
+            fn stop_strip(&mut self) -> Result<Vec<String>, String> { panic!("stop strip") }
+        }
+        let text = to_app(&o, &mut Idle).unwrap().lines.join("\n");
+        assert!(text.contains("8. The strip\n   = left alone here: HOME is not your real home directory (a test)"), "{text}");
+        o.write = true;
+        let text = to_app(&o, &mut Idle).unwrap().lines.join("\n");
+        assert!(text.contains("8. The strip\n   left alone: HOME is not your real home directory (a test)"), "{text}");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

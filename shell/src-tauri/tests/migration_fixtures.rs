@@ -5,9 +5,10 @@
 //! Nothing here can reach the real launchd, the real login items or the live install:
 //! - every run gets a temp HOME (and BELLWETHER_TEST_ROOT, so a run that somehow got the
 //!   real HOME is refused before it reads anything; `migration.rs`, `choose`);
-//! - launchctl is `fake-launchctl` and the login items are `fake-login-items`, two small
-//!   shell scripts written here (BELLWETHER_LAUNCHCTL, BELLWETHER_LOGIN_ITEMS). The binary
-//!   refuses a stand-in that is launchctl itself;
+//! - launchctl is `fake-launchctl`, the login items are `fake-login-items` and the app's
+//!   strip is `fake-strip`, small shell scripts written here (BELLWETHER_LAUNCHCTL,
+//!   BELLWETHER_LOGIN_ITEMS, BELLWETHER_STRIP). The binary refuses a stand-in that is
+//!   launchctl or open itself. The fake strip only logs what it was asked: no strip starts;
 //! - "launchd's" agents are processes this test starts: a Rust brain playing the old Node
 //!   brain on a free port (never 47417), and a `sleep` playing the old strip. The fake
 //!   launchctl's `bootout` stops exactly the pid this test wrote for that label; the fake
@@ -112,6 +113,30 @@ case "$1" in
     fi
     echo "app at login: off"
     echo "brain agent: off" ;;
+esac
+"#;
+
+const FAKE_STRIP: &str = r#"#!/bin/sh
+# A stand-in for Bellwether.app's strip (`shell start` / `shell stop`), for tests only. It
+# starts nothing: "running" is the file $FAKE_STATE/strip-running.
+S="$FAKE_STATE"
+echo "$1" >> "$S/strip.log"
+case "$1" in
+  start)
+    if [ -f "$S/strip-running" ]; then echo "the strip is already running (pid 5150)"; exit 0; fi
+    : > "$S/strip-running"
+    echo "started the strip (pid 5150); it starts a brain of its own only if none answers" ;;
+  stop)
+    if [ -f "$S/strip-stuck" ]; then
+      # Two strips: one quits, the other doesn't within 5 s (deviation 134).
+      echo "stopped the strip (pid 5151)"
+      echo "the strip (pid 5150) didn't quit within 5 s; quit it from the menu-bar sheep, or \`kill 5150\`"
+      exit 1
+    fi
+    if [ -f "$S/strip-running" ]; then rm -f "$S/strip-running"; echo "stopped the strip (pid 5150)"; fi ;;
+  *)
+    echo "fake strip: $1 isn't supported" >&2
+    exit 64 ;;
 esac
 "#;
 
@@ -268,7 +293,7 @@ fn world(root: &Path, kind: Kind) -> World {
         // Another of the user's LaunchAgents, never touched.
         std::fs::write(agents.join("com.example.other.plist"), plist("com.example.other", &["/usr/bin/true".into()], &home)).unwrap();
     }
-    for (name, text) in [("fake-launchctl", FAKE_LAUNCHCTL), ("fake-login-items", FAKE_LOGIN_ITEMS)] {
+    for (name, text) in [("fake-launchctl", FAKE_LAUNCHCTL), ("fake-login-items", FAKE_LOGIN_ITEMS), ("fake-strip", FAKE_STRIP)] {
         std::fs::write(state.join(name), text).unwrap();
         std::fs::set_permissions(state.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -306,6 +331,7 @@ impl World {
             .env("BELLWETHER_TEST_ROOT", &self.base)
             .env("BELLWETHER_LAUNCHCTL", self.state.join("fake-launchctl"))
             .env("BELLWETHER_LOGIN_ITEMS", self.state.join("fake-login-items"))
+            .env("BELLWETHER_STRIP", self.state.join("fake-strip"))
             .env("BELLWETHER_TEST_VERIFY_MS", "4000")
             .env("FAKE_STATE", &self.state)
             .env("FAKE_BIN", BIN)
@@ -401,6 +427,7 @@ fn expected_actions(w: &World) -> Vec<String> {
     if w.kind == Kind::Pasture {
         a.push("rewrite 16 pasture entries (X-Pasture-*) with the current header names, a backup first (diff below, token masked)".into());
     }
+    a.push("start Bellwether.app's strip and its menu-bar sheep, unless it runs already (as `bellwether shell start` does), so the sheep show now rather than at your next login".into());
     a
 }
 
@@ -430,6 +457,7 @@ fn check_fixture(kind: Kind) {
     assert_eq!(std::fs::read(&w.settings).unwrap(), original_settings);
     assert_eq!(tree(&w.app), app_before, "a preview writes nothing");
     assert!(w.log("launchctl.log").is_empty() && w.log("login.log").is_empty(), "a preview only asks launchd (print)");
+    assert!(w.log("strip.log").is_empty(), "a preview starts no strip");
 
     // --write.
     let (code, out, err) = w.run(&["migrate", "--to-app", "--write"]);
@@ -453,6 +481,9 @@ fn check_fixture(kind: Kind) {
     assert_eq!(hook.status, 204, "the old hooks' token is the new brain's");
     assert!(out.contains("the new brain answers on port"), "{out}");
     assert!(out.contains("7. Doctor"), "{out}");
+    // The fix after the maintainer's rc.1 install: the strip starts at the end, and it says so.
+    assert_eq!(w.log("strip.log"), ["start"], "the strip is started once the migration finished");
+    assert!(out.contains("8. The strip\n   started the strip (pid 5150)"), "{out}");
 
     // Application Support.
     let mut want: BTreeSet<String> = ["hook-token", "legacy/", "legacy/migration.json", "legacy/migrate.lock"].into_iter().map(String::from).collect();
@@ -530,18 +561,23 @@ fn check_fixture(kind: Kind) {
         assert!(out.starts_with("Nothing to migrate"), "{args:?}: {out}");
     }
     assert_eq!(w.log("login.log"), ["register"], "the second run registers nothing");
+    assert_eq!(w.log("strip.log"), ["start"], "nor starts the strip again");
 
     // --undo: a preview, then the original settings bytes and plists back.
     let (code, out, err) = w.run(&["migrate", "--undo"]);
     assert_eq!(code, 0, "{out}{err}");
     assert!(out.contains("- unregister the brain agent and the app at login"), "{out}");
+    assert!(out.contains("- quit the app's strip, if it runs (the old agents bring their own back)"), "{out}");
     assert_eq!(after, std::fs::read(&w.settings).unwrap(), "a preview changes nothing");
+    assert_eq!(w.log("strip.log"), ["start"], "an undo preview quits nothing");
     let (code, out, err) = w.run(&["migrate", "--undo", "--write"]);
     if show {
         eprintln!("==== {kind:?}: migrate --undo --write\n{out}{err}");
     }
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(w.log("login.log"), ["register", "unregister"]);
+    assert_eq!(w.log("strip.log"), ["start", "stop"], "the undo quits the app's strip: the old agents bring their own");
+    assert!(out.contains("stopped the strip (pid 5150)") && !w.state.join("strip-running").exists(), "{out}");
     let mut lc = booted.clone();
     lc.extend(original_plists.iter().map(|(p, _)| format!("bootstrap gui/{uid} {}", p.display())));
     assert_eq!(w.log("launchctl.log"), lc, "the agents that were loaded are started again");
@@ -626,6 +662,7 @@ fn a_port_held_by_something_else_leaves_the_old_setup_running() {
     assert!(err.contains("Nothing was changed: the old setup keeps running"), "{err}");
     assert!(w.log("launchctl.log").is_empty(), "nothing was booted out: {:?}", w.log("launchctl.log"));
     assert!(w.log("login.log").is_empty());
+    assert!(w.log("strip.log").is_empty(), "no strip started by a run that stopped");
     assert!(w.procs.alive(spid), "the old strip still runs");
     assert!(w.state.join("loaded").join(w.labels[0]).exists() && w.state.join("loaded").join(w.labels[1]).exists());
     for (l, bytes) in w.labels.iter().zip(&plists) {
@@ -654,6 +691,7 @@ fn a_new_brain_that_never_comes_up_puts_the_old_agents_back() {
     want.extend(w.labels.iter().map(|l| format!("bootstrap gui/{uid} {}", w.agents.join(format!("{l}.plist")).display())));
     assert_eq!(w.log("launchctl.log"), want);
     assert_eq!(w.log("login.log"), ["register", "unregister"]);
+    assert!(w.log("strip.log").is_empty(), "a run that undid itself starts no strip: the old one is back");
     for l in w.labels {
         assert!(w.agents.join(format!("{l}.plist")).exists());
         assert!(w.state.join("loaded").join(l).exists(), "{l} is loaded again");
@@ -732,6 +770,7 @@ fn a_run_killed_during_step_4_is_finished_by_the_next_run() {
     assert_eq!(code, 0, "the rerun finishes it (the dead run's lock is taken over): {out}{err}");
     assert!(out.contains("the new brain answers on port"), "{out}");
     assert_eq!(w.log("login.log"), ["register", "register"]);
+    assert_eq!(w.log("strip.log"), ["start"], "the run that finishes it starts the strip (the killed one never got there)");
     assert_eq!(hook_with(w.port, TOKEN), 204);
     assert!(!w.app.join("legacy/swapping").exists());
     let (_, out, _) = w.run(&["migrate", "--to-app"]);
@@ -747,6 +786,47 @@ fn a_run_killed_during_step_4_is_finished_by_the_next_run() {
     for l in w.labels {
         assert!(w.agents.join(format!("{l}.plist")).exists());
     }
+    drop(w);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Deviation 134: an undo whose app strip won't quit stops before the old agents start (two
+/// strips otherwise), says how to go on and what the strips did, keeps the record, and the
+/// same command finishes once the strip is quit.
+#[test]
+fn an_undo_whose_strip_will_not_quit_starts_no_old_agents_and_can_run_again() {
+    let root = std::env::temp_dir().join(format!("bw-m8-stuck-{}", std::process::id()));
+    let mut w = world(&root, Kind::Renamed);
+    w.start_old_agents();
+    let original: Vec<Vec<u8>> = w.labels.iter().map(|l| std::fs::read(w.agents.join(format!("{l}.plist"))).unwrap()).collect();
+    let (code, out, err) = w.run(&["migrate", "--to-app", "--write"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let migrated = std::fs::read(&w.settings).unwrap();
+    let booted = w.log("launchctl.log");
+    std::fs::write(w.state.join("strip-stuck"), "").unwrap();
+    let (code, out, err) = w.run(&["migrate", "--undo", "--write"]);
+    assert_ne!(code, 0, "{out}{err}");
+    assert!(err.contains("stopped the strip (pid 5151)") && err.contains("the strip (pid 5150) didn't quit within 5 s"), "every strip's line: {err}");
+    assert!(err.contains("STOP: the app's strip is still running, so the old agents were not started"), "{err}");
+    assert!(err.contains("Quit Bellwether from its menu-bar sheep") && err.contains("`bellwether migrate --undo --write` again"), "{err}");
+    assert!(err.contains("record is kept") && !err.contains("Done."), "{err}");
+    assert!(err.contains("still has the hook entries the migration wrote") && !err.contains("as it was"), "the settings file isn't restored yet: {err}");
+    assert_eq!(w.log("launchctl.log"), booted, "no old agent bootstrapped");
+    assert_eq!(w.log("login.log"), ["register", "unregister"]);
+    assert_eq!(std::fs::read(&w.settings).unwrap(), migrated, "the settings file is left as the migration wrote it");
+    assert!(w.app.join("legacy/migration.json").exists(), "the record is kept");
+    // Quit by hand; the same command finishes it.
+    std::fs::remove_file(w.state.join("strip-stuck")).unwrap();
+    std::fs::remove_file(w.state.join("strip-running")).unwrap();
+    let (code, out, err) = w.run(&["migrate", "--undo", "--write"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("the app's strip wasn't running") && out.contains("Done."), "{out}");
+    let uid = w.uid();
+    assert!(w.log("launchctl.log").iter().filter(|l| l.starts_with(&format!("bootstrap gui/{uid} "))).count() == 2, "{:?}", w.log("launchctl.log"));
+    for (l, bytes) in w.labels.iter().zip(&original) {
+        assert_eq!(&std::fs::read(w.agents.join(format!("{l}.plist"))).unwrap(), bytes);
+    }
+    assert!(!w.app.join("legacy/migration.json").exists());
     drop(w);
     let _ = std::fs::remove_dir_all(&root);
 }

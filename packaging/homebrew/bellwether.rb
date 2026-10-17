@@ -1,7 +1,8 @@
 # The Homebrew cask for Bellwether (distribution plan D7, milestone 9). This is the
 # template: the tap workflow (.github/workflows/tap.yml) renders it for each published
 # release with `node scripts/release.mjs cask` (the version and the DMG's sha256 replace
-# the zeros below) and opens a pull request on Fanzoo/homebrew-tap as Casks/bellwether.rb.
+# the zeros below, and this comment gives way to a two-line header saying the file is
+# generated) and opens a pull request on Fanzoo/homebrew-tap as Casks/bellwether.rb.
 cask "bellwether" do
   version "0.0.0"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"

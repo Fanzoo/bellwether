@@ -3440,17 +3440,20 @@ last login (not a herdr pane from before it).
    pid <Node brain>)`; both agents stopped and moved to `legacy/`; and hook entries **already
    current** (no diff). If it shows a hook diff or a STOP, stop here and compare.
 4. **Move**: `"$B" migrate --to-app --write`. Expect exit 0, step 4 ending `the new brain answers on
-   port 47417 (pid N) and takes the hook token (… ms)`, step 5 `already current: unchanged`, and
-   doctor at the end. If it says an item is **waiting for your approval**, everything was undone
-   (the Node brain is back): turn Bellwether on in System Settings > General > Login Items &
-   Extensions, then run step 4 again. If the run is interrupted (terminal closed, Ctrl-C), run
+   port 47417 (pid N) and takes the hook token (… ms)`, step 5 `already current: unchanged`,
+   doctor, and step 8 `started the strip (pid M)` (or `the strip is already running`). If it
+   says an item is **waiting for your approval**, everything was undone (the Node brain is
+   back): turn Bellwether on in System Settings > General > Login Items & Extensions, then run
+   step 4 again. If the run is interrupted (terminal closed, Ctrl-C), run
    step 3 again: it says the migration is unfinished and step 4 finishes it (or `--undo
    --write` puts the old setup back).
 5. **Check**:
    1. `ps -o ppid,args -p N`: `1 /Applications/Bellwether.app/Contents/MacOS/Bellwether serve`;
       `ls ~/Library/LaunchAgents | grep -c local.bellwether` prints 0.
-   2. The strip: if no sheep appear, `"$B" shell start`. The two sessions from step 2 show
-      **the same colours and slots** (screenshot to compare).
+   2. The strip: the migration started it (step 8, deviation 131), so the sheep and the
+      menu-bar sheep are up without `shell start`; if step 8 said `not started`, note why and
+      run `"$B" shell start`. The two sessions from step 2 show **the same colours and slots**
+      (screenshot to compare).
    3. In a session started **before** step 4, ask for something that needs permission: its sheep
       alerts with a bubble.
    4. `"$B" doctor`: brain (the Rust brain), brain token, hooks, `login: brain` and `login: app`
@@ -3462,8 +3465,11 @@ last login (not a herdr pane from before it).
    6. A second `"$B" migrate --to-app` says `Nothing to migrate`.
 6. **Accessibility**: as M5 switch-over step 8.
 7. **Rollback, if anything is wrong**: `"$B" migrate --undo` (preview), then `--undo --write`: the
-   login items go, the two plists come back and are started, and the settings file is restored
-   only if nothing else changed it (here it wasn't changed at all). Check `curl -s
+   login items go, the app's strip quits (`stopped the strip (pid M)`), the two plists come
+   back and are started (the old strip with them), and the settings file is restored only if
+   nothing else changed it (here it wasn't changed at all). If the strip doesn't quit within
+   5 s, the undo stops before starting the old agents (deviation 134): Quit Bellwether from
+   its menu-bar sheep and run `--undo --write` again. Check `curl -s
    http://127.0.0.1:47417/health` shows a Node brain again. If the plists aren't back, step 2's
    copies on the Desktop and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.bellwether.brain.plist`
    (and `.shell`) do it by hand.
@@ -3870,7 +3876,7 @@ Tested here:
   animation, `selftest: done PASS`. The bundle's `Resources/pets/bellwether/animations.xml`
   has the pinned sha256. A `--demo --snapshot` run drew the flock as sheep in helmets.
 
-Review round 1 (the first look, (f) round 1 of 3): sheets in `/private/tmp/claude-501/-Users-jefffansler-Documents-projects-jeff-agent-hub/ab75b3b8-7e3b-4e7b-8be0-906d57f36b4d/scratchpad/m10a-round1/`:
+Review round 1 (the first look, (f) round 1 of 3): sheets in a scratch directory (`m10a-round1/`):
 `bellwether-overview.png` (every frame at 8×, `#FF8C00` on light and `#202020` on dark;
 then strip sizes at 2× and 1×), the eight `bellwether-{sheep,lamb}-{1x,2x}-{light,dark}.png`,
 and `bellwether-live-strip-light-dark.png` (two live `--demo` snapshots on light and dark).
@@ -3891,7 +3897,7 @@ The maintainer's requests (2026-10-16, through the coordinator), verbatim in sub
    them if it's cheap".
 What changed: see round 2.
 
-Review round 2 ((f) round 2 of 3, 2026-10-16): in `/private/tmp/claude-501/-Users-jefffansler-Documents-projects-jeff-agent-hub/ab75b3b8-7e3b-4e7b-8be0-906d57f36b4d/scratchpad/m10a-round2/`: `review.html` (the animated
+Review round 2 ((f) round 2 of 3, 2026-10-16): in a scratch directory (`m10a-round2/`): `review.html` (the animated
 preview, below), `bellwether-overview.png`, the eight gate (f) sheets, and
 `bellwether-live-strip-light-dark.png` (a live `--demo` strip from the rebuilt test bundle;
 `--selftest` PASS, and the bundle's Resources file has the new pin). What changed for each
@@ -3936,7 +3942,7 @@ looks great." The direction is approved, with no changes requested. This is not 
 ship approval, which covers every animation (round 3).
 
 Review round 3 ((f) round 3 of 3, 2026-10-16): every animation, for the final sign-off.
-In `/private/tmp/claude-501/-Users-jefffansler-Documents-projects-jeff-agent-hub/ab75b3b8-7e3b-4e7b-8be0-906d57f36b4d/scratchpad/m10a-round3/`:
+In a scratch directory (`m10a-round3/`):
 - `review.html`: all 17 animations in place, walking and running bands, and the alert
   cycle (the confirmed alert now plays its own jump);
 - `bellwether-overview.png`: every frame at 5×, then the middle frame of every animation
@@ -4011,7 +4017,7 @@ Round 3b (2026-10-16): the maintainer's one change, done (deviation 125).
   declared in `pet.json`, packed as two extra tiles and pinned. The strip draws it above
   the head on the side the sheep faces, never mirrored, at the same times and positions
   as before. The sheep's own frames are unchanged.
-- **To glance at**, in `/private/tmp/claude-501/-Users-jefffansler-Documents-projects-jeff-agent-hub/ab75b3b8-7e3b-4e7b-8be0-906d57f36b4d/scratchpad/m10a-round3b/`:
+- **To glance at**, in a scratch directory (`m10a-round3b/`):
   - `review.html`: a new "Asleep, facing both ways" scene, plus everything as before;
   - the sheets, now with a "sleep loop facing right" row;
   - `bellwether-live-strip-light-dark.png`: three live `--demo` runs from the rebuilt test
@@ -5585,3 +5591,267 @@ Recorded by the planner for the drag milestone (2026-10-16).
        - `config.json`.
 
        Only the strip capability gains a seventh command, `sprite_drag`.
+
+Recorded by the developer while fixing the flaky Rust throughput test (2026-10-17, for
+0.2.0-rc.2).
+
+130. **The "/hook p99 under 5 ms" test: same bounds, same conditions for both brains, and
+     its retries work.**
+     - Plan: the test judges the best of up to three 2 s bursts at 200 events/s (M3 review
+       fixes), and it is the same test for both brains.
+     - True: in CI the Rust cell failed in runs 38983930056 and 38989244730, about 2 in
+       13 runs, and passed on rerun. Node never failed there. Two causes, both measured:
+       - **The retries never ran.** Bursts 2 and 3 went to the same brain with the same
+         session, which changes nothing a snapshot shows, so each saw 0 snapshots. The
+         test counted them as starved, so only the first burst was judged (24 of 24
+         probe runs, both brains). The failing CI runs took 57.5 and 58.1 s against
+         43–46 s for passing ones. The extra time is the two starved bursts and their
+         recalibrations. Locally, a failing run of the old test takes 11.5 s against
+         4.3 s for a passing one.
+       - **The two brains weren't held to the same conditions.** The Rust harness
+         (`rustStartBrain`) saves state.json every 200 ms, so the tests that read it back
+         don't wait. brain.mjs's default and the shipped brain's is 2 s. Every hook marks
+         the state dirty, so the Rust brain wrote state.json 11 times per burst and Node
+         once. The write is synchronous on the serving thread in both brains (as
+         planned).
+         - Instrumented in a scratch build, each save took 0.5–1.2 ms on this Mac's SSD
+           and up to 3.5 ms under disk load. The hook handler never took 0.3 ms.
+         - Make each save 3 ms slower, as a slow runner disk would, and the old test fails
+           3 in 10. At 6 ms slower it fails 10 in 10 (p99 6.9–8.8 ms, p50 0.5–0.7 ms).
+           The new test passes 10 in 10 at each.
+       - Not a slow Rust brain. The debug Rust brain's p99 matched or beat Node's in every
+         local condition tried: idle, 60 and 150 busy processes on 18 cores, background
+         QoS, and disk load. At 150 busy processes both failed a burst sometimes (Rust 2
+         of 8, Node 1 of 8).
+     - Done (test/brain-server.test.mjs, test/conformance.mjs):
+       - Each burst is a new sheep (its own session, folder and pane), so every burst sees
+         its snapshots and the best-of-3 is real.
+       - The test starts its brain with `persistMs: 2000` under both brains.
+       - The bounds are unchanged: p99 under 5 ms × `machineSlowdown()`, p50 under 2 ms,
+         no failures and at most 4 snapshots in any second, on every burst.
+       - The failure message lists every burst's p50/p99/max and how many starved.
+       - The parity run now prints the failing tests and their messages for a red rust
+         cell in a required row, as it did for node. The CI logs of both failing runs
+         only named the test.
+     - It still catches a regression: with a 6 ms stall five times a second on the serving
+       thread (the 200 ms saves, each made 6 ms slower), the new test fails 5 in 5, with
+       all three bursts over.
+     - Follow-up, not changed: state.json is still written on the serving thread. On a
+       stalled disk, one hook every 2 s waits for it, in both brains.
+131. **A migration from the CLI starts the app's strip; an undo quits it (0.2.0-rc.2, from
+     the maintainer's rc.1 install).**
+     - Plan: D9's seven steps end with doctor. M8's by-hand check 5.2 said "if no sheep
+       appear, `"$B" shell start`".
+     - True: after `Bellwether migrate --to-app --write` from Terminal (exit 0, the Rust
+       brain on 47417, both login items enabled, doctor all pass) only `Bellwether serve`
+       ran: no strip, no menu-bar sheep until the next login. The app is registered to
+       open at login, and nothing opens it now.
+     - Done (crates/brain/src/toapp.rs, shell/src-tauri/src/migration.rs and cli.rs):
+       - **CLI `--to-app --write`**: a step 8, "The strip", after doctor. It starts the
+         app's strip the way `shell start` does (`open -g -a` the bundle, BELLWETHER_HOME
+         passed on, alive 1.5 s after it appears), or says
+         `the strip is already running (pid N)`. The preview lists it. `shell start` and
+         step 8 share one function, `cli::start_strip`. A strip that doesn't start is a
+         line in the output, not a failure: the migration is done, and the line says
+         `bellwether shell start` (exit 0).
+       - **The setup window's "Move it into the app"**: nothing. The window is the strip,
+         already running. `toapp::Options` has a new `strip` field, true only from the
+         CLI, so the window's preview has no step 8 and its run never asks the host to
+         start a strip.
+       - **A run that stops or undoes itself** (port held, a copy that fails, no new
+         brain, approval pending): no strip. Step 8 is reached only after steps 1 to 7
+         finished. The old setup is back, with its own strip.
+       - **A rerun that finishes an interrupted migration**: it is a run that finishes, so
+         it starts the strip. A rerun that finds "Nothing to migrate" starts nothing: it
+         changes nothing, and `shell start` is the command for that.
+       - **`--undo --write`**: it quits the app's strip, right after the login items are
+         unregistered and before the old agents are bootstrapped. Otherwise the old shell
+         agent brings its strip back next to the app's, and the app's strip, finding no
+         brain once its brain agent stopped, would start one of its own on the port the
+         old brain wants. If the unregister fails, the strip stays (the app is still the
+         setup; the record is kept for the rerun). A strip that doesn't quit within 5 s
+         gets a warning line, not a failure. The preview lists the quit under step 2.
+         Before this, the real host already quit it, but outside the run's output:
+         `migration::command` called `stop_own_instances(true)` after an undo with the
+         real HOME. That call is gone. The quit is now a step every host goes through, so
+         the stand-in can test it.
+       - **Testing without launching anything**: the `Host` trait gained `strip_acts`,
+         `strip_why_not`, `start_strip` and `stop_strip`. Their defaults never touch a
+         strip. `Real` starts and quits through `cli::start_strip` / `cli::quit_strips`,
+         and in a test build each panics first, like its launchctl and SMAppService calls
+         (the existing source check covers both). `Stubbed` uses only the stand-in named
+         by the new `BELLWETHER_STRIP`, which answers `start` and `stop`. Without it,
+         nothing is called. `choose` refuses it with the real HOME, as it does the other
+         two, and refuses a stand-in that is `/usr/bin/open` or named `open`. Tests: six
+         new toapp cases (a finished run from the CLI and from the window, a strip that
+         won't start, a held port and a run that undid itself, a rerun after an
+         interrupted run, the undo order and an unregister that fails, a host that doesn't
+         act). In migration_fixtures.rs a `fake-strip` stand-in is asserted through the
+         binary on all three fixture HOMEs: preview, write, a second run, undo preview,
+         undo; also the held port, no new brain and a killed run. The onboarding step-1
+         test now uses a host that could start a strip, and asserts the window never asks
+         it to.
+       - The README's migration text, divergence 25 and M8's by-hand checks 4, 5.2 and 7 say
+         so. M8's section text (`BELLWETHER_LAUNCHCTL` and `BELLWETHER_LOGIN_ITEMS` as the
+         only stand-ins) and deviation entries before this one are left as written.
+     - Both brains: `migrate --to-app` / `--undo` exist only in the app (Rust; divergence
+       25), so there is no Node side to keep in parity and no conformance row.
+     - Not verified: the real host's step 8 and undo quit (an `open` of the real bundle
+       and a SIGTERM to its strip) were not run. The constraints rule out the real HOME
+       and launching the app. The code is the same as `shell start` / `shell stop`, which
+       the M6 and M8 by-hand checks exercise. It is also not verified whether a strip
+       opened by step 8 on a Mac whose `shell-state.json` has no `onboarded` flag opens
+       the setup window (it would at the next login anyway; nothing here changes that).
+     - Amended by 134: a strip that doesn't quit within 5 s now stops the undo before the
+       old agents start (it was a warning, and the run went on), every strip's line is
+       printed, and the stragglers `stop_own_instances` printed are listed again.
+132. **The published cask carries a generated header, not the template's comment
+     (0.2.0-rc.2).**
+     - Plan: M9 renders `packaging/homebrew/bellwether.rb` with the version and the DMG's
+       sha256 and nothing else changed.
+     - True: so Fanzoo/homebrew-tap's Casks/bellwether.rb (PR #1, rc.1) opens with the
+       template's own comment: "This is the template … the zeros below …". That is wrong in
+       the published file.
+     - Done: `renderCask` (scripts/release.mjs) drops the template's leading comment and
+       puts two lines in its place (`caskHeader`):
+       `# Bellwether <version>. Generated by Bellwether's release workflow
+       (scripts/release.mjs cask);` and `# edits go to packaging/homebrew/bellwether.rb in
+       https://github.com/Fanzoo/bellwether.` It refuses a template that isn't a leading
+       comment followed by `cask "bellwether" do`. The template keeps its comment, which
+       now also says it gives way to the header. tap.yml is unchanged: it runs the same
+       command.
+     - Tests: release.test.mjs's rendering test pins the two header lines exactly. It
+       checks that the template still has its comment and that no "template", "zeros",
+       zero sha256 or `"0.0.0"` is left in the output. From `cask "bellwether" do` on, the
+       line count is the same and exactly the version and sha256 lines differ (the old
+       check, now on the body), and a template without the leading comment is refused.
+       tester-m9's injection test compares the body's line count rather than the whole
+       file's, and checks that the cask starts right after the two header lines and that
+       no `$&` is left.
+     - Amended by 134: a template with no comment at all (or only bare `#` lines) was
+       accepted, contrary to the above; it is refused now.
+133. **The README is rewritten for the installed app now, ahead of M11 (0.2.0-rc.2, the
+     maintainer's call).**
+     - Plan: M11 builds "a README rewritten for the app (install, onboarding, CLI from PATH,
+       building from source as a contributor section)", together with deleting the Node
+       brain.
+     - True: v0.2.0-rc.1 installs with the cask and the DMG, and the maintainer wants to
+       share Bellwether after rc.2. The README still opened with the old name, a
+       repository first run on the Node brain (token, `pets fetch`, `shell build`,
+       LaunchAgents) and a "Coming from pasture" section. Nobody but the maintainer ever
+       ran the repository install, and "pasture" was only a working name.
+     - Done (docs only; no code changed):
+       - **README.md**, for Mac users of the app: what it is (a sheep per session, lambs
+         per subagent, an alert when it needs you); Install (the cask, the DMG, the CLI
+         the cask links into `/opt/homebrew/bin` or `/usr/local/bin`); First launch (the
+         setup window's steps, named as onboarding.html names them); What the sheep mean;
+         Settings and pets (the menu-bar items as tray.rs spells them, config.json in the
+         app's folder, what needs `shell restart`, `pets import`); Commands (the app's
+         CLI, trimmed); What Bellwether shows, and what it keeps; Safe by design (no body,
+         so it can never approve or block; the 1 s timeout; 127.0.0.1 and the four request
+         guards), no longer second; Updates; Uninstall (the cask's caveat order, `--zap`,
+         and the DMG case); Licensing; a link to docs/DEVELOPMENT.md. No Node,
+         `./bellwether`, LaunchAgents or pasture.
+       - **docs/DEVELOPMENT.md** (new) takes everything for contributors, verbatim where it
+         still holds: the two brains, the hook guarantees in code (now naming the Rust
+         `hook.rs` too), the repository's First run and Setup 1–8 (including the by-hand
+         checks), the signed app (building, the app's files, the setup window, tokens,
+         `autostart`, legacy agents, updates and releases), Bellwether's own pets, the
+         dependency licences, the repository CLI's command table, and Tests (the conformance
+         harness, CI). Its "First run" and "Setup" headings are unchanged, so the tests that
+         read them only change file.
+       - **The repository-install → app migration** (with deviation 131's strip start and
+         undo quit) is a short bulleted note in docs/DEVELOPMENT.md, same facts.
+       - **Removed:** "Coming from pasture" (the `./pasture` forwarder, `PASTURE_*`
+         variables, `X-Pasture-*` headers, the Node `migrate --from <pasture dir>` steps),
+         the README's pointer to it, and the stale "until milestone 10 the app has no sheep"
+         note. The code for those is untouched; M11 deletes it with the Node brain.
+     - Tests: docs.test.mjs's first-run order test, token.test.mjs's step-1 test,
+       tester-m10's First-run command walk and both grass-dock README checks now read
+       docs/DEVELOPMENT.md, unchanged otherwise. The hook-command check runs on both files;
+       the fence check covers DEVELOPMENT.md and RELEASING.md too; the hub-path check covers
+       DEVELOPMENT.md (allowing its `docs/DISTRIBUTION-PLAN.md`). New: the README names the
+       cask, the DMG, the CLI path, the setup window and DEVELOPMENT.md, and none of Node,
+       `./bellwether`, npm, cargo, LaunchAgents, `.env`, `data/` or pasture; Safe by design
+       keeps its guarantees and comes after First launch; Uninstall keeps the cask caveat's
+       order (checked against the cask template too); the menu-bar labels are tray.rs's
+       constants and the setup-window words are onboarding.html's.
+     - Left as written: code strings that point at the README for repository setup
+       (brain/doctor.mjs "README, Setup step 1", brain/cli.mjs "see README, Setup",
+       brain/config.mjs "the command in the README", scripts/build-app.mjs "see the README,
+       'The signed app'"). That text is now in docs/DEVELOPMENT.md under the same headings.
+       The Node ones go with M11; build-app.mjs's now points at docs/DEVELOPMENT.md
+       (deviation 134).
+     - M11's README item is then done, short of the release notes; M11's "docs.test.mjs is
+       updated" still applies when the Node brain goes.
+134. **Fixes from BR-3K's verification of 131–132, and two README corrections
+     (0.2.0-rc.2).**
+     - **The cask template's comment is required** (132 said so; a template that opened
+       straight with `cask "bellwether" do` was accepted). `renderCask` now refuses a
+       template without a leading comment, or with only bare `#` lines: the comment is
+       what the header replaces. release.test.mjs: both are refused, and any comment with
+       words in it is accepted.
+     - **An undo whose strip won't quit stops before the old agents start** (131 warned and
+       went on, leaving two strips). Right after the login items are unregistered, a strip
+       still running after 5 s ends the run with `STOP: the app's strip is still running, so
+       the old agents were not started …`, how to go on (Quit Bellwether from its menu-bar
+       sheep, then `bellwether migrate --undo --write` again) and what is left (plists back,
+       login items unregistered, old agents not running, the settings file still carrying
+       the migrated hook entries, which the rerun's step 4 restores), exit 1,
+       the record kept, like the other stops. The rerun finishes it: plists back already,
+       the strip quit, the agents started, the settings restored. For that rerun the real
+       host's `unregister` now skips an item SMAppService reports as not registered (it
+       answers an error for those) and says it is off. A not-found item still goes to
+       unregister, whose error names the cause: SMAppService couldn't find the service (its
+       plist missing from the bundle, say), which doesn't prove there is no stale
+       registration. Test
+       (migration_fixtures.rs, through the binary with the `fake-strip` stand-in, which now
+       has a `strip-stuck` mode answering one stopped and one stuck strip): exit non-zero,
+       both strips' lines and the STOP text, no `bootstrap` in launchctl.log, the settings
+       bytes still the migration's, the record kept; then, the strip quit, the same command
+       exits 0, bootstraps both agents, puts back both plists byte for byte and drops the
+       record. The real SMAppService skip is not exercised by a test (no test reaches
+       SMAppService).
+     - **`quit_strips` reports every strip**: when one didn't quit, the strips stopped
+       before and after it were dropped from the output. The lines now come from
+       `quit_lines`, in order, all of them, and an error carries them all, one per line
+       (`shell stop|restart` prints them; the undo prints each). Unit test
+       `every_strip_is_reported_when_one_does_not_quit`.
+     - **The undo lists what of the app is still running again**, as
+       `stop_own_instances(true)` did before 131: the real host's `stop_strip` adds
+       `cli::stragglers(true)` (split out of `stop_own_instances`, which uses it too):
+       after 300 ms, any process of this bundle but a strip or an `--action` run,
+       `still running: pid N (args, parent P); it wasn't started by the login item, so it
+       was left alone`. If none of it is a strip, the undo says `the app's strip wasn't
+       running` first. Not tested: it lists real processes, only on the real host.
+     - **Doc line wrapping**: the overlong lines added for 131–133 (M8's by-hand checks 4,
+       5.2 and 7, deviations 131–133, docs/DEVELOPMENT.md, README.md) are rewrapped to the
+       file's width; tables and code are left alone. M8's check 7 now also says what to do
+       when the strip doesn't quit.
+     - **The README's colours**: it said the session colour is on the sheep's horns.
+       Bellwether's sheep has no horns. The tinter (`shell/src/player/horns.mjs`) recolours
+       every pixel in the magenta window (hue 285–315°): on Bellwether's sheep that is the
+       flight helmet (its three mask tones, pets/SPEC.md), on the eSheep the horns, and an
+       imported pet with no magenta takes no colour. `pets.tint: "whole"` multiplies the
+       whole pet. The README and docs/DEVELOPMENT.md now say that; the value is still named
+       `"horns"` in config.
+     - **scripts/build-app.mjs** points at docs/DEVELOPMENT.md, "The signed app", instead of
+       the README.
+     - Also: divergence 25 and docs/DEVELOPMENT.md's migration note say the undo stops on a
+       strip that won't quit.
+     - **After BR-3K's verification of 133–134** (ship with fixes):
+       - The README says before Install that it needs Claude Code and a Mac, and First
+         launch ends with "If no sheep appears, run `bellwether doctor`". docs.test.mjs
+         checks both. "Safe by design" stays near the end, as agreed.
+       - The `unregister` skip covers NotRegistered only (above). Apple's documentation for
+         `notFound` couldn't be shown to mean "not registered" in every case (its page
+         didn't load its text here), so it is treated as an error, as before 134.
+       - The stuck-strip STOP said the settings file "is as it was"; the hooks are still
+         the migrated ones then. It now says `The settings file still has the hook entries
+         the migration wrote (step 4 restores them on the next run)`; the fixture test
+         asserts that wording and that "as it was" is gone.
+       - Four lines in M10a's review rounds named an absolute scratch path (a local user
+         and session directory); they now say "a scratch directory" with the folder name.
+         A grep of the tracked and new files for `/private/tmp`, the home path and the
+         session id finds nothing else of that kind (RELEASING.md's `/private/tmp/bw-run`
+         is a generic example path, and stays).
