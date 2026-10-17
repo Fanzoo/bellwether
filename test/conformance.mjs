@@ -235,8 +235,11 @@ async function main() {
       process.stderr.write(`  ${impl.padEnd(4)} ${row.file} … `);
       row[impl] = await runFile(row.file, impl);
       process.stderr.write(`${cell(row[impl])} (${(row[impl].ms / 1000).toFixed(1)} s)\n`);
-      // A red node cell is a regression in today's brain: say exactly what failed.
-      if (impl === 'node' && !row.node.ok) for (const f of row.node.failures) process.stderr.write(`       not ok: ${f.name}\n${f.why.map((w) => `         ${w}\n`).join('')}`);
+      // A red node cell is a regression in today's brain, and so is a red rust cell in a
+      // row the current milestone requires: say exactly what failed (a CI log holds
+      // nothing else, and a timing failure can't be rerun to see its numbers).
+      const required = impl === 'node' || (row.milestone && milestoneNumber(row.milestone) <= milestoneNumber(manifest.current));
+      if (required && !row[impl].ok) for (const f of row[impl].failures) process.stderr.write(`       not ok: ${f.name}\n${f.why.map((w) => `         ${w}\n`).join('')}`);
     }
   }
 

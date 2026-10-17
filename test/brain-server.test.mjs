@@ -152,29 +152,40 @@ describe('throughput', () => {
     // burst. Every burst must still have no failures and at most 4 snapshots a second
     // (strict). The lower bound on snapshots seen (2) is the watcher's work, so it scales
     // with the slowdown, measured again after a starved burst (M4 review D8).
+    // Each burst is a new sheep (its own session, folder and pane): a second burst of the
+    // same session changes nothing a snapshot shows, so it saw no snapshots, counted as
+    // starved, and the best of 3 was only ever the first burst. Both brains save
+    // state.json at the shipped interval (2 s, brain.mjs's default): the Rust harness's
+    // 200 ms, there for the tests that read state.json back, put 11 synchronous saves on
+    // the serving thread in each burst instead of 1 (deviation 130).
     let budget = 5 * machineSlowdown();
     const runs = [];
     let starved = 0;
-    await withBrain(async (brain) => {
-      for (let i = 0; i < 3; i++) {
-        const r = await replay(burst({ rate: 200, seconds: 2 }), { port: brain.port, token: TOKEN });
-        assert.deepEqual(r.failures, []);
-        assert.ok(r.maxPerSecond <= 4, `max snapshots per second: ${r.maxPerSecond}`);
-        if (r.snapshots < (machineSlowdown() > 2 ? 1 : 2)) {
-          const s = machineSlowdown({ fresh: true });
-          budget = 5 * s;
-          if (r.snapshots < (s > 2 ? 1 : 2)) {
-            starved++;
-            continue;
+    await withBrain(
+      async (brain) => {
+        for (let i = 0; i < 3; i++) {
+          const lines = burst({ rate: 200, seconds: 2 });
+          for (const l of lines) Object.assign(l.normalised, { sessionId: `burst-session-${i}`, cwd: `/replay/burst-${i}`, terminal: { ...l.normalised.terminal, herdrPane: `w9:p${i}` } });
+          const r = await replay(lines, { port: brain.port, token: TOKEN });
+          assert.deepEqual(r.failures, []);
+          assert.ok(r.maxPerSecond <= 4, `max snapshots per second: ${r.maxPerSecond}`);
+          if (r.snapshots < (machineSlowdown() > 2 ? 1 : 2)) {
+            const s = machineSlowdown({ fresh: true });
+            budget = 5 * s;
+            if (r.snapshots < (s > 2 ? 1 : 2)) {
+              starved++;
+              continue;
+            }
           }
+          runs.push(r);
+          if (r.p99 < budget && r.p50 < 2) break;
         }
-        runs.push(r);
-        if (r.p99 < budget && r.p50 < 2) break;
-      }
-    });
+      },
+      { persistMs: 2000 },
+    );
     if (runs.length === 0) return t.skip(`inconclusive: the watcher saw too few snapshots in ${starved} bursts (slowdown ${machineSlowdown().toFixed(1)}); every burst had no failures and at most 4 snapshots a second`);
     const best = runs.reduce((a, b) => (b.p99 < a.p99 ? b : a));
-    const seen = runs.map((r) => `p50 ${r.p50.toFixed(2)} / p99 ${r.p99.toFixed(2)} ms`).join('; ');
+    const seen = runs.map((r) => `p50 ${r.p50.toFixed(2)} / p99 ${r.p99.toFixed(2)} / max ${r.max.toFixed(2)} ms`).join('; ') + (starved ? `; ${starved} starved` : '');
     assert.ok(best.p99 < budget, `p99 over ${budget.toFixed(1)} ms in every burst: ${seen}`);
     assert.ok(best.p50 < 2, `p50 over 2 ms in the best burst: ${seen}`);
   });
