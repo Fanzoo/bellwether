@@ -97,8 +97,8 @@ describe('bellwether token init (D4)', () => {
     assert.equal(fs.statSync(g).mode & 0o777, 0o600);
     assert.equal(fs.readFileSync(g, 'utf8'), 'BELLWETHER_HOOK_TOKEN=TOK_NEW_0123456789ab\n');
   });
-  test('the README\'s first step is `token init`, and the CLI only accepts `token init`', () => {
-    const r = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');
+  test('docs/DEVELOPMENT.md\'s first step is `token init`, and the CLI only accepts `token init`', () => {
+    const r = fs.readFileSync(path.join(AGENT_DIR, 'docs', 'DEVELOPMENT.md'), 'utf8');
     const first = r.slice(r.indexOf('## First run'), r.indexOf('## Setup'));
     assert.match(first, /\.\/bellwether token init/);
     assert.doesNotMatch(first, />> \.env/);

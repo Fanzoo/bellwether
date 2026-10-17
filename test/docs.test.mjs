@@ -6,7 +6,10 @@ import { describe, test } from 'node:test';
 import { crateLicence, lockedCrates, registryAvailable } from '../scripts/third-party.mjs';
 import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 
-/** NOTICE, THIRD-PARTY.md, the repository's own setup files and the first-run README. */
+/**
+ * NOTICE, THIRD-PARTY.md, the repository's own setup files, the README (for people who install
+ * the app) and docs/DEVELOPMENT.md (building and running from a checkout).
+ */
 
 const read = (...p) => fs.readFileSync(path.join(AGENT_DIR, ...p), 'utf8');
 
@@ -54,9 +57,41 @@ describe('repository setup', () => {
     assert.match(r, /desktopPet[\s\S]*eSheep/);
     assert.match(r, /never committed or bundled/);
     assert.doesNotMatch(r, /agents\/bellwether|PLAN\.md|hub `\.env`|hub-root/);
+    // the developer doc names the repository's own docs/DISTRIBUTION-PLAN.md, never a hub's
+    assert.doesNotMatch(read('docs', 'DEVELOPMENT.md'), /agents\/bellwether|(?<!DISTRIBUTION-)PLAN\.md|hub `\.env`|hub-root/);
   });
-  test('the README\'s first run puts autostart before hooks, and quitting the trial strip before autostart', () => {
+  test('the README is for the installed app: the cask or the DMG, the setup window, the CLI on PATH; the checkout, Node and the old name are in docs/DEVELOPMENT.md', () => {
     const r = read('README.md');
+    const at = (s) => r.indexOf(s);
+    assert.ok(at('brew install --cask fanzoo/tap/bellwether') > 0 && at('/releases') > 0, 'install: the cask and the DMG');
+    assert.ok(at('/opt/homebrew/bin/bellwether') > 0, 'the cask puts the CLI on PATH');
+    assert.match(r, /## First launch[\s\S]*setup window/);
+    assert.match(r.slice(0, at('## First launch')), /You need \[Claude Code\]/, 'says before installing that it needs Claude Code');
+    assert.match(r.slice(at('## First launch'), at('## What the sheep mean')), /If no\s+sheep appears, run `bellwether doctor`/, 'First launch points at doctor');
+    assert.match(r, /docs\/DEVELOPMENT\.md/);
+    assert.doesNotMatch(r, /\.\/bellwether|\bNode\b|node scripts|npm |cargo|pasture|LaunchAgents|\.env\b|data\//i);
+    // "Safe by design" keeps the guarantees, after the setup sections rather than second
+    const safe = r.slice(at('## Safe by design'), r.indexOf('\n## ', at('## Safe by design') + 3));
+    for (const s of ['approve or block', 'empty reply', '1-second timeout', '127.0.0.1', '`Origin`', '`Host`', 'JSON', 'hook token']) assert.ok(safe.includes(s), `Safe by design: ${s}`);
+    assert.ok(at('## First launch') < at('## Safe by design'));
+    // uninstall: hooks and login items first, then brew (the cask's caveat)
+    const un = r.slice(at('## Uninstall'));
+    assert.ok(un.indexOf('bellwether hooks uninstall --write') < un.indexOf('bellwether autostart uninstall --write') && un.indexOf('bellwether autostart uninstall --write') < un.indexOf('brew uninstall --cask bellwether') && un.includes('--zap'));
+    assert.match(read('packaging', 'homebrew', 'bellwether.rb'), /bellwether hooks uninstall --write\n\s+bellwether autostart uninstall --write/);
+  });
+  test('the README names the menu-bar items as the tray spells them', () => {
+    const r = read('README.md');
+    const tray = read('shell', 'src-tauri', 'src', 'tray.rs');
+    for (const k of ['QUIET', 'HIDE', 'SETUP', 'UPDATES']) {
+      const label = new RegExp(`pub const ${k}: &str = "([^"]+)";`).exec(tray)[1];
+      assert.ok(r.includes(`*${label}*`), `README: *${label}*`);
+    }
+    for (const s of ['Show labels', 'Quit Bellwether']) assert.ok(tray.includes(`"${s}"`) && r.includes(`*${s}*`), s);
+    const page = read('shell', 'src', 'onboarding.html');
+    for (const s of ['Start at login', 'Show the changes', 'Install', 'Import…', 'Ask iTerm2', 'Ask Terminal', '~/.local/bin/bellwether']) assert.ok(page.includes(s) && r.includes(s), `setup window: ${s}`);
+  });
+  test('docs/DEVELOPMENT.md\'s first run puts autostart before hooks, and quitting the trial strip before autostart', () => {
+    const r = read('docs', 'DEVELOPMENT.md');
     const first = r.slice(r.indexOf('## First run'), r.indexOf('## Setup'));
     const at = (s) => first.indexOf(s);
     for (const s of ['pets fetch', 'shell --dev --release', '**Quit it**', 'autostart install --write', 'hooks install --write', 'all set']) assert.ok(at(s) > 0, s);
@@ -65,12 +100,14 @@ describe('repository setup', () => {
 });
 
 describe('the hook commands the README shows', () => {
-  test('`help` lists hooks print, install and uninstall with --out, --write, --settings and the old-port --port; the README names the same commands', () => {
+  test('`help` lists hooks print, install and uninstall with --out, --write, --settings and the old-port --port; the README and docs/DEVELOPMENT.md name the same commands', () => {
     const r = spawnBrainSync(['help'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: tempDir() } });
     assert.equal(r.status, 0, r.stderr);
     for (const s of ['hooks print [--out <file>', 'hooks install   [--write] [--settings <path>]', 'hooks uninstall [--write] [--settings <path>] [--port <old port>]', 'doctor [--json] [--e2e] [--settings <path>]']) assert.ok(r.stdout.includes(s), s);
-    const readme = read('README.md');
-    for (const s of ['hooks install', 'hooks install --write', 'hooks uninstall --write', 'hooks print']) assert.ok(readme.includes(s), s);
+    for (const f of ['README.md', path.join('docs', 'DEVELOPMENT.md')]) {
+      const doc = read(f);
+      for (const s of ['hooks install', 'hooks install --write', 'hooks uninstall --write', 'hooks print']) assert.ok(doc.includes(s), `${f}: ${s}`);
+    }
   });
 });
 
@@ -81,7 +118,7 @@ describe('Markdown code fences', () => {
    * README's signed-app section did, milestone 5).
    */
   test('no fence line carries text: a closing fence is bare, an opening one names one language at most', () => {
-    const files = ['README.md', 'NOTICE', 'THIRD-PARTY.md', path.join('docs', 'DISTRIBUTION-PLAN.md'), path.join('test', 'DIVERGENCES.md')].filter((f) => fs.existsSync(path.join(AGENT_DIR, f)));
+    const files = ['README.md', 'NOTICE', 'THIRD-PARTY.md', path.join('docs', 'DEVELOPMENT.md'), path.join('docs', 'RELEASING.md'), path.join('docs', 'DISTRIBUTION-PLAN.md'), path.join('test', 'DIVERGENCES.md')].filter((f) => fs.existsSync(path.join(AGENT_DIR, f)));
     const bad = [];
     for (const f of files) {
       let open = false;

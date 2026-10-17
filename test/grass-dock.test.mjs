@@ -159,8 +159,8 @@ describe('doctor: a stale Accessibility entry after a rebuild', () => {
     assert.equal(never.status, 'INFO');
     assert.match(never.detail, /remove it with − and grant again/);
   });
-  test('the README says what to do when it was granted before and now says not granted', () => {
-    const readme = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');
+  test('docs/DEVELOPMENT.md says what to do when it was granted before and now says not granted', () => {
+    const readme = fs.readFileSync(path.join(AGENT_DIR, 'docs', 'DEVELOPMENT.md'), 'utf8');
     assert.match(readme, /Remove the old `bellwether-shell`\s+entry \(select it, then −\), run `.\/bellwether shell dock-permission`/);
   });
 });

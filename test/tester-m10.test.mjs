@@ -227,12 +227,12 @@ describe('doctor `next`: a walk from nothing to "all set"', notUnderRust("the re
   });
 });
 
-describe('README "First run": every command exists, with the flags shown', notUnderRust("the README's First run is the repository's `./bellwether` (pets fetch, shell --dev, LaunchAgents); the app's first run is its onboarding window (milestone 7)"), () => {
-  const readme = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');
+describe('docs/DEVELOPMENT.md "First run": every command exists, with the flags shown', notUnderRust("docs/DEVELOPMENT.md's First run is the repository's `./bellwether` (pets fetch, shell --dev, LaunchAgents); the app's first run is its onboarding window (milestone 7)"), () => {
+  const readme = fs.readFileSync(path.join(AGENT_DIR, 'docs', 'DEVELOPMENT.md'), 'utf8');
   const section = readme.slice(readme.indexOf('## First run'), readme.indexOf('\n## Setup'));
   const commands = [...section.matchAll(/\.\/bellwether ([a-z]+(?: [a-z]+)?(?: --[a-z-]+)*)/g)].map((m) => m[1]);
   test('the section names the expected commands', () => {
-    for (const c of ['doctor', 'pets fetch', 'shell --dev --release', 'autostart install', 'autostart install --write', 'hooks install', 'hooks install --write', 'hooks uninstall --write', 'autostart uninstall --write']) assert.ok(commands.includes(c), `README does not mention ${c}`);
+    for (const c of ['doctor', 'pets fetch', 'shell --dev --release', 'autostart install', 'autostart install --write', 'hooks install', 'hooks install --write', 'hooks uninstall --write', 'autostart uninstall --write']) assert.ok(commands.includes(c), `docs/DEVELOPMENT.md does not mention ${c}`);
   });
   test('every one is accepted by the CLI (none is an unknown command or flag), run with a temp HOME and nothing that builds, serves or downloads', () => {
     const home = tempDir('m10-readme-');

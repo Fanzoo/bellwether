@@ -210,8 +210,8 @@ describe('doctor `dock` line', () => {
     assert.equal(run(`${start}`), undefined);
     assert.equal(run(`${start}2 bellwether-shell: webview: dock: Accessibility granted\n`), undefined);
   });
-  test('the README says the grant must be repeated after a rebuild, names the command, and no longer claims the strip needs no Accessibility', () => {
-    const readme = fs.readFileSync(path.join(AGENT_DIR, 'README.md'), 'utf8');
+  test('docs/DEVELOPMENT.md says the grant must be repeated after a rebuild, names the command, and no longer claims the strip needs no Accessibility', () => {
+    const readme = fs.readFileSync(path.join(AGENT_DIR, 'docs', 'DEVELOPMENT.md'), 'utf8');
     assert.match(readme, /rebuild it must be given again/);
     assert.match(readme, /shell dock-permission/);
     const step6 = readme.slice(readme.indexOf('### 6.'), readme.indexOf('### 7.'));

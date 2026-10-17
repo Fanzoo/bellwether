@@ -155,7 +155,7 @@ function signingIdentity() {
   const ids = [...out.matchAll(/^\s*\d+\)\s+([0-9A-F]{40})\s+"([^"]+)"/gm)].map((m) => ({ sha: m[1], name: m[2] }));
   const want = process.env.BELLWETHER_SIGNING_IDENTITY;
   const pick = want ? ids.filter((i) => i.sha === want.toUpperCase() || i.name === want || i.name.startsWith(`${want} (`)) : ids.filter((i) => i.name.startsWith('Developer ID Application:'));
-  if (pick.length === 0) fail(want ? `no valid code-signing identity matches BELLWETHER_SIGNING_IDENTITY (${want}); \`security find-identity -v -p codesigning\` lists them` : 'no "Developer ID Application" identity in the keychain: import the certificate with its private key (see the README, "The signed app")');
+  if (pick.length === 0) fail(want ? `no valid code-signing identity matches BELLWETHER_SIGNING_IDENTITY (${want}); \`security find-identity -v -p codesigning\` lists them` : 'no "Developer ID Application" identity in the keychain: import the certificate with its private key (see docs/DEVELOPMENT.md, "The signed app")');
   if (pick.length > 1) fail(`${pick.length} identities match; set BELLWETHER_SIGNING_IDENTITY to one SHA-1 from \`security find-identity -v -p codesigning\``);
   return pick[0];
 }
