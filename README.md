@@ -5,6 +5,8 @@ have open. A session's subagents trot out beside it as lambs. When a session nee
 permission prompt, a question), its sheep turns to face you with a bubble saying what it
 wants, and clicking the sheep takes you to that terminal.
 
+![A terminal running Claude Code above the macOS Dock, with sheep walking along the top of the Dock: a "garden" session with three lambs, a "bellwether" session, and a "weather-app" sheep facing the viewer with a bubble reading "AskUserQuestion?"](docs/images/bellwether.png)
+
 You need [Claude Code](https://claude.com/claude-code) and a Mac (macOS 13 Ventura or
 newer). Windows and Linux are planned.
 
