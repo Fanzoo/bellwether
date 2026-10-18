@@ -27,6 +27,11 @@ pub struct ShellView {
     /// Per strip window label: the Dock's extent in that strip's x (Milestone 10,
     /// Accessibility). Empty without the permission: the full-width strip.
     pub dock: Vec<(String, f64, f64)>,
+    /// Per strip window label: the ids of its sprite boxes the cursor is on, by the
+    /// click-through poll (deviation 136). The webview shows a hover label only for one
+    /// of these: once the cursor is off every box the window stops hearing the mouse, so
+    /// this is its only word that the cursor has gone. Windows with none are left out.
+    pub over: Vec<(String, Vec<String>)>,
 }
 
 impl ShellView {
@@ -38,6 +43,7 @@ impl ShellView {
     pub fn json_for(&self, label: &str) -> Value {
         let mut v = self.json();
         v["dock"] = self.dock.iter().find(|(l, _, _)| l == label).map_or(Value::Null, |(_, lo, hi)| serde_json::json!({"lo": lo, "hi": hi}));
+        v["over"] = serde_json::json!(self.over.iter().find(|(l, _)| l == label).map_or(&[][..], |(_, ids)| &ids[..]));
         v
     }
 }

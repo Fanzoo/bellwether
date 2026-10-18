@@ -10,6 +10,7 @@ import { displayLabels } from './player/labels.mjs';
 import { tintHorns, tintWhole } from './player/horns.mjs';
 import { fadeStep, frontmost, tuftPixels, tuftX } from './player/grass.mjs';
 import { familyHomes, homeX } from './player/layout.mjs';
+import { hoverTarget } from './player/hover.mjs';
 import { assertSafePetXml, parsePetDocument, resolveAnimationMap } from './player/pet.mjs';
 import { cleanOverlays, overlayPlacements } from './player/overlay.mjs';
 import { Sprite, behaviourOf } from './player/sprite.mjs';
@@ -46,14 +47,19 @@ let display; // config the shell passed: palette, scale, slotWidthPx, homeWander
 // actor id -> { sprite, actor, removedAt }; a lamb's entry also has parentId, place,
 // colourIndex (its parent's tint) and projectLabel (its parent's project).
 const sprites = new Map();
+// The hover label's sprite, worked out on every frame from where the pointer was last
+// seen and the shell's cursor poll (player/hover.mjs, deviation 136); pointer is null
+// when it isn't known (it left, the page was hidden, the strip was hidden or toggled).
 let hovered = null;
+let pointer = null;
 let dirty = true;
 // Milestone 7. muted: the brain's do-not-disturb (the tray's "Quiet (alerts only)",
 // `bellwether mute`). view: the shell's part of each snapshot: hidden (sharing, or the tray's
 // "Hide everything (for screen sharing)"),
-// showLabels (tray), near (sprite keys within fade.radiusPx of the cursor).
+// showLabels (tray), near (sprite keys within fade.radiusPx of the cursor), over (this
+// strip's sprite keys whose box the cursor is on, by the shell's poll).
 let muted = false;
-let view = { rev: -1, hidden: false, showLabels: false, near: new Set(), dock: null };
+let view = { rev: -1, hidden: false, showLabels: false, near: new Set(), over: new Set(), dock: null };
 
 /** Whether the strip animates at all: not while muted or hidden. */
 const quiet = () => muted || view.hidden;
@@ -201,7 +207,12 @@ function applyView(v) {
   if (!!v.hidden !== view.hidden) log(`strip ${v.hidden ? 'hidden: drawing stops' : 'shown: drawing resumes'}`);
   const dock = v.dock && Number.isFinite(v.dock.lo) && Number.isFinite(v.dock.hi) && v.dock.hi > v.dock.lo ? { lo: v.dock.lo, hi: v.dock.hi } : null;
   const dockChanged = JSON.stringify(dock) !== JSON.stringify(view.dock ?? null);
-  view = { rev: v.rev, hidden: !!v.hidden, showLabels: !!v.showLabels, near, dock };
+  // Hide everything or Show labels toggled: whatever the pointer was on, it is forgotten
+  // until it moves again (the tray's menu is where the cursor is now).
+  if (!!v.hidden !== view.hidden || !!v.showLabels !== view.showLabels) pointer = null;
+  const over = new Set(Array.isArray(v.over) ? v.over : []);
+  view = { rev: v.rev, hidden: !!v.hidden, showLabels: !!v.showLabels, near, over, dock };
+  updateHover();
   if (dockChanged && pet) placeFamilies();
   dirty = true;
   if (nearChanged && !quiet()) {
@@ -218,6 +229,7 @@ function apply(snapshot) {
   const now = performance.now();
   if (!!snapshot.muted !== muted) {
     muted = !!snapshot.muted;
+    pointer = null;
     log(muted ? 'muted: animation stops; only a sheep that needs you shows a badge' : 'unmuted');
   }
   const seen = new Set();
@@ -402,8 +414,10 @@ function draw(now = performance.now()) {
       label(e.shownLabel ?? e.actor.label, d.x + e.sprite.width / 2, d.y - 6, fadeOf(id));
     }
   }
-  if (hovered && !bubbled.has(hovered) && sprites.has(hovered)) {
-    const { sprite, actor, shownLabel, parentId } = sprites.get(hovered);
+  const h = hovered && sprites.get(hovered);
+  if (h && !bubbled.has(hovered) && !h.sprite.gone && h.removedAt === undefined) {
+    const { sprite, actor, shownLabel, parentId } = h;
+    // Where its sheep is now: the label follows it.
     const d = sprite.drawInfo(now);
     // A sheep shows its project (told apart from same-project sheep); a lamb its agent type.
     label(parentId ? actor.label : shownLabel ?? actor.label, d.x + sprite.width / 2, d.y - 6);
@@ -733,16 +747,38 @@ canvas.addEventListener('pointerdown', (e) => {
   entry.sprite.playOnce('hop', performance.now());
   invoke('sprite_clicked', { id: entry.actor.id }).catch(() => {});
 });
-canvas.addEventListener('pointermove', (e) => {
-  const id = spriteAt(e.offsetX, e.offsetY);
+/** The live sprite (not leaving, not gone) at a point, for the hover label. */
+function liveSpriteAt(x, y) {
+  const id = spriteAt(x, y);
+  const e = id && sprites.get(id);
+  return e && !e.sprite.gone && e.removedAt === undefined ? id : null;
+}
+
+/**
+ * The hover label's sprite, afresh: called every frame and whenever the pointer or the
+ * shell's view changes. Never kept from an old pointer event: once the cursor is off
+ * every sprite the window stops hearing the mouse, so no pointerleave would come.
+ */
+function updateHover() {
+  const id = quiet() ? null : hoverTarget({ pointer, over: view.over, hitAt: liveSpriteAt });
   if (id !== hovered) {
     hovered = id;
     dirty = true;
   }
+}
+
+canvas.addEventListener('pointermove', (e) => {
+  pointer = { x: e.offsetX, y: e.offsetY };
+  updateHover();
 });
-canvas.addEventListener('pointerleave', () => {
-  hovered = null;
-  dirty = true;
+const forgetPointer = () => {
+  pointer = null;
+  updateHover();
+};
+canvas.addEventListener('pointerleave', forgetPointer);
+canvas.addEventListener('pointercancel', forgetPointer);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') forgetPointer();
 });
 
 // ------------------------------------------------------------------ loop
@@ -771,6 +807,8 @@ let bounceDue = false;
 function frame() {
   const now = performance.now();
   if (quiet()) {
+    pointer = null;
+    updateHover();
     // No ticking, no bounce: draw once when something changed (a badge to show).
     if (dirty) {
       dirty = false;
@@ -810,6 +848,8 @@ function frame() {
     }
   }
   if (replace) placeFamilies();
+  // After the sprites have moved: a sheep may have walked out from under a still cursor.
+  updateHover();
   if (bounceDue) lastBounceDraw = now;
   bounceDue = false;
   // At most one redraw every 150 ms. Each redraw costs about the same whatever is

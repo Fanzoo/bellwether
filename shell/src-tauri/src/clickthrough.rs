@@ -37,6 +37,14 @@ pub fn hit(boxes: &[Rect], x: f64, y: f64) -> bool {
     boxes.iter().any(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
 }
 
+/// Ids of the sprites whose box holds a point (the hover label, deviation 136).
+pub fn over(boxes: &[Rect], x: f64, y: f64) -> Vec<String> {
+    let mut ids: Vec<String> = boxes.iter().filter(|r| hit(std::slice::from_ref(r), x, y)).filter_map(|r| r.id.clone()).collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// Ids of the sprites whose box is within `radius` of a point (the cursor-near fade).
 pub fn near(boxes: &[Rect], x: f64, y: f64, radius: f64) -> Vec<String> {
     let mut ids: Vec<String> = boxes
@@ -64,6 +72,7 @@ pub fn run<R: Runtime>(app: AppHandle<R>, fade_radius: f64) {
         let Ok(cursor) = app.cursor_position() else { continue };
         let boxes = app.state::<Hitboxes>().by_window.lock().unwrap().clone();
         let mut close: Vec<String> = Vec::new();
+        let mut under: Vec<(String, Vec<String>)> = Vec::new();
         fast = false;
         for (label, window) in app.webview_windows() {
             // Only strips are click-through; the onboarding window is a normal window.
@@ -77,6 +86,10 @@ pub fn run<R: Runtime>(app: AppHandle<R>, fade_radius: f64) {
             let y = (cursor.y - pos.y as f64) / scale;
             if let Some(b) = boxes.get(&label) {
                 close.extend(near(b, x, y, fade_radius));
+                let ids = over(b, x, y);
+                if !ids.is_empty() {
+                    under.push((label.clone(), ids));
+                }
                 if !b.is_empty() {
                     if let Ok(size) = window.outer_size() {
                         let (w, h) = (size.width as f64 / scale, size.height as f64 / scale);
@@ -95,9 +108,14 @@ pub fn run<R: Runtime>(app: AppHandle<R>, fade_radius: f64) {
                 }
             }
         }
-        // The fade: the webview only hears about it when the set changes.
-        if brain.view().near != close {
-            brain.update_view(|v| v.near = close);
+        // The fade and the hover: the webview only hears about them when they change.
+        under.sort();
+        let now = brain.view();
+        if now.near != close || now.over != under {
+            brain.update_view(|v| {
+                v.near = close;
+                v.over = under;
+            });
         }
     }
 }
@@ -114,6 +132,26 @@ mod tests {
         assert!(!hit(&boxes, 70.0, 100.0));
         assert!(!hit(&boxes, 9.9, 100.0));
         assert!(!hit(&[], 0.0, 0.0));
+    }
+
+    #[test]
+    fn over_lists_the_sprites_under_the_cursor() {
+        let a = Rect { x: 100.0, y: 70.0, w: 60.0, h: 60.0, id: Some("a".into()) };
+        let b = Rect { x: 140.0, y: 70.0, w: 60.0, h: 60.0, id: Some("b".into()) };
+        let boxes = [a, b];
+        assert_eq!(over(&boxes, 120.0, 100.0), vec!["a".to_string()]);
+        assert_eq!(over(&boxes, 150.0, 100.0), vec!["a".to_string(), "b".to_string()], "where two boxes overlap");
+        assert!(over(&boxes, 99.0, 100.0).is_empty(), "just left of a");
+        assert!(over(&boxes, 120.0, 60.0).is_empty(), "above a");
+        assert!(over(&[Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0, id: None }], 5.0, 5.0).is_empty(), "a box without an id");
+    }
+
+    #[test]
+    fn the_view_tells_each_strip_only_its_own_hover() {
+        let v = crate::brain::ShellView { over: vec![("strip-0".into(), vec!["a".into()])], ..Default::default() };
+        assert_eq!(v.json_for("strip-0")["over"], serde_json::json!(["a"]));
+        assert_eq!(v.json_for("strip-1")["over"], serde_json::json!([]), "another strip: the cursor is on none of its sprites");
+        assert_eq!(crate::brain::ShellView::default().json_for("strip-0")["over"], serde_json::json!([]));
     }
 
     #[test]
