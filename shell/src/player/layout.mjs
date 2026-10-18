@@ -150,3 +150,81 @@ function disjoint(sheep, homes, stripWidth) {
   return boxes.every((b, i) => i === 0 || boxes[i - 1][1] <= b[0] + 0.5);
 }
 
+
+/**
+ * Where a dropped sheep's family lives (D10, milestone 12). Slotted sheep never move for
+ * a dropped one: the dropped sheep is the one that gives way.
+ *
+ * drop    {centre, extent: {left, right}, dir}: where it was let go (its centre), how far
+ *         its family reaches either side of that, and which way it was being carried
+ *         (-1 or 1: a tie goes that way)
+ * others  [{lo, hi}]: every other family's reach (home ± wander, plus its extent)
+ *
+ * - The drop centre is kept on the strip, with its whole family.
+ * - Clear of every reach there: it lives at the drop centre, wandering `wanderMax`, cut to
+ *   the room on the nearer side.
+ * - Inside another reach: it lives at the nearest centre where its family fits clear (it
+ *   lands where it was dropped, then walks there), with the room there.
+ * - No room anywhere: it stays where it was dropped, with no wander (`noRoom`).
+ *
+ * @returns {{centre, wander, noRoom: boolean, moved: boolean}}
+ */
+export function dropHome(drop, others, { stripWidth, wanderMax }) {
+  const { left, right } = drop.extent;
+  const lo = left;
+  const hi = Math.max(lo, stripWidth - right);
+  const c = Math.min(Math.max(drop.centre, lo), hi);
+  // The centres that would put the family inside another reach (touching is allowed).
+  const blocked = others
+    .filter((r) => Number.isFinite(r?.lo) && Number.isFinite(r?.hi))
+    .map((r) => [r.lo - right, r.hi + left])
+    .sort((a, b) => a[0] - b[0]);
+  const free = [];
+  let from = lo;
+  for (const [a, b] of blocked) {
+    if (a > from + 0.5) free.push([from, Math.min(a, hi)]);
+    from = Math.max(from, b);
+    if (from >= hi) break;
+  }
+  if (from <= hi) free.push([from, hi]);
+  const room = free.filter(([a, b]) => b >= a);
+  const wanderAt = (x, [a, b]) => Math.max(0, Math.min(wanderMax, x - a, b - x));
+  const inside = room.find(([a, b]) => c >= a - 0.5 && c <= b + 0.5);
+  if (inside) return { centre: c, wander: wanderAt(c, inside), noRoom: false, moved: false };
+  if (!room.length) return { centre: c, wander: 0, noRoom: true, moved: false };
+  // The nearest clear centre; on a tie, the way it was being carried.
+  let best = null;
+  for (const span of room) {
+    const x = c < span[0] ? span[0] : span[1];
+    const d = Math.abs(x - c);
+    const better = !best || d < best.d - 0.5 || (Math.abs(d - best.d) <= 0.5 && Math.sign(x - c) === (drop.dir < 0 ? -1 : 1));
+    if (better) best = { x, d, span };
+  }
+  return { centre: best.x, wander: wanderAt(best.x, best.span), noRoom: false, moved: true };
+}
+
+/**
+ * Every family's home with drops (D10): `familyHomes` for the slotted families, then each
+ * dropped family, in drop order (`seq`), by `dropHome` against the reaches of all the
+ * others placed so far, so a later drop gives way to an earlier one.
+ *
+ * A family dropped on the strip where placement would put it anyway (`drop.ghost`) still
+ * holds its slot's band, empty, so picking it up and dropping it moves nobody else. One
+ * dropped onto another monitor (a guest) takes no band there.
+ *
+ * @param {Array<{id, slot, extent, drop?: {centre, seq, ghost, dir}}>} families
+ * @returns {Map<id, {centre, wander, noRoom?: boolean, moved?: boolean}>}
+ */
+export function homesWithDrops(families, opts) {
+  const slotted = families.filter((f) => !f.drop || f.drop.ghost);
+  const homes = familyHomes(slotted, opts);
+  const reach = (h, e) => ({ lo: h.centre - h.wander - e.left, hi: h.centre + h.wander + e.right });
+  const reaches = families.filter((f) => !f.drop && homes.has(f.id)).map((f) => reach(homes.get(f.id), f.extent));
+  const dropped = families.filter((f) => f.drop).sort((a, b) => (a.drop.seq ?? 0) - (b.drop.seq ?? 0));
+  for (const f of dropped) {
+    const h = dropHome({ centre: f.drop.centre, extent: f.extent, dir: f.drop.dir }, reaches, { stripWidth: opts.stripWidth, wanderMax: opts.wanderMax });
+    homes.set(f.id, h);
+    reaches.push(reach(h, f.extent));
+  }
+  return homes;
+}

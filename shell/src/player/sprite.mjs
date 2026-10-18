@@ -74,6 +74,13 @@ export class Sprite {
     this.alertSince = 0;
     this.returnTo = null; // lambs: () => the x to trot back to when leaving (the parent)
     this.catchingUp = false; // walking back to its range, then resuming its behaviour
+    // Carried by the cursor (D10, milestone 12): held, then falling to the ground.
+    this.held = false;
+    this.heldY = 0; // the top of a held sprite, in the strip
+    this.fall = null; // {from (px above the ground), start, ms} while it falls
+    this.landedSeq = null; // the last drop it landed for (land plays once per drop)
+    this.pendingEscalation = false; // a confirmed alert that came while held
+    this.lastTick = 0;
   }
 
   env() {
@@ -93,8 +100,28 @@ export class Sprite {
 
   /** Switches behaviour; the first animation of the new behaviour starts at once. */
   setBehaviour(name, now) {
+    if (this.held || this.fall) {
+      // Carried (or falling): the behaviour is kept, and shown once it has landed. Only
+      // `leave` acts at once: it is set down where it is and runs off.
+      if (name === 'leave') {
+        this.held = false;
+        this.fall = null;
+        this.pendingEscalation = false;
+      } else {
+        if (name === 'alert' && this.behaviour !== 'alert') this.confirmed = false;
+        this.behaviour = name;
+        return;
+      }
+    }
     if (name === this.behaviour && !this.oneShot) return;
     const wasAlert = this.behaviour === 'alert';
+    if (name === 'alert' && !wasAlert && this.oneShot === 'land') {
+      // Landing: the turn, hold and bounce start after it.
+      this.behaviour = name;
+      this.confirmed = false;
+      this.alertSince = now;
+      return;
+    }
     this.catchingUp = false;
     this.behaviour = name;
     this.holding = false;
@@ -117,14 +144,94 @@ export class Sprite {
   }
 
   /**
+   * Picked up (D10): it stops whatever it shows and plays `carried` (or `walk`, for a pet
+   * without it) where it is, until it is set down. Snapshot behaviours are still taken
+   * (`setBehaviour`) but not shown.
+   */
+  hold(now) {
+    this.heldY = this.stripHeight - this.height - this.offsety;
+    this.held = true;
+    this.fall = null;
+    this.oneShot = null;
+    this.holding = false;
+    this.catchingUp = false;
+    this.offsety = 0;
+    this.start(this.idsFor('carried')[0], now);
+  }
+
+  /** Moves a held sprite: `x` its left edge, `top` its top, both kept inside the strip. */
+  carry(x, top) {
+    if (!this.held) return;
+    const nx = this.clampToStrip(x);
+    if (Math.abs(nx - this.x) >= 1) this.facing = nx > this.x ? 1 : -1;
+    this.x = nx;
+    this.heldY = Math.min(Math.max(0, top), Math.max(0, this.stripHeight - this.height));
+  }
+
+  /**
+   * Let go: it falls from where it is held to the ground, plays `land` (if the pet has it),
+   * then shows its behaviour (an alert's turn, hold and bounce; an escalation that came
+   * while it was held). With a drop's `seq`, it lands once per drop: the same seq again
+   * only sets it down.
+   */
+  setDown(now, { seq } = {}) {
+    const again = seq != null && seq === this.landedSeq;
+    if (seq != null) this.landedSeq = seq;
+    if (!this.held && !this.fall) return !again;
+    this.held = false;
+    const from = Math.max(0, this.stripHeight - this.height - this.heldY);
+    if (again || from < 1) {
+      this.fall = null;
+      this.afterFall(now, !again);
+      return !again;
+    }
+    // A short fall, as if under gravity (3200 px/s²): about 250 ms from 100 px.
+    this.fall = { from, start: now, ms: Math.round(1000 * Math.sqrt((2 * from) / 3200)) };
+    return true;
+  }
+
+  afterFall(now, land = true) {
+    this.fall = null;
+    this.offsety = 0;
+    if (this.behaviour === 'alert') this.alertSince = now;
+    if (land && this.map.land) {
+      this.oneShot = 'land';
+      this.holding = false;
+      this.start(this.map.land[0], now);
+      return;
+    }
+    this.resume(now);
+  }
+
+  /** Back to the behaviour after a landing. */
+  resume(now) {
+    this.oneShot = null;
+    this.holding = false;
+    if (this.behaviour === 'alert') {
+      if (this.pendingEscalation) {
+        this.pendingEscalation = false;
+        this.playOnce('alert', now);
+        return;
+      }
+      this.start(this.idsFor('turn')[0], now);
+      return;
+    }
+    this.start(this.idsFor(this.behaviour ?? 'walk')[0], now);
+  }
+
+  /**
    * The ~6 s Notification confirmed the alert: escalate visually, once. The pet's
    * alert animation (esheep64's boing) plays, then the sheep faces forward again,
    * bouncing higher. No sound (Decision 7).
    */
   setConfirmed(confirmed, now) {
     if (confirmed && !this.confirmed && this.behaviour === 'alert') {
-      this.holding = false;
-      this.playOnce('alert', now);
+      // While carried, the escalation waits for the landing.
+      if (this.held || this.fall || this.oneShot === 'land') this.pendingEscalation = true;
+      else {
+        this.holding = false;
+        this.playOnce('alert', now);
+      }
     }
     this.confirmed = !!confirmed;
   }
@@ -168,6 +275,8 @@ export class Sprite {
   /** Advances to `now`. Returns true if the drawing changed. */
   tick(now) {
     if (this.gone || !this.anim) return false;
+    this.lastTick = now;
+    if (this.held || this.fall) return this.tickHeld(now);
     const slid = this.slideBack();
     if (this.holding || now < this.nextDue) return slid;
     const current = this.oneShot ?? this.behaviour;
@@ -192,6 +301,27 @@ export class Sprite {
     this.nextDue = now + m.interval;
     this.anim.step++;
     if (this.anim.step >= this.anim.total) this.finished(anim, now);
+    return true;
+  }
+
+  /** Held or falling: the carried animation plays where it is; nothing moves it but the cursor. */
+  tickHeld(now) {
+    if (this.fall && now >= this.fall.start + this.fall.ms) {
+      this.afterFall(now);
+      return true;
+    }
+    if (now < this.nextDue) return !!this.fall;
+    const anim = this.model.animations[this.anim.id];
+    const m = motionAt(anim, this.anim.step, this.anim.total, this.env(), this.warn);
+    this.frame = frameAt(anim, this.anim.step);
+    this.opacity = m.opacity;
+    this.nextDue = now + m.interval;
+    this.anim.step++;
+    if (this.anim.step >= this.anim.total) {
+      const ids = this.idsFor('carried');
+      const next = pickNext(anim, this.rand(), new Set(ids));
+      this.start(next ?? ids[0], now);
+    }
     return true;
   }
 
@@ -236,6 +366,10 @@ export class Sprite {
   }
 
   finished(anim, now) {
+    if (this.oneShot === 'land') {
+      this.resume(now);
+      return;
+    }
     if (this.catchingUp) {
       this.start(this.idsFor('walk')[0], now);
       return;
@@ -289,10 +423,17 @@ export class Sprite {
   /** What to draw: the frame, where, and whether to mirror it (the art faces left). */
   drawInfo(now) {
     const lift = now === undefined ? 0 : this.bounce(now);
+    const ground = this.stripHeight - this.height;
+    let y = ground - this.offsety - lift;
+    if (this.held) y = this.heldY;
+    else if (this.fall) {
+      const p = this.fall.ms > 0 ? Math.min(1, Math.max(0, ((now ?? this.lastTick) - this.fall.start) / this.fall.ms)) : 1;
+      y = ground - this.fall.from * (1 - p * p);
+    }
     return {
       frame: this.frame,
       x: Math.round(this.x),
-      y: Math.round(this.stripHeight - this.height - this.offsety - lift),
+      y: Math.round(y),
       flip: this.facing > 0 && !this.holding,
       opacity: this.opacity,
     };

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Move a sheep by dragging it.** Press and move, and it dangles from the cursor; let go
+  and it lands there, on the strip of whichever monitor you dropped it on. It never lands
+  on another sheep (it walks to the nearest clear spot), and its lambs follow. The move
+  lasts until Bellwether restarts or the session ends; nothing is saved.
+- A click on a sheep now counts when you let go, so a press can become a drag.
+- With two monitors at different display scaling, hover labels, fading and clicks now
+  line up with the sheep on the second monitor.
+
 ## 1.0.0
 
 Bellwether puts a small flock of desktop sheep above your Dock, one per Claude Code

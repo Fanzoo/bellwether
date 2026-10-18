@@ -571,10 +571,11 @@ describe('resting sprites follow a moving home (Milestone 6, R1)', () => {
 
 describe('unobtrusiveness in the webview (Milestone 7)', () => {
   const main = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src', 'main.js'), 'utf8');
-  test('one long poll carries the shell view too; still only the six commands (and the selftest\'s refused probe)', () => {
+  test('one long poll carries the shell view too; still only the seven commands (and the selftest\'s refused probe)', () => {
     assert.match(main, /invoke\('get_snapshot', \{ after: rev, shellAfter: view\.rev \}\)/);
     const commands = new Set([...main.matchAll(/invoke\('([a-z_]+)'/g)].map((m) => m[1]));
-    assert.deepEqual([...commands].sort(), ['debug_snapshot', 'get_pet', 'get_snapshot', 'report_hitboxes', 'setup_status', 'shell_log', 'sprite_clicked']);
+    // Milestone 12 (D10): sprite_drag, the seventh.
+    assert.deepEqual([...commands].sort(), ['debug_snapshot', 'get_pet', 'get_snapshot', 'report_hitboxes', 'setup_status', 'shell_log', 'sprite_clicked', 'sprite_drag']);
     // Milestone 7: setup_status (an onboarding command) is called only by --selftest, which
     // passes only when the strip's capability refuses it.
     assert.equal([...main.matchAll(/invoke\('setup_status'/g)].length, 1);

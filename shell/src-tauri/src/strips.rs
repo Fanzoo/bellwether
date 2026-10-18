@@ -19,11 +19,18 @@ pub struct Strips {
     pub by_monitor: std::sync::Mutex<HashMap<String, String>>,
     /// The next window index (labels are never reused).
     pub next: std::sync::atomic::AtomicUsize,
+    /// Strips whose page has asked for its first snapshot, so it can draw a carried sheep
+    /// (D10): until then the pressed strip keeps drawing it, at its edge.
+    pub ready: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl Strips {
     pub fn monitor_of(&self, label: &str) -> Option<String> {
         self.by_monitor.lock().unwrap().iter().find(|(_, l)| l.as_str() == label).map(|(m, _)| m.clone())
+    }
+
+    pub fn is_ready(&self, label: &str) -> bool {
+        self.ready.lock().unwrap().contains(label)
     }
 }
 
@@ -32,6 +39,10 @@ pub fn close<R: Runtime>(app: &AppHandle<R>, monitor: &str) {
     let label = app.state::<Strips>().by_monitor.lock().unwrap().remove(monitor);
     if let Some(label) = label {
         app.state::<crate::clickthrough::Hitboxes>().by_window.lock().unwrap().remove(&label);
+        app.state::<Strips>().ready.lock().unwrap().remove(&label);
+        // A gesture held by this window ends with it.
+        let brain = app.state::<std::sync::Arc<crate::brain::Brain>>();
+        app.state::<crate::clickthrough::Drag>().cancel(&brain, "its strip closed", Some(&label));
         if let Some(w) = app.get_webview_window(&label) {
             let _ = w.destroy();
         }

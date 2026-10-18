@@ -1,11 +1,12 @@
 fn main() {
     // Only bellwether's own commands exist, and each gets a generated permission
-    // (allow-report-hitboxes, …) that a capability grants explicitly: the strip's six in
+    // (allow-report-hitboxes, …) that a capability grants explicitly: the strip's seven in
     // capabilities/strip.json, the onboarding window's eleven in capabilities/onboarding.json.
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
             "report_hitboxes",
             "sprite_clicked",
+            "sprite_drag",
             "get_pet",
             "get_snapshot",
             "shell_log",

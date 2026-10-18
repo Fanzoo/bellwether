@@ -123,7 +123,7 @@ describe('the onboarding page (plan D6)', () => {
     for (const c of used) assert.ok(ELEVEN.includes(c), `${c} is not an onboarding command`);
     assert.doesNotMatch(JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
     assert.doesNotMatch(HTML, /<script(?![^>]*src="onboarding\.js")|style="|on[a-z]+="/, 'no inline script, style or handler (the CSP refuses them)');
-    for (const c of ['get_pet', 'get_snapshot', 'report_hitboxes', 'sprite_clicked', 'shell_log', 'debug_snapshot']) assert.ok(!used.has(c), `the page must not call the strip's ${c}`);
+    for (const c of ['get_pet', 'get_snapshot', 'report_hitboxes', 'sprite_clicked', 'sprite_drag', 'shell_log', 'debug_snapshot']) assert.ok(!used.has(c), `the page must not call the strip's ${c}`);
   });
 
   test('a new user walks steps 2–8 in order, and Done ends with doctor in plain words', async () => {

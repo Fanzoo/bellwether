@@ -32,11 +32,18 @@ pub struct ShellView {
     /// of these: once the cursor is off every box the window stops hearing the mouse, so
     /// this is its only word that the cursor has gone. Windows with none are left out.
     pub over: Vec<(String, Vec<String>)>,
+    /// A sheep being carried, when it is drawn by a strip other than the pressed one
+    /// (D10, milestone 12): that strip draws it, the pressed strip doesn't.
+    pub carry: Option<crate::clickthrough::Carry>,
+    /// The last drag the shell cancelled itself: (pressed strip, sprite id, number).
+    pub cancel: Option<(String, String, u64)>,
 }
 
 impl ShellView {
     fn json(&self) -> Value {
-        serde_json::json!({"rev": self.rev, "hidden": self.hidden, "showLabels": self.show_labels, "near": self.near})
+        // `placement`: a strip applies the flock again when it changes (a drop, a sheep moving
+        // monitor), even with no new brain snapshot.
+        serde_json::json!({"rev": self.rev, "hidden": self.hidden, "showLabels": self.show_labels, "near": self.near, "placement": self.placement})
     }
 
     /// The view as one strip window sees it (its own Dock extent, or none).
@@ -44,6 +51,17 @@ impl ShellView {
         let mut v = self.json();
         v["dock"] = self.dock.iter().find(|(l, _, _)| l == label).map_or(Value::Null, |(_, lo, hi)| serde_json::json!({"lo": lo, "hi": hi}));
         v["over"] = serde_json::json!(self.over.iter().find(|(l, _)| l == label).map_or(&[][..], |(_, ids)| &ids[..]));
+        // The carried sheep: where to draw it (the strip under the cursor), or that it is
+        // drawn elsewhere (the pressed strip); other strips hear nothing.
+        v["carry"] = match &self.carry {
+            Some(c) if c.label == label => serde_json::json!({"id": c.id, "x": c.x, "y": c.y, "grabDx": c.grab_dx, "colourIndex": c.colour, "alert": c.alert}),
+            Some(c) if c.pressed == label => serde_json::json!({"id": c.id, "away": true}),
+            _ => Value::Null,
+        };
+        v["dragCancel"] = match &self.cancel {
+            Some((l, id, n)) if l == label => serde_json::json!({"id": id, "n": n}),
+            _ => Value::Null,
+        };
         v
     }
 }

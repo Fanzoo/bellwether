@@ -30,13 +30,29 @@ esac
 exit 64
 "#;
 
-fn free_port() -> u16 {
-    loop {
-        let p = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        if p != 47417 && p >= 1024 {
-            return p;
+/// Starts `serve --port 0` (the brain binds a port the OS picks) and returns it with the
+/// port it announced. A port picked here and handed over later could be taken in between
+/// (the other tests here bind ports too); `serve` then exits at once ("already in use"),
+/// which made the bundle-swap test fail now and then (milestone 12 fixes, deviation 139).
+fn serve_on_any_port(mut cmd: Command) -> (std::process::Child, u16) {
+    use std::io::BufRead;
+    let mut child = cmd.args(["serve", "--port", "0"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    let mut lines = std::io::BufReader::new(child.stderr.take().unwrap()).lines();
+    let mut seen = Vec::new();
+    let port = loop {
+        let Some(Ok(line)) = lines.next() else {
+            let _ = child.kill();
+            panic!("serve stopped before it was listening: {seen:?} (exit {:?})", child.wait());
+        };
+        if let Some(rest) = line.split("listening on http://127.0.0.1:").nth(1) {
+            break rest.split(|c: char| !c.is_ascii_digit()).next().unwrap().parse::<u16>().unwrap();
         }
-    }
+        seen.push(line);
+    };
+    assert_ne!(port, 47417);
+    // Keep reading, so the brain never blocks on a full pipe.
+    std::thread::spawn(move || lines.for_each(drop));
+    (child, port)
 }
 
 /// A brain stand-in: /health says `version` and `pid`; /hook answers 204.
@@ -160,21 +176,11 @@ fn an_older_brain_that_isnt_the_apps_agent_is_left_alone() {
 #[test]
 fn the_same_version_passes_and_launchd_is_not_asked() {
     let w = World::new("same");
-    let port = free_port();
     std::fs::write(w.base.join("app/hook-token"), TOKEN).unwrap();
     std::fs::set_permissions(w.base.join("app/hook-token"), std::fs::Permissions::from_mode(0o600)).unwrap();
-    let mut serve = Command::new(BIN)
-        .args(["serve", "--port", &port.to_string()])
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("HOME", w.base.join("home"))
-        .env("BELLWETHER_HOME", w.base.join("app"))
-        .env("BELLWETHER_HOOK_TOKEN", TOKEN)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut cmd = Command::new(BIN);
+    cmd.env_clear().env("PATH", "/usr/bin:/bin").env("HOME", w.base.join("home")).env("BELLWETHER_HOME", w.base.join("app")).env("BELLWETHER_HOOK_TOKEN", TOKEN);
+    let (mut serve, port) = serve_on_any_port(cmd);
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut out = String::new();
     while Instant::now() < deadline {
@@ -223,19 +229,10 @@ fn a_process_whose_bundle_was_replaced_is_still_this_bundles() {
     std::fs::create_dir_all(&macos).unwrap();
     std::fs::copy(BIN, macos.join("Bellwether")).unwrap();
     let exe = macos.join("Bellwether").canonicalize().unwrap();
-    let port = free_port();
-    let mut child = Command::new(&exe)
-        .args(["serve", "--port", &port.to_string()])
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("HOME", w.base.join("home"))
-        .env("BELLWETHER_HOME", w.base.join("app"))
-        .env("BELLWETHER_HOOK_TOKEN", TOKEN)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut cmd = Command::new(&exe);
+    cmd.env_clear().env("PATH", "/usr/bin:/bin").env("HOME", w.base.join("home")).env("BELLWETHER_HOME", w.base.join("app")).env("BELLWETHER_HOOK_TOKEN", TOKEN);
+    // Listening (its port bound) before anything is looked at: it stays up until killed.
+    let (mut child, _) = serve_on_any_port(cmd);
     let pid = child.id() as i32;
     let deadline = Instant::now() + Duration::from_secs(10);
     while !processes_of(&exe).iter().any(|(p, _, _)| *p == pid) {
@@ -247,10 +244,12 @@ fn a_process_whose_bundle_was_replaced_is_still_this_bundles() {
     let found = processes_of(&exe);
     let deleted = pid_exe(pid);
     let elsewhere = processes_of(&w.base.join("Other.app/Contents/MacOS/Bellwether"));
+    let alive = child.try_wait().unwrap().is_none();
     // Only the process this test started, by its own handle.
     let _ = child.kill();
     let _ = child.wait();
+    assert!(alive, "the brain was still running while it was looked up");
     assert_eq!(deleted, Exe::Deleted, "proc_pidpath after the bundle is gone");
-    assert!(found.iter().any(|(p, _, a)| *p == pid && a.ends_with(&format!("serve --port {port}"))), "{found:?}");
+    assert!(found.iter().any(|(p, _, a)| *p == pid && a.ends_with("serve --port 0")), "{found:?}");
     assert!(!elsewhere.iter().any(|(p, _, _)| *p == pid), "never another path's");
 }

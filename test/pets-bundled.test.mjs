@@ -324,7 +324,7 @@ test('review.html runs the player\'s own modules: the bundle exports what the pa
   }
 });
 
-test('a pet without carried or land (an imported one) falls back to walk in the player; nothing plays them yet', async () => {
+test('a pet without carried or land (an imported one) falls back to walk in the player; a bundled pet plays both when dragged (milestone 12)', async () => {
   const { Sprite } = await import('../shell/src/player/sprite.mjs');
   const { parsePetDocument: parse } = await import('../shell/src/player/pet.mjs');
   for (const name of PETS) {
@@ -340,9 +340,27 @@ test('a pet without carried or land (an imported one) falls back to walk in the 
     const full = resolveAnimationMap(model, b.src.pet.behaviours);
     assert.equal(model.animations[full.carried[0]].name, 'carried');
     assert.equal(model.animations[full.land[0]].name, 'land');
+    // Milestone 12 plays them: carried while held, land once it is set down.
+    const dragged = new Sprite({ model, map: full, width: 60, height: 60, stripWidth: 900, stripHeight: 110, home: 400, wander: 100 });
+    dragged.setBehaviour('graze', 0);
+    dragged.hold(10);
+    assert.equal(model.animations[dragged.anim.id].name, 'carried', `${name}: carried while held`);
+    dragged.setDown(20);
+    const played = new Set();
+    for (let t = 20; t < 3000; t += 20) {
+      dragged.tick(t);
+      played.add(model.animations[dragged.anim.id].name);
+    }
+    assert.ok(played.has('land'), `${name}: land after the drop (${[...played]})`);
+    // Without them: walk frames while held, and no landing.
+    sp.setBehaviour('graze', 0);
+    sp.hold(10);
+    assert.deepEqual(map.walk.includes(sp.anim.id), true);
   }
+  // The strip's own default map (esheep64's names) asks for neither, so nothing is missing.
   const main = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src', 'main.js'), 'utf8');
-  assert.doesNotMatch(main, /'carried'|'land'/, 'the strip doesn\'t play them yet (the drag milestone will)');
+  const defaults = main.slice(main.indexOf('const DEFAULT_ANIMATION_MAP'), main.indexOf('};', main.indexOf('const DEFAULT_ANIMATION_MAP')));
+  assert.doesNotMatch(defaults, /carried|land/);
 });
 
 describe('overlays: the sleeping "z", drawn separately and never mirrored (deviation 125)', async () => {

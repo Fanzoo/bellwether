@@ -100,6 +100,10 @@ struct Places {
     primary: String,
     placed: std::collections::HashMap<String, placement::Placed>,
     book: std::collections::HashMap<String, (String, i64)>,
+    /// Sheep put down by hand (D10, milestone 12), by identity key. In memory only.
+    dropped: std::collections::HashMap<String, placement::Dropped>,
+    /// The last drop's number.
+    seq: u64,
 }
 
 struct Shared {
@@ -112,6 +116,8 @@ struct Shared {
     snapshot: Option<(String, f64)>,
     /// Debug only: also snapshot every N seconds (--snapshot-every N).
     snapshot_every: Option<f64>,
+    /// Debug only (`--demo --demo-drag`): the strip runs a scripted drag (D10).
+    demo_drag: bool,
 }
 
 #[derive(Serialize)]
@@ -216,6 +222,7 @@ fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
         "trace": crate::settings::env_os("SHELL_TRACE").is_some(),
         "snapshotAfterMs": shared.snapshot.as_ref().map(|(_, secs)| secs * 1000.0),
         "snapshotEveryMs": shared.snapshot.as_ref().and(shared.snapshot_every).map(|secs| secs * 1000.0),
+        "demoDrag": shared.demo_drag,
     });
     let overlays = bundled_overlays(&folder);
     Ok(PetPayload { folder, xml, animation_map, overlays, display })
@@ -238,11 +245,13 @@ async fn get_snapshot(
         .map_err(|e| e.to_string())?;
     // Milestone 8: each strip window sees only the sheep living on its monitor.
     let brain_view = b2.view();
+    // Its page is up: it can draw a carried sheep from now on (D10).
+    strips.ready.lock().unwrap().insert(window.label().to_string());
     let snap = snap.map(|s| {
         let p = places.lock().unwrap();
         let mine = strips.monitor_of(window.label()).unwrap_or_else(|| p.primary.clone());
         let open: std::collections::HashSet<String> = strips.by_monitor.lock().unwrap().keys().cloned().collect();
-        let mut v = placement::view_for(&s, &mine, &p.primary, &p.placed, &open, &p.book);
+        let mut v = placement::view_for(&s, &mine, &p.primary, &p.placed, &open, &p.book, &p.dropped);
         if v.get("shell").is_some() {
             v["shell"] = brain_view.json_for(window.label());
         }
@@ -270,7 +279,7 @@ fn report_hitboxes(window: tauri::WebviewWindow, boxes: Vec<Rect>, hitboxes: tau
 /// session's terminal to the front (Milestone 8), on its own thread.
 #[tauri::command]
 fn sprite_clicked(id: String, brain: tauri::State<'_, Arc<Brain>>, locator: tauri::State<'_, Arc<locator::Locator>>) {
-    let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == ':' || *c == '.' || *c == '_' || *c == '@').take(128).collect();
+    let id = clean_id(&id);
     log(&format!("sprite clicked: {id}"));
     let Some(snap) = brain.current() else { return };
     // A lamb's click goes to its parent's terminal.
@@ -301,6 +310,134 @@ fn sprite_clicked(id: String, brain: tauri::State<'_, Arc<Brain>>, locator: taur
         let result = locator.focus(&terminal);
         log(&format!("click on {id}: {result:?}"));
     });
+}
+
+/// Keeps a sprite id to the characters ids are made of (as `sprite_clicked` does).
+fn clean_id(id: &str) -> String {
+    id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == ':' || *c == '.' || *c == '_' || *c == '@').take(128).collect()
+}
+
+/// A sheep in the brain's snapshot by its sprite id (sheep only, not lambs).
+fn sheep_by_id<'a>(snap: &'a Value, id: &str) -> Option<&'a Value> {
+    snap.get("flock").and_then(Value::as_array)?.iter().find(|s| s.get("id").and_then(Value::as_str) == Some(id))
+}
+
+/// Dragging a sheep along the strip (D10, milestone 12). The pressed strip's webview owns
+/// the gesture and says where it is in it; the shell holds the window's mouse, knows
+/// where the cursor is, and keeps the drop records.
+///
+/// - `press`: the window holds the mouse until the gesture ends (clickthrough.rs).
+/// - `lift`: past the threshold, a sheep is carried: `grabDx` (cursor x − its left edge)
+///   and `width`. Strips open on every monitor.
+/// - `release`: the end of a click (only the hold ends), or the drop of a lifted sheep. A
+///   drop is recorded for the monitor under the cursor; on the pressed strip's own monitor
+///   at `x`, the webview's own centre for it. Returns `{monitor, centreX, seq, ghost, here}`.
+/// - `cancel`: nothing is recorded (`reason` for the log).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn sprite_drag(
+    phase: String,
+    id: String,
+    grab_dx: Option<f64>,
+    width: Option<f64>,
+    x: Option<f64>,
+    reason: Option<String>,
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    brain: tauri::State<'_, Arc<Brain>>,
+    places: tauri::State<'_, Arc<std::sync::Mutex<Places>>>,
+    drag: tauri::State<'_, clickthrough::Drag>,
+    strips: tauri::State<'_, strips::Strips>,
+    shared: tauri::State<'_, Shared>,
+) -> Value {
+    let id = clean_id(&id);
+    let label = window.label().to_string();
+    let num = |v: Option<f64>| v.filter(|v| v.is_finite() && v.abs() < 100_000.0);
+    match phase.as_str() {
+        "press" => {
+            let mut h = drag.hold.lock().unwrap();
+            // One hold at a time: a new press replaces any other.
+            *h = Some(clickthrough::Hold::new(&label, &id, std::time::Instant::now()));
+            Value::Null
+        }
+        "lift" => {
+            let snap = brain.current();
+            let sheep = snap.as_ref().and_then(|s| sheep_by_id(s, &id));
+            {
+                let mut h = drag.hold.lock().unwrap();
+                let Some(hold) = h.as_mut().filter(|h| h.label == label && h.id == id) else { return Value::Null };
+                hold.lifted = true;
+                hold.grab_dx = num(grab_dx).unwrap_or(0.0);
+                hold.width = num(width).filter(|w| *w > 0.0).unwrap_or(0.0);
+                hold.colour = sheep.and_then(|s| s.get("colourIndex")).and_then(Value::as_i64).unwrap_or(0);
+                hold.alert = sheep.and_then(|s| s.pointer("/alert/kind")).and_then(Value::as_str).map(str::to_string);
+            }
+            log(&format!("sheep {id} picked up"));
+            // Strips on every monitor, now rather than on the next pass.
+            drag.kick();
+            Value::Null
+        }
+        "release" => {
+            let hold = {
+                let mut h = drag.hold.lock().unwrap();
+                if h.as_ref().is_some_and(|h| h.label == label && h.id == id) {
+                    h.take()
+                } else {
+                    None
+                }
+            };
+            let Some(hold) = hold.filter(|h| h.lifted) else { return Value::Null };
+            let identity = brain.current().as_ref().and_then(|s| sheep_by_id(s, &id)).and_then(|s| s.get("identityKey")).and_then(Value::as_str).map(str::to_string);
+            let Some(identity) = identity else {
+                log("drag cancelled: its session ended");
+                brain.update_view(|v| v.carry = None);
+                return Value::Null;
+            };
+            let mut p = places.lock().unwrap();
+            let pressed = strips.monitor_of(&label).unwrap_or_else(|| p.primary.clone());
+            // The monitor under the cursor, unless that is the pressed strip's own (or has
+            // no strip ready, or the gesture is --demo-drag's): then the pressed strip's own
+            // centre for the sheep, which it has drawn there.
+            let at = if shared.demo_drag { None } else { clickthrough::cursor_now(&app) };
+            let (monitor, centre) = match at.filter(|a| a.monitor != pressed && strips.is_ready(&a.label)) {
+                Some(a) => {
+                    let half = hold.width / 2.0;
+                    (a.monitor, (a.x - hold.grab_dx + half).clamp(half, (a.w - half).max(half)))
+                }
+                None => (pressed.clone(), num(x).unwrap_or(0.0)),
+            };
+            p.seq += 1;
+            let seq = p.seq;
+            let ghost = p.placed.get(&identity).map(|pl| pl.monitor.as_str()).unwrap_or(p.primary.as_str()) == monitor;
+            p.dropped.insert(identity, placement::Dropped { monitor: monitor.clone(), centre_x: centre, seq, sheep: id.clone() });
+            drop(p);
+            log(&format!("sheep {id} dropped on {monitor:?} at x {} ({})", centre.round(), if ghost { "ghost" } else { "guest" }));
+            brain.update_view(|v| {
+                v.carry = None;
+                v.placement += 1;
+            });
+            drag.kick();
+            serde_json::json!({"monitor": monitor, "centreX": centre, "seq": seq, "ghost": ghost, "here": monitor == pressed})
+        }
+        "cancel" => {
+            let hold = {
+                let mut h = drag.hold.lock().unwrap();
+                if h.as_ref().is_some_and(|h| h.label == label && h.id == id) {
+                    h.take()
+                } else {
+                    None
+                }
+            };
+            if hold.is_some_and(|h| h.lifted) {
+                let reason: String = reason.unwrap_or_default().chars().filter(|c| c.is_ascii_alphanumeric() || " -'".contains(*c)).take(64).collect();
+                log(&format!("drag cancelled: {}", if reason.is_empty() { "the strip cancelled it" } else { &reason }));
+                brain.update_view(|v| v.carry = None);
+                drag.kick();
+            }
+            Value::Null
+        }
+        _ => Value::Null,
+    }
 }
 
 /// One line from the webview into the shell's log (pet warnings, sheep arriving).
@@ -372,6 +509,8 @@ struct Flags {
     spawn_brain: bool,
     selftest: bool,
     demo: bool,
+    /// With --demo: a scripted drag through the strip's own state machine (D10).
+    demo_drag: bool,
     /// Open the onboarding window now (`open -b <id> --args --onboarding`).
     onboarding: bool,
     /// Debug: locate one terminal (the snapshot's `terminal` object as JSON), print
@@ -390,6 +529,7 @@ fn flags() -> Flags {
         spawn_brain: !args.iter().any(|a| a == "--no-spawn-brain"),
         selftest: args.iter().any(|a| a == "--selftest"),
         demo: args.iter().any(|a| a == "--demo"),
+        demo_drag: args.iter().any(|a| a == "--demo") && args.iter().any(|a| a == "--demo-drag"),
         onboarding: args.iter().any(|a| a == "--onboarding"),
         locate: value("--locate"),
     }
@@ -447,6 +587,7 @@ pub fn run() {
         selftest: flags.selftest,
         snapshot: flags.snapshot.clone().map(|p| (p, flags.snapshot_after)),
         snapshot_every: flags.snapshot_every,
+        demo_drag: flags.demo_drag,
     };
     let capture_exclusion = settings.config.pointer("/privacy/captureExclusion").and_then(Value::as_bool).unwrap_or(true);
     let hide_when_sharing = settings.config.pointer("/privacy/hideWhenSharing").and_then(Value::as_bool).unwrap_or(true);
@@ -536,7 +677,9 @@ pub fn run() {
         .manage(Hitboxes::default())
         .manage(strips::Strips::default())
         .manage(locator.clone())
-        .manage(Arc::new(std::sync::Mutex::new(Places { primary: String::new(), placed: Default::default(), book: Default::default() })))
+        .manage(Arc::new(std::sync::Mutex::new(Places { primary: String::new(), placed: Default::default(), book: Default::default(), dropped: Default::default(), seq: 0 })))
+        .manage(clickthrough::Drag::default())
+        .manage(clickthrough::Screens::default())
         .manage(shared)
         .manage(onboarding::Onboarding::new(onboarding_ctx))
         .invoke_handler(tauri::generate_handler![
@@ -544,6 +687,7 @@ pub fn run() {
             get_snapshot,
             report_hitboxes,
             sprite_clicked,
+            sprite_drag,
             shell_log,
             debug_snapshot,
             onboarding::setup_status,
@@ -564,6 +708,8 @@ pub fn run() {
             let handle = app.handle().clone();
             let monitor = app.primary_monitor()?.ok_or("no primary monitor")?;
             app.state::<Arc<std::sync::Mutex<Places>>>().lock().unwrap().primary = strips::monitor_name(&monitor);
+            // The monitors for the cursor poll (D10); the placement loop keeps them current.
+            *app.state::<clickthrough::Screens>().now.lock().unwrap() = (monitors_of(&handle), monitor.scale_factor());
             if let Some(json) = &flags.locate {
                 // --locate: one lookup, printed; no window, no tray, no brain.
                 let t = locator::Terminal::from_json(&serde_json::from_str(json).unwrap_or(Value::Null));
@@ -627,10 +773,14 @@ pub fn run() {
                 // Debug: one sheep per behaviour, without a brain, to check the
                 // animation map by eye. No hooks, no brain, nothing persisted.
                 log("--demo: showing a synthetic flock; the brain is not contacted");
+                if flags.demo_drag {
+                    log("--demo-drag: the strip will press demo sheep 2, carry it onto sheep 4 and drop it, then click sheep 1");
+                }
                 brain_for_setup.set_demo(demo_snapshot());
             }
             let h = handle.clone();
-            std::thread::spawn(move || clickthrough::run(h, fade_radius));
+            let demo_drag = flags.demo_drag;
+            std::thread::spawn(move || clickthrough::run(h, fade_radius, demo_drag));
             if updates_on {
                 updater::schedule(handle.clone(), update_policy);
             }
@@ -911,7 +1061,12 @@ fn monitors_main(app: &tauri::AppHandle) -> Vec<locator::Monitor> {
             let w = h.webview_windows().into_values().next().map(|w| w.available_monitors().map(|v| v.len()));
             log(&format!("trace: available_monitors app {:?} window {:?} primary {:?}", a.as_ref().map(|v| v.len()), w, h.primary_monitor().map(|m| m.map(|m| strips::monitor_name(&m)))));
         }
-        let _ = tx.send(monitors_of(&h));
+        let mons = monitors_of(&h);
+        let scale = h.primary_monitor().ok().flatten().map(|m| m.scale_factor());
+        if let Some(scale) = scale {
+            *h.state::<clickthrough::Screens>().now.lock().unwrap() = (mons.clone(), scale);
+        }
+        let _ = tx.send(mons);
     }).is_err() {
         return Vec::new();
     }
@@ -953,7 +1108,8 @@ fn placement_loop(app: tauri::AppHandle, brain: Arc<Brain>, locator: Arc<locator
     let places = app.state::<Arc<std::sync::Mutex<Places>>>().inner().clone();
     let mut last_monitors: Vec<locator::Monitor> = Vec::new();
     loop {
-        std::thread::sleep(Duration::from_millis(500));
+        // Every 500 ms, or at once when a sheep is lifted or dropped (strips to open).
+        app.state::<clickthrough::Drag>().wait(Duration::from_millis(500));
         let monitors = monitors_main(&app);
         if monitors.is_empty() {
             continue;
@@ -964,6 +1120,7 @@ fn placement_loop(app: tauri::AppHandle, brain: Arc<Brain>, locator: Arc<locator
         let displays_changed = !last_monitors.is_empty() && monitors != last_monitors;
         if displays_changed {
             log(&format!("displays changed: {:?}; locating every sheep again", monitors.iter().map(|m| &m.name).collect::<Vec<_>>()));
+            app.state::<clickthrough::Drag>().cancel(&brain, "the displays changed", None);
         }
         last_monitors = monitors.clone();
         let Some(snap) = brain.current() else { continue };
@@ -972,13 +1129,42 @@ fn placement_loop(app: tauri::AppHandle, brain: Arc<Brain>, locator: Arc<locator
         let primary = places.lock().unwrap().primary.clone();
         let mut changed = false;
         let present: HashSet<String> = sheep.iter().map(|s| s.identity.clone()).collect();
+        // The sheep being carried is leaving or gone: the drag ends at once (D10).
+        {
+            let drag = app.state::<clickthrough::Drag>();
+            let held = drag.hold.lock().unwrap().as_ref().map(|h| h.id.clone());
+            if let Some(id) = held {
+                let live = snap.get("flock").and_then(Value::as_array).is_some_and(|f| {
+                    f.iter().any(|s| {
+                        let mine = s.get("id").and_then(Value::as_str) == Some(id.as_str()) || s.get("lambs").and_then(Value::as_array).is_some_and(|l| l.iter().any(|x| x.get("id").and_then(Value::as_str) == Some(id.as_str())));
+                        mine && s.get("state").and_then(Value::as_str) != Some("leaving")
+                    })
+                });
+                if !live {
+                    drag.cancel(&brain, "its session ended", None);
+                }
+            }
+        }
+        // Drops that end now: the session ended, or the monitor went (D10).
+        {
+            let mut p = places.lock().unwrap();
+            for (identity, reason) in placement::ended_drops(&p.dropped, &sheep, &monitors) {
+                if let Some(d) = p.dropped.remove(&identity) {
+                    log(&format!("drop for {} ended: {reason}", d.sheep));
+                    // Back to normal placement: located again on this pass.
+                    p.placed.remove(&identity);
+                    changed = true;
+                }
+            }
+        }
         // Who needs a lookup, done at most LOCATE_WORKERS at a time, so one slow terminal
         // (a herdr socket that hangs until the 4 s kill) doesn't hold up the others.
         let todo: Vec<&placement::Sheep> = sheep
             .iter()
             .filter(|s| {
-                let prev = places.lock().unwrap().placed.get(&s.identity).cloned();
-                placement::needs_locate(prev.as_ref(), s, now, relocate, displays_changed)
+                let p = places.lock().unwrap();
+                let prev = p.placed.get(&s.identity).cloned();
+                placement::needs_locate(prev.as_ref(), s, now, relocate, displays_changed, p.dropped.contains_key(&s.identity))
             })
             .collect();
         let found = locate_all(&locator, &todo);
@@ -1000,7 +1186,7 @@ fn placement_loop(app: tauri::AppHandle, brain: Arc<Brain>, locator: Arc<locator
         // Strips to match.
         let needed = {
             let p = places.lock().unwrap();
-            placement::strips_needed(&primary, &monitors, &p.placed, &present)
+            placement::strips_needed(&primary, &monitors, &p.placed, &present, &p.dropped, app.state::<clickthrough::Drag>().lifted())
         };
         let open: std::collections::BTreeSet<String> = app.state::<strips::Strips>().by_monitor.lock().unwrap().keys().cloned().collect();
         for m in needed.difference(&open) {
@@ -1025,7 +1211,7 @@ fn placement_loop(app: tauri::AppHandle, brain: Arc<Brain>, locator: Arc<locator
         // Slots on the other monitors, reported to the brain so they're kept.
         let report = {
             let mut p = places.lock().unwrap();
-            let (book, report) = placement::assign_slots(&sheep, &p.placed, &primary, &p.book);
+            let (book, report) = placement::assign_slots(&sheep, &p.placed, &primary, &p.book, &p.dropped);
             changed |= book != p.book;
             p.book = book;
             report
@@ -1127,7 +1313,7 @@ mod tests {
         );
         loc.socket_check = Box::new(|_| Ok(()));
         let sheep: Vec<placement::Sheep> = (0..8)
-            .map(|i| placement::Sheep { identity: format!("s{i}"), label: String::new(), alert: String::new(), terminal: serde_json::json!({"herdrPane": format!("w1:p{i}"), "herdrSocket": format!("/s/{i}")}), slots: Default::default() })
+            .map(|i| placement::Sheep { identity: format!("s{i}"), label: String::new(), alert: String::new(), terminal: serde_json::json!({"herdrPane": format!("w1:p{i}"), "herdrSocket": format!("/s/{i}")}), slots: Default::default(), leaving: false })
             .collect();
         let todo: Vec<&placement::Sheep> = sheep.iter().collect();
         let t = std::time::Instant::now();
@@ -1159,18 +1345,18 @@ mod tests {
         assert!(reject_doctype("<animations><header/></animations>").is_ok());
     }
 
-    /// The webview surface (plan D1, D6; milestone 5's and milestone 7's "done when"): two
-    /// capabilities, each granting an exact list to its own windows: the strip's six to
-    /// `strip-*`, the onboarding window's eleven to `onboarding`, none shared. The handler
-    /// list, build.rs and the autogenerated permission files name the same seventeen, and no
-    /// other capability exists.
+    /// The webview surface (plan D1, D6; milestone 5's, 7's and 12's "done when"): two
+    /// capabilities, each granting an exact list to its own windows: the strip's seven to
+    /// `strip-*` (`sprite_drag` since milestone 12, D10), the onboarding window's eleven to
+    /// `onboarding`, none shared. The handler list, build.rs and the autogenerated permission
+    /// files name the same eighteen, and no other capability exists.
     #[test]
     fn the_capabilities_list_exactly_their_permissions() {
-        const SIX: [&str; 6] = ["get_pet", "get_snapshot", "report_hitboxes", "sprite_clicked", "shell_log", "debug_snapshot"];
+        const SEVEN: [&str; 7] = ["get_pet", "get_snapshot", "report_hitboxes", "sprite_clicked", "sprite_drag", "shell_log", "debug_snapshot"];
         let allow = |list: &[&str]| -> Vec<String> { list.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).collect() };
         let granted = |cap: &Value| -> Vec<String> { cap["permissions"].as_array().unwrap().iter().map(|p| p.as_str().expect("a plain permission name, no scope object").to_string()).collect() };
         let strip: Value = serde_json::from_str(include_str!("../capabilities/strip.json")).unwrap();
-        assert_eq!(granted(&strip), allow(&SIX), "the strip: exactly the six, in this order");
+        assert_eq!(granted(&strip), allow(&SEVEN), "the strip: exactly the seven, in this order");
         assert_eq!(strip["windows"], serde_json::json!(["strip-*"]));
         let onboarding: Value = serde_json::from_str(include_str!("../capabilities/onboarding.json")).unwrap();
         assert_eq!(granted(&onboarding), allow(&onboarding::COMMANDS), "the onboarding window: exactly the eleven of D6, in its order");
@@ -1178,7 +1364,7 @@ mod tests {
         for cap in [&strip, &onboarding] {
             assert!(cap.get("remote").is_none() && cap.get("platforms").is_none());
         }
-        assert!(!SIX.iter().any(|c| onboarding::COMMANDS.contains(c)), "no command is in both");
+        assert!(!SEVEN.iter().any(|c| onboarding::COMMANDS.contains(c)), "no command is in both");
         assert!(!strips::is_strip(onboarding::LABEL), "the onboarding window never matches strip-*");
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut caps: Vec<String> = std::fs::read_dir(dir.join("capabilities")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
@@ -1186,7 +1372,7 @@ mod tests {
         assert_eq!(caps, ["onboarding.json", "strip.json"]);
         let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(conf["app"]["security"]["capabilities"], serde_json::json!(["strip", "onboarding"]));
-        let mut all: Vec<&str> = SIX.iter().chain(onboarding::COMMANDS.iter()).copied().collect();
+        let mut all: Vec<&str> = SEVEN.iter().chain(onboarding::COMMANDS.iter()).copied().collect();
         let src = include_str!("lib.rs");
         let handler: Vec<&str> = src.split(concat!("generate_", "handler![")).nth(1).unwrap().split(']').next().unwrap().split(',').map(str::trim).filter(|c| !c.is_empty()).map(|c| c.trim_start_matches("onboarding::")).collect();
         assert_eq!(handler, all);

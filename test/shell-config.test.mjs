@@ -10,12 +10,13 @@ import { AGENT_DIR } from './helpers.mjs';
  */
 
 const TAURI = path.join(AGENT_DIR, 'shell', 'src-tauri');
-const ALLOWED = ['allow-get-pet', 'allow-get-snapshot', 'allow-report-hitboxes', 'allow-sprite-clicked', 'allow-shell-log', 'allow-debug-snapshot'];
+// Milestone 12 (D10): sprite_drag is the seventh.
+const ALLOWED = ['allow-get-pet', 'allow-get-snapshot', 'allow-report-hitboxes', 'allow-sprite-clicked', 'allow-sprite-drag', 'allow-shell-log', 'allow-debug-snapshot'];
 // Milestone 7 (plan D6): the onboarding window's eleven, in their own capability.
 const ONBOARDING = ['allow-setup-status', 'allow-hooks-preview', 'allow-hooks-apply', 'allow-login-items-set', 'allow-permission-request', 'allow-pet-select', 'allow-pet-import', 'allow-migration-preview', 'allow-migration-apply', 'allow-cli-tool-install', 'allow-setup-close'];
 const WINDOWS = { 'strip.json': [['strip-*'], ALLOWED], 'onboarding.json': [['onboarding'], ONBOARDING] };
 
-test('capabilities grant only bellwether\'s own commands: the strip\'s six to strip windows, the onboarding eleven to the onboarding window', () => {
+test('capabilities grant only bellwether\'s own commands: the strip\'s seven to strip windows, the onboarding eleven to the onboarding window', () => {
   const files = fs.readdirSync(path.join(TAURI, 'capabilities')).filter((f) => f.endsWith('.json')).sort();
   assert.deepEqual(files, ['onboarding.json', 'strip.json']);
   for (const f of files) {

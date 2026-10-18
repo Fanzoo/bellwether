@@ -74,10 +74,16 @@ To come back to the window later: menu-bar sheep > *Set up Bellwether…*.
 - **Colours:** each session has its own colour, on its sheep's flight helmet, and keeps
   its colour and place across `/clear` and restarts. Two sessions in one project are told
   apart in their labels (`my-project · tab 2`).
-- **Hover** over a sheep to see its project; **click** it to bring its terminal forward.
-  Bubbles and the space between sheep let clicks through to whatever is underneath, and a
-  sheep fades while the cursor is near it.
-- **More than one monitor:** each sheep lives on the monitor where its terminal window is.
+- **Hover** over a sheep to see its project; **click** it to bring its terminal forward
+  (the click counts when you let go). Bubbles and the space between sheep let clicks
+  through to whatever is underneath, and a sheep fades while the cursor is near it.
+- **Move a sheep** by dragging it: press and move, and it dangles from the cursor; let go
+  and it lands there, on the strip of whichever monitor you dropped it on, and carries on
+  around that spot. It never lands on another sheep: it walks to the nearest clear spot.
+  Its lambs follow it (lambs themselves can't be dragged). The move lasts until Bellwether
+  restarts or its session ends; nothing is saved.
+- **More than one monitor:** each sheep lives on the monitor where its terminal window is,
+  unless you have moved it.
 
 ## Settings and pets
 

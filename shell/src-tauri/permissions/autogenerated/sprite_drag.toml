@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sprite-drag"
+description = "Enables the sprite_drag command without any pre-configured scope."
+commands.allow = ["sprite_drag"]
+
+[[permission]]
+identifier = "deny-sprite-drag"
+description = "Denies the sprite_drag command without any pre-configured scope."
+commands.deny = ["sprite_drag"]

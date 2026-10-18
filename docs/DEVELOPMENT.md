@@ -292,7 +292,8 @@ keeps the plain name.
   - It looks again when a sheep first appears, on each new alert, every
     `strip.relocateSec` (60 s), and when the displays change.
   - A sheep it can't place lives on the main monitor.
-- **Click a sheep** to bring its terminal to the front.
+- **Click a sheep** to bring its terminal to the front. The click fires when the button
+  comes up, not when it goes down (a press can't know yet whether it will be a drag).
   - Inside herdr: herdr's workspace, tab and pane are selected, then the window
     hosting herdr comes forward.
   - In a plain iTerm2 tab, that tab is selected; in Terminal.app, the window holding
@@ -309,6 +310,35 @@ keeps the plain name.
   where herdr is (default `herdr`, also found in `~/.local/bin`).
 - `bellwether-shell --locate '<terminal json>'` (a debug flag) prints what one lookup
   finds, and quits.
+
+### Moving a sheep
+
+- **Drag it:** press on a sheep and move 4 px or more. It plays `carried` and dangles
+  under the cursor, above every bubble and at full opacity. Let go and it falls to the
+  ground of the strip under the cursor, plays `land`, then carries on with whatever its
+  session is doing, around that spot. A press and release that moves less than 4 px is a
+  click, as before.
+- **Where it can go:** along the strip, left or right, including onto another monitor's
+  strip (one opens on every monitor while you carry a sheep). It always lands on the
+  ground; never mid-screen.
+- **Onto another sheep:** it lands, then walks to the nearest spot where its family fits
+  clear. Sheep in their slots never move for a dropped one. With no room anywhere on that
+  strip it stays where it was dropped, in front, and the log says `no room`.
+- **How long it lasts:** until the app restarts (`bellwether shell restart` included), its
+  session ends (`/exit`, a crash), the monitor goes, or you drag it again. `/clear` and
+  `/resume` keep it. Nothing is saved: no slot changes, nothing in `shell-state.json` or
+  `state.json`. While it lasts, the sheep doesn't move back to its terminal's monitor.
+- **Lambs** follow their parent: along the strip while it is carried, and to its new
+  monitor. A lamb can't be dragged; pressing one and moving does nothing.
+- **Quiet** and **Hide everything** leave nothing to pick up, and turning either on
+  mid-drag puts the sheep back where it was picked up. There is no Escape: to undo a move,
+  drag it back, or restart the strip.
+- **The log** (`shell.log`) has `sheep <id> picked up`, `sheep <id> dropped on <monitor>
+  at x <n>`, `drag cancelled: <reason>` and `drop for <id> ended: <reason>`, never a
+  bubble's text.
+- `--demo --demo-drag` (debug, with `--snapshot <png> --snapshot-every 1`) runs a scripted
+  drag on the demo flock: it presses sheep 2, carries it onto sheep 4, drops it, then
+  clicks sheep 1.
 
 ### Things to check by hand once
 
@@ -378,6 +408,24 @@ These need your hands, your eyes or a screen permission, so they aren't automate
     `config.json` and restart the shell. herdr sessions are still placed (through
     iTerm2 or the process tree), and `bellwether doctor` shows `herdr CLI`. Remove the
     setting afterwards.
+16. **Moving a sheep** (milestone 12). Use a test build on a free port with a scratch
+    home; make sheep with `bellwether replay <fixture> --tag <name>` against that port, and
+    one real session with `claude --settings <scratch hooks file>` for the clicks.
+    1. Click versus drag, with a mouse and with a trackpad (tap, click-and-drag,
+       three-finger drag): a click hops and focuses on release; a drag never focuses.
+    2. Drop onto empty ground, onto another sheep (it walks clear; the other doesn't
+       move), and onto a full strip (`no room` in the log).
+    3. Drop a sheep while it alerts: a "!" badge while carried, its bubble after landing.
+    4. Turn on Quiet, then Hide everything, mid-drag: the sheep goes back where it was
+       picked up.
+    5. Two monitors: carry a sheep across (a strip appears there), drop it, carry it back;
+       the strip left empty goes.
+    6. The fail-safe: reload the strip mid-drag (a pet change in the setup window), let
+       go, then click a Finder icon under the strip: the click reaches it.
+    7. `/exit` in a dropped sheep's session (a new `claude` in that tab comes back in its
+       slot), and `/clear` (the sheep stays where it was dropped).
+    8. `bellwether shell restart` puts every sheep back in its slot, on its terminal's
+       monitor.
 
 ---
 

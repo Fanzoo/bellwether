@@ -1,15 +1,16 @@
 // The strip's webview: draws the sheep and reports where they are. It has no network
 // access (CSP connect-src is Tauri's IPC only) and calls only bellwether's own commands:
-// get_pet, get_snapshot, report_hitboxes, sprite_clicked, shell_log, and with --snapshot
-// (debug) debug_snapshot. (--selftest also checks that the onboarding window's commands
-// are refused to it.)
+// get_pet, get_snapshot, report_hitboxes, sprite_clicked, sprite_drag (milestone 12),
+// shell_log, and with --snapshot (debug) debug_snapshot. (--selftest also checks that the
+// onboarding window's commands are refused to it.)
 
 import { BUBBLE, layoutBubbles } from './player/bubbles.mjs';
 import { familyExtent, freePlace, lambX } from './player/lambs.mjs';
 import { displayLabels } from './player/labels.mjs';
 import { tintHorns, tintWhole } from './player/horns.mjs';
 import { fadeStep, frontmost, tuftPixels, tuftX } from './player/grass.mjs';
-import { familyHomes, homeX } from './player/layout.mjs';
+import { homeX, homesWithDrops } from './player/layout.mjs';
+import { dragEvent, idleDrag } from './player/drag.mjs';
 import { hoverTarget } from './player/hover.mjs';
 import { assertSafePetXml, parsePetDocument, resolveAnimationMap } from './player/pet.mjs';
 import { cleanOverlays, overlayPlacements } from './player/overlay.mjs';
@@ -59,7 +60,22 @@ let dirty = true;
 // showLabels (tray), near (sprite keys within fade.radiusPx of the cursor), over (this
 // strip's sprite keys whose box the cursor is on, by the shell's poll).
 let muted = false;
-let view = { rev: -1, hidden: false, showLabels: false, near: new Set(), over: new Set(), dock: null };
+let view = { rev: -1, hidden: false, showLabels: false, near: new Set(), over: new Set(), dock: null, carry: null };
+
+// Dragging a sheep (D10, milestone 12). gesture: the press, click or drag state machine
+// (player/drag.mjs); pressId: the pressed sprite's id as the shell knows it. carried: the
+// sheep this strip is carrying {key, id, grabDx, fromX, dir}. guest: a sheep carried here
+// from another monitor's strip (the shell's `carry`), drawn here until it is let go;
+// lastGuest: where it was when the carry ended, for its fall if it was dropped here.
+let gesture = idleDrag();
+let pressId = null;
+let carried = null;
+let guest = null;
+let lastGuest = null;
+let lastCancel = null;
+let lastPlacement = null;
+// Until the first snapshot is drawn: a sheep dropped here before a reload doesn't land again.
+let booted = false;
 
 /** Whether the strip animates at all: not while muted or hidden. */
 const quiet = () => muted || view.hidden;
@@ -116,7 +132,7 @@ function grassFor(model, map, base, tileW, tileH) {
 /** Each sprite's tuft: fade it in while grazing or chewing, out a moment after. */
 function stepGrass(entry, now) {
   const { sprite } = entry;
-  const eating = !sprite.gone && entry.removedAt === undefined && !sprite.oneShot && (sprite.behaviour === 'graze' || sprite.behaviour === 'chew');
+  const eating = !sprite.gone && !sprite.held && !sprite.fall && entry.removedAt === undefined && !sprite.oneShot && (sprite.behaviour === 'graze' || sprite.behaviour === 'chew');
   const before = entry.grass?.alpha ?? 0;
   entry.grass = fadeStep(entry.grass, { eating, now });
   if (eating) {
@@ -211,7 +227,16 @@ function applyView(v) {
   // until it moves again (the tray's menu is where the cursor is now).
   if (!!v.hidden !== view.hidden || !!v.showLabels !== view.showLabels) pointer = null;
   const over = new Set(Array.isArray(v.over) ? v.over : []);
-  view = { rev: v.rev, hidden: !!v.hidden, showLabels: !!v.showLabels, near, over, dock };
+  const carry = v.carry && typeof v.carry === 'object' ? v.carry : null;
+  view = { rev: v.rev, hidden: !!v.hidden, showLabels: !!v.showLabels, near, over, dock, carry };
+  // A drag ends when the strip is hidden, or when the shell ended it (its fail-safe, the
+  // ceiling, a display change): the sheep is set down where it was picked up.
+  if (view.hidden) cancelGesture('the strip is hidden');
+  if (v.dragCancel && v.dragCancel.n !== lastCancel?.n) {
+    lastCancel = v.dragCancel;
+    if (pressId === v.dragCancel.id) cancelGesture('the shell ended it', false);
+  }
+  applyCarry(carry, performance.now());
   updateHover();
   if (dockChanged && pet) placeFamilies();
   dirty = true;
@@ -231,6 +256,7 @@ function apply(snapshot) {
     muted = !!snapshot.muted;
     pointer = null;
     log(muted ? 'muted: animation stops; only a sheep that needs you shows a badge' : 'unmuted');
+    if (muted) cancelGesture('Quiet is on');
   }
   const seen = new Set();
   let urgent = false;
@@ -245,11 +271,33 @@ function apply(snapshot) {
       const sprite = new Sprite({ model: pet.model, map: pet.map, width: w, height: h, stripWidth: width, stripHeight: height, home: home(actor.slot), wander: display.homeWanderPx, warn });
       entry = { key: actor.id, sprite, actor, fresh: true };
       sprites.set(actor.id, entry);
-      log(`sheep ${actor.id} (${actor.label}) arrives in slot ${actor.slot}, colour ${actor.colourIndex}`);
+      if (actor.dropped) {
+        // Dropped here from another strip (D10): it starts where it was let go, not at its
+        // home and without arriving, and falls from where it was held.
+        sprite.x = sprite.clampToStrip(actor.dropped.centreX - w / 2);
+        entry.fresh = false;
+        const held = lastGuest?.id === actor.id && now - lastGuest.at < 3000 ? lastGuest : null;
+        if (held) entry.dropDir = held.dir;
+        if (booted) {
+          sprite.hold(now);
+          sprite.carry(sprite.x, held ? held.top : 0);
+        } else sprite.landedSeq = actor.dropped.seq;
+        log(`sheep ${actor.id} (${actor.label}) dropped here at x ${Math.round(actor.dropped.centreX)}, colour ${actor.colourIndex}`);
+      } else log(`sheep ${actor.id} (${actor.label}) arrives in slot ${actor.slot}, colour ${actor.colourIndex}`);
     }
     entry.actor = actor;
     entry.removedAt = undefined;
     if (update(entry, actor, now)) urgent = true;
+    if (actor.dropped && actor.dropped.seq !== entry.sprite.landedSeq) {
+      if (entry.awaitingDrop) {
+        // Dropped from here, already landing: this is its record, not a second landing.
+        entry.sprite.landedSeq = actor.dropped.seq;
+        entry.awaitingDrop = false;
+      } else if (entry.sprite.held && entry !== carriedEntry()) {
+        if (entry.sprite.setDown(now, { seq: actor.dropped.seq })) urgent = true;
+      } else entry.sprite.landedSeq = actor.dropped.seq;
+    }
+    if (entry.localDrop && actor.dropped?.seq === entry.localDrop.seq) entry.localDrop = null;
     entry.shownLabel = labels.get(actor.id) ?? actor.label;
     for (const lamb of actor.lambs ?? []) {
       // Keyed under the parent: agent ids are unique per session, not across them
@@ -263,14 +311,32 @@ function apply(snapshot) {
   }
   for (const [id, entry] of sprites) {
     if (seen.has(id) || entry.removedAt !== undefined) continue;
+    if (entry.carriedAway) {
+      // Carried to another monitor's strip and dropped there: gone from here at once,
+      // without running off. Its lambs leave as on any move to another monitor.
+      sprites.delete(id);
+      log(`sheep ${id} carried to another monitor`);
+      continue;
+    }
     // Gone from the brain's flock: a sheep runs off, a lamb trots back into its
     // parent; either is dropped once it's gone.
     entry.removedAt = now;
     log(`${entry.parentId ? 'lamb' : 'sheep'} ${id} -> leave (gone from the flock)`);
     entry.sprite.setBehaviour('leave', now);
   }
+  // The sprite being pressed or carried is leaving or gone: the drag ends at once (it was
+  // set down where it is and runs off, as `leave` does).
+  if (gesture.phase !== 'idle') {
+    const e = sprites.get(gesture.id);
+    if (!e || e.removedAt !== undefined || e.actor.state === 'leaving') cancelGesture('its session ended');
+  }
   placeFamilies();
   dirty = true;
+  if (!booted) {
+    booted = true;
+    // M12 step 1 (e): how long a new strip takes to draw its first snapshot.
+    log(`first snapshot drawn: ${snapshot.flock.length} sheep, ${Math.round(now)} ms after the page started`);
+  }
   if (urgent) {
     lastDraw = now;
     draw(now);
@@ -291,15 +357,22 @@ function placeFamilies() {
   const families = parents.map((e) => {
     const places = [...sprites.values()].filter((l) => l.parentId === e.actor.id).map((l) => l.place + 1);
     const used = Math.max(0, ...places) + (e.actor.hiddenLambCount > 0 ? 1 : 0);
-    return { id: e.actor.id, slot: e.actor.slot, extent: familyExtent(used, { parentW: e.sprite.width, lambW }) };
+    return { id: e.actor.id, slot: e.actor.slot, extent: familyExtent(used, { parentW: e.sprite.width, lambW }), drop: dropOf(e) };
   });
-  // On the Dock's top edge when its extent is known (Accessibility granted); else the full strip.
-  const homes = familyHomes(families, { stripWidth: stripSize().width, slotWidth: display.slotWidthPx, wanderMax: display.homeWanderPx, dock: view.dock });
+  // On the Dock's top edge when its extent is known (Accessibility granted); else the full
+  // strip. A dropped sheep lives around its drop, clear of the others (D10).
+  const homes = homesWithDrops(families, { stripWidth: stripSize().width, slotWidth: display.slotWidthPx, wanderMax: display.homeWanderPx, dock: view.dock });
   for (const e of parents) {
     const h = homes.get(e.actor.id);
     if (!h) continue;
     e.sprite.setHome(h.centre - e.sprite.width / 2);
     e.sprite.wander = h.wander;
+    e.inFront = !!h.noRoom;
+    const drop = e.actor.dropped ?? e.localDrop;
+    if (h.noRoom && drop && e.noRoomSeq !== drop.seq) {
+      e.noRoomSeq = drop.seq;
+      log(`sheep ${e.actor.id} dropped on ${monitor} at x ${Math.round(drop.centreX)}: no room, so it stays there, in front`);
+    }
     if (e.fresh) {
       e.sprite.x = e.sprite.clampToStrip(e.sprite.home);
       e.fresh = false;
@@ -307,10 +380,18 @@ function placeFamilies() {
   }
 }
 
+/** A sheep's drop for the layout: the shell's record, or this strip's own until it arrives. */
+function dropOf(e) {
+  const d = e.actor.dropped ?? e.localDrop;
+  if (!d || !Number.isFinite(d.centreX)) return null;
+  return { centre: d.centreX, seq: d.seq ?? Number.MAX_SAFE_INTEGER, ghost: !!d.ghost, dir: e.dropDir ?? 1 };
+}
+
 /** Applies one actor's state to its sprite. True if a new or newly confirmed alert needs drawing now. */
 function update(entry, actor, now) {
   let urgent = false;
-  const behaviour = behaviourOf(actor);
+  // A sheep dropped onto a strip doesn't arrive there: it was carried in (D10).
+  const behaviour = actor.dropped && behaviourOf(actor) === 'arrive' ? 'walk' : behaviourOf(actor);
   const what = entry.parentId ? 'lamb' : 'sheep';
   if (behaviour !== entry.sprite.behaviour) log(`${what} ${actor.id} -> ${behaviour} (${actor.state}${actor.flavour ? ` ${actor.flavour}` : ''}${actor.alert ? ', alert' : ''})`);
   // A new or newly confirmed alert is drawn at once, not on the next 150 ms step.
@@ -361,8 +442,13 @@ async function follow() {
       const snap = await invoke('get_snapshot', { after: rev, shellAfter: view.rev });
       if (display.trace) log(`trace: got rev ${snap?.rev}`);
       if (snap && typeof snap.rev === 'number') {
+        // A drop or a sheep moving monitor changes this strip's flock with no new brain
+        // snapshot: the shell's `placement` says so.
+        const placement = snap.shell?.placement;
+        const moved = placement !== undefined && placement !== lastPlacement;
         if (snap.shell && snap.shell.rev !== view.rev) applyView(snap.shell);
-        if (snap.rev !== rev) apply(snap);
+        if (snap.rev !== rev || moved) apply(snap);
+        if (placement !== undefined) lastPlacement = placement;
         rev = snap.rev;
       } else {
         await sleep(1000);
@@ -399,9 +485,10 @@ function draw(now = performance.now()) {
     drawMuted();
     return;
   }
-  // Sheep first, then lambs in front of them.
-  const all = [...sprites.values()];
-  for (const e of [...all.filter((e) => !e.parentId), ...all.filter((e) => e.parentId)]) drawSprite(e, now);
+  // Sheep first (one dropped where there was no room in front of the others), then lambs
+  // in front of them. The carried sheep is drawn last, below.
+  const all = [...sprites.values()].filter((e) => !e.carriedAway && e.key !== carried?.key);
+  for (const e of [...all.filter((e) => !e.parentId && !e.inFront), ...all.filter((e) => !e.parentId && e.inFront), ...all.filter((e) => e.parentId)]) drawSprite(e, now);
   // The grass in front of the mouths, so a grazing sheep is eating into it.
   for (const e of all) drawGrass(e);
   for (const e of all) if (!e.parentId && e.removedAt === undefined && e.actor.hiddenLambCount > 0) moreLambs(e);
@@ -409,7 +496,7 @@ function draw(now = performance.now()) {
   if (view.showLabels) {
     // The tray's "Show labels": every sheep without a bubble shows its project.
     for (const [id, e] of sprites) {
-      if (e.parentId || e.removedAt !== undefined || e.sprite.gone || bubbled.has(id) || id === hovered) continue;
+      if (e.parentId || e.removedAt !== undefined || e.sprite.gone || bubbled.has(id) || id === hovered || e.carriedAway || id === carried?.key) continue;
       const d = e.sprite.drawInfo(now);
       label(e.shownLabel ?? e.actor.label, d.x + e.sprite.width / 2, d.y - 6, fadeOf(id));
     }
@@ -421,6 +508,43 @@ function draw(now = performance.now()) {
     const d = sprite.drawInfo(now);
     // A sheep shows its project (told apart from same-project sheep); a lamb its agent type.
     label(parentId ? actor.label : shownLabel ?? actor.label, d.x + sprite.width / 2, d.y - 6);
+  }
+  // Last, above bubbles, labels and lambs: the carried sheep, at full opacity (D10).
+  drawCarried(now);
+}
+
+/** The entry this strip is carrying, if it is drawn here (not on another monitor's strip). */
+function carriedEntry() {
+  const e = carried && sprites.get(carried.key);
+  if (!e) return null;
+  return view.carry?.away && view.carry.id === e.actor.id ? null : e;
+}
+
+/**
+ * The carried sheep, here or carried in from another strip: drawn last, never faded, with
+ * no label. An alerting one wears the "!" badge instead of its bubble; a parent whose
+ * lamb waits still wears its "lamb" tag.
+ */
+function drawCarried(now) {
+  const e = carriedEntry();
+  if (e) {
+    drawSprite(e, now, { full: true });
+    const a = e.actor;
+    const d = e.sprite.drawInfo(now);
+    if (a.alert) badge(d.x + e.sprite.width - 6, d.y + 4, a.alert.kind);
+    else if (a.lambAlert) {
+      const waiting = (a.lambs ?? []).filter((l) => l.alert);
+      const onStrip = waiting.find((l) => sprites.get(lambKey(e.key, l.id)) && !sprites.get(lambKey(e.key, l.id)).sprite.gone);
+      if (onStrip) lambTag(e, onStrip.alert.kind, !!onStrip.alert.confirmed, now);
+      else badge(d.x + e.sprite.width - 6, d.y + 4, 'lamb');
+    }
+  }
+  if (guest) {
+    drawSprite(guest, now, { full: true });
+    if (guest.actor.alert) {
+      const d = guest.sprite.drawInfo(now);
+      badge(d.x + guest.sprite.width - 6, d.y + 4, guest.actor.alert.kind);
+    }
   }
 }
 
@@ -447,10 +571,11 @@ function drawMuted() {
   }
 }
 
-function drawSprite({ key, sprite, actor, colourIndex }, now) {
+function drawSprite({ key, sprite, actor, colourIndex }, now, { full = false } = {}) {
   if (sprite.gone) return; // a lamb back inside its parent, or a sheep off the strip
   const d = sprite.drawInfo(now);
-  d.opacity *= fadeOf(key);
+  // The carried sheep is exempt from the cursor-near fade (full).
+  if (!full) d.opacity *= fadeOf(key);
   const { width: w, height: h } = sprite;
   const sheet = pet.sheets[colourIndex ?? actor.colourIndex] ?? pet.sheets[0];
   const { col, row } = tileOf(pet.model, d.frame);
@@ -553,9 +678,13 @@ function drawBubbles(now) {
   const sheepTop = height - spriteSize().h;
   const items = [];
   const tags = [];
+  // The carried sheep has no bubble: it wears a badge (drawCarried), logged as shown here.
+  const badged = new Map();
+  const held = carried && sprites.get(carried.key);
+  if (held?.actor.alert) badged.set(held.key, `${held.actor.alert.kind}${held.actor.alert.confirmed ? '+confirmed' : ''}`);
   for (const [id, entry] of sprites) {
     const { sprite, actor } = entry;
-    if (sprite.gone || actor.state === 'leaving' || entry.removedAt !== undefined) continue;
+    if (sprite.gone || actor.state === 'leaving' || entry.removedAt !== undefined || entry === held || entry.carriedAway) continue;
     const rest = sprite.drawInfo();
     const cx = rest.x + sprite.width / 2;
     if (entry.parentId) {
@@ -583,7 +712,7 @@ function drawBubbles(now) {
   for (const t of tags) lambTag(t.entry, t.kind, t.confirmed, now);
   const bubbled = new Set();
   if (!items.length) {
-    logDrawnAlerts(new Map());
+    logDrawnAlerts(badged);
     return bubbled;
   }
   const { width } = stripSize();
@@ -605,7 +734,7 @@ function drawBubbles(now) {
     bubbled.add(id);
   }
   if (dropped.length) maybeWarnDropped(dropped.length);
-  logDrawnAlerts(new Map(items.map((i) => [i.id, `${i.kind}${i.confirmed ? '+confirmed' : ''}`])));
+  logDrawnAlerts(new Map([...badged, ...items.map((i) => [i.id, `${i.kind}${i.confirmed ? '+confirmed' : ''}`])]));
   return bubbled;
 }
 
@@ -710,8 +839,11 @@ let lastBoxesAt = 0;
 
 function reportHitboxes(now, force = false) {
   // Muted or hidden: nothing to click, the whole strip passes clicks through.
+  const away = carried && !carriedEntry() ? carried.key : null;
   const boxes = [...sprites]
     .filter(([, e]) => !e.sprite.gone && !quiet())
+    // Not a sheep carried to (or drawn on) another monitor's strip.
+    .filter(([id, e]) => !e.carriedAway && id !== away)
     .map(([id, { sprite }]) => {
       const { width: w, height: h } = sprite;
       // The rest position, extended upwards over the bounce, so the box doesn't move
@@ -740,13 +872,219 @@ function spriteAt(x, y) {
   return null;
 }
 
-canvas.addEventListener('pointerdown', (e) => {
-  const id = spriteAt(e.offsetX, e.offsetY);
-  if (!id) return;
-  const entry = sprites.get(id);
+// ------------------------------------------------------ dragging (D10)
+
+/** A press on the canvas (or --demo-drag's): a press, a click or the start of a drag. */
+function pointerDown(x, y, button = 0, pointerId) {
+  // Another button going down mid-gesture: ignored (it neither clicks nor starts anything).
+  if (quiet() || gesture.phase !== 'idle') return;
+  const id = spriteAt(x, y);
+  const entry = id && sprites.get(id);
+  if (!entry || entry.carriedAway) return;
+  if (entry.sprite.gone || entry.removedAt !== undefined || entry.actor.state === 'leaving') {
+    // Going anyway: a press is a click at once, as before.
+    click(entry);
+    return;
+  }
+  // The moves and the release keep coming while the cursor is outside the window.
+  if (button === 0 && pointerId !== undefined) {
+    try {
+      canvas.setPointerCapture(pointerId);
+    } catch {
+      // not a live pointer (a synthetic event)
+    }
+  }
+  gestureEvent({ type: 'down', id, lamb: !!entry.parentId, button, x, y, left: entry.sprite.x });
+}
+
+function gestureEvent(ev, notify = true) {
+  const r = dragEvent(gesture, ev);
+  gesture = r.state;
+  for (const a of r.actions) act(a, notify);
+}
+
+/** Ends any gesture under way: a carried sheep is set down where it was picked up. */
+function cancelGesture(reason, notify = true) {
+  if (gesture.phase !== 'idle') gestureEvent({ type: 'cancel', reason }, notify);
+}
+
+function click(entry) {
   entry.sprite.playOnce('hop', performance.now());
   invoke('sprite_clicked', { id: entry.actor.id }).catch(() => {});
+}
+
+const drag = (args) => invoke('sprite_drag', args).catch((e) => {
+  warn(`sprite_drag failed: ${e}`);
+  return null;
 });
+
+/** Carries out one action of the gesture's state machine (player/drag.mjs). */
+function act(a, notify) {
+  const now = performance.now();
+  const entry = sprites.get(a.id);
+  switch (a.do) {
+    case 'press':
+      pressId = entry.actor.id;
+      drag({ phase: 'press', id: pressId });
+      return;
+    case 'lift': {
+      const s = entry.sprite;
+      s.hold(now);
+      carried = { key: a.id, id: entry.actor.id, grabDx: a.grabDx, fromX: s.x, dir: s.facing };
+      drag({ phase: 'lift', id: carried.id, grabDx: a.grabDx, width: s.width });
+      updateHover();
+      drawNow(now);
+      return;
+    }
+    case 'carry': {
+      if (!entry || !carried) return;
+      // Drawn on another monitor's strip: here it stays where it was, and so do its lambs.
+      if (!carriedEntry()) return;
+      const before = entry.sprite.x;
+      entry.sprite.carry(a.x - carried.grabDx, a.y);
+      if (Math.abs(entry.sprite.x - before) >= 1) carried.dir = entry.sprite.x > before ? 1 : -1;
+      drawNow(now);
+      return;
+    }
+    case 'click':
+      if (entry) click(entry);
+      return;
+    case 'release':
+      drag({ phase: 'release', id: pressId ?? a.id });
+      pressId = null;
+      return;
+    case 'drop':
+      dropCarried(entry, now);
+      return;
+    case 'cancel': {
+      if (notify) drag({ phase: 'cancel', id: pressId ?? a.id, reason: a.reason });
+      pressId = null;
+      const c = carried;
+      carried = null;
+      if (a.lifted && entry && entry.sprite.held && c) {
+        // Set down where it was picked up; nothing is recorded.
+        entry.sprite.carry(c.fromX, entry.sprite.heldY);
+        entry.sprite.setDown(now);
+      }
+      if (a.lifted) log(`sheep ${c?.id ?? a.id} set back down: ${a.reason}`);
+      dirty = true;
+      return;
+    }
+    case 'log':
+      log(a.line);
+      return;
+  }
+}
+
+/**
+ * The drop: on this strip it lands at once where it is; carried to another strip, it is
+ * hidden here and goes from here when the shell has moved it. The shell records the drop
+ * (or doesn't, and the sheep is set down where it was picked up).
+ */
+function dropCarried(entry, now) {
+  const c = carried;
+  carried = null;
+  const id = pressId ?? c?.id;
+  pressId = null;
+  if (!entry || !c) {
+    drag({ phase: 'cancel', id, reason: 'its sprite went' });
+    return;
+  }
+  const s = entry.sprite;
+  const away = view.carry?.away && view.carry.id === entry.actor.id;
+  const centre = s.x + s.width / 2;
+  entry.dropDir = c.dir;
+  if (away) {
+    entry.carriedAway = true;
+    entry.awayAt = now;
+  } else {
+    s.setDown(now);
+    entry.awaitingDrop = true;
+    // Until the shell's record arrives: its slot's band stays (it is usually a ghost).
+    entry.localDrop = { centreX: centre, seq: Number.MAX_SAFE_INTEGER, ghost: true };
+    placeFamilies();
+  }
+  dirty = true;
+  drag({ phase: 'release', id, x: centre }).then((r) => {
+    const t = performance.now();
+    if (!r || !Number.isFinite(r.seq)) {
+      // Not recorded (its session ended meanwhile): back where it was picked up.
+      entry.localDrop = null;
+      entry.awaitingDrop = false;
+      if (entry.carriedAway) {
+        entry.carriedAway = false;
+        s.x = c.fromX;
+      }
+      if (s.held) s.setDown(t);
+    } else if (r.here) {
+      entry.localDrop = { centreX: r.centreX, seq: r.seq, ghost: !!r.ghost };
+      if (entry.awaitingDrop) s.landedSeq = r.seq;
+      entry.awaitingDrop = false;
+      if (entry.carriedAway) {
+        entry.carriedAway = false;
+        s.carry(r.centreX - s.width / 2, s.heldY);
+        s.setDown(t, { seq: r.seq });
+      }
+    } else {
+      // Dropped on another monitor's strip: it goes from here with the next snapshot.
+      entry.localDrop = null;
+      entry.awaitingDrop = false;
+      entry.carriedAway = true;
+      entry.awayAt = t;
+    }
+    placeFamilies();
+    dirty = true;
+  });
+}
+
+/**
+ * The shell's `carry`: a sheep carried from another monitor's strip and drawn here, at
+ * the cursor less its grab offset, dangling from the cursor's y. It lives only while
+ * carried; dropped here, it comes back as a sheep of this strip's flock.
+ */
+function applyCarry(c, now) {
+  const here = c && !c.away && Number.isFinite(c.x) && Number.isFinite(c.y) && pet ? c : null;
+  if (!here) {
+    if (guest) {
+      lastGuest = { id: guest.key, top: guest.sprite.heldY, dir: guest.dir, at: now };
+      guest = null;
+      dirty = true;
+    }
+    return;
+  }
+  if (!guest || guest.key !== here.id) {
+    const { w, h } = spriteSize();
+    const { width, height } = stripSize();
+    const sprite = new Sprite({ model: pet.model, map: pet.map, width: w, height: h, stripWidth: width, stripHeight: height, home: 0, wander: 0, warn });
+    sprite.hold(now);
+    const colourIndex = Number.isInteger(here.colourIndex) ? here.colourIndex : 0;
+    guest = { key: here.id, sprite, colourIndex, actor: { id: here.id, colourIndex, alert: here.alert ? { kind: here.alert } : null }, lastX: null, dir: 1 };
+  }
+  const x = here.x - (Number.isFinite(here.grabDx) ? here.grabDx : 0);
+  if (guest.lastX !== null && Math.abs(x - guest.lastX) >= 1) guest.dir = x > guest.lastX ? 1 : -1;
+  guest.lastX = x;
+  guest.sprite.carry(x, here.y);
+  drawNow(now);
+}
+
+// While a sheep is carried, the strip drawing it redraws on every move, up to the display
+// rate, instead of the 150 ms cap. The cap returns at the drop.
+const CARRY_DRAW_MS = 16;
+
+function drawNow(now) {
+  dirty = true;
+  if (quiet() || now - lastDraw < CARRY_DRAW_MS) return;
+  lastDraw = now;
+  dirty = false;
+  draw(now);
+  lastSig = signature(now);
+}
+
+const carrying = () => !!carried || !!guest;
+
+canvas.addEventListener('pointerdown', (e) => pointerDown(e.offsetX, e.offsetY, e.button ?? 0, e.pointerId));
+// Only the button that started the gesture ends it (drag.mjs reads `buttons`, then `button`).
+canvas.addEventListener('pointerup', (e) => gestureEvent({ type: 'up', x: e.offsetX, y: e.offsetY, button: e.button ?? 0, buttons: e.buttons }));
 /** The live sprite (not leaving, not gone) at a point, for the hover label. */
 function liveSpriteAt(x, y) {
   const id = spriteAt(x, y);
@@ -760,7 +1098,9 @@ function liveSpriteAt(x, y) {
  * every sprite the window stops hearing the mouse, so no pointerleave would come.
  */
 function updateHover() {
-  const id = quiet() ? null : hoverTarget({ pointer, over: view.over, hitAt: liveSpriteAt });
+  const hit = quiet() ? null : hoverTarget({ pointer, over: view.over, hitAt: liveSpriteAt });
+  // No hover label on a carried sheep.
+  const id = hit !== null && carried && hit === carried.key ? null : hit;
   if (id !== hovered) {
     hovered = id;
     dirty = true;
@@ -769,6 +1109,7 @@ function updateHover() {
 
 canvas.addEventListener('pointermove', (e) => {
   pointer = { x: e.offsetX, y: e.offsetY };
+  if (gesture.phase !== 'idle') gestureEvent({ type: 'move', x: e.offsetX, y: e.offsetY, buttons: e.buttons });
   updateHover();
 });
 const forgetPointer = () => {
@@ -776,7 +1117,11 @@ const forgetPointer = () => {
   updateHover();
 };
 canvas.addEventListener('pointerleave', forgetPointer);
-canvas.addEventListener('pointercancel', forgetPointer);
+// The system took the pointer (a gesture, the window losing it): forget it, and end any drag.
+canvas.addEventListener('pointercancel', () => {
+  forgetPointer();
+  cancelGesture('pointercancel');
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') forgetPointer();
 });
@@ -790,8 +1135,13 @@ function signature(now) {
   const parts = [hovered ?? '', stripSize().width, stripSize().height, muted, view.rev];
   for (const [id, e] of sprites) {
     const d = e.sprite.drawInfo(now);
-    parts.push(id, e.sprite.gone ? 'g' : '', d.frame, d.x, d.y, d.flip ? 1 : 0, d.opacity, (e.grass?.alpha ?? 0).toFixed(2), e.alertKey ?? '', e.actor.hiddenLambCount ?? '', e.actor.lambAlert ? 1 : 0, e.actor.alert?.text ?? '', e.actor.label ?? '');
+    parts.push(id, e.sprite.gone ? 'g' : '', d.frame, d.x, d.y, d.flip ? 1 : 0, d.opacity, (e.grass?.alpha ?? 0).toFixed(2), e.alertKey ?? '', e.actor.hiddenLambCount ?? '', e.actor.lambAlert ? 1 : 0, e.actor.alert?.text ?? '', e.actor.label ?? '', e.carriedAway ? 'away' : '');
   }
+  if (guest) {
+    const d = guest.sprite.drawInfo(now);
+    parts.push('guest', guest.key, d.frame, d.x, d.y, d.flip ? 1 : 0);
+  }
+  if (carried) parts.push('carried', carried.key, carriedEntry() ? '' : 'away');
   return parts.join('|');
 }
 
@@ -821,8 +1171,9 @@ function frame() {
     reportHitboxes(now);
     return;
   }
-  const step = sprites.size > CROWDED_SPRITES ? CROWDED_DRAW_INTERVAL_MS : DRAW_INTERVAL_MS;
+  const step = carrying() ? CARRY_DRAW_MS : sprites.size > CROWDED_SPRITES ? CROWDED_DRAW_INTERVAL_MS : DRAW_INTERVAL_MS;
   const { width } = stripSize();
+  if (guest && guest.sprite.tick(now)) dirty = true;
   for (const entry of sprites.values()) {
     // A lamb's place moves with its parent.
     const parent = entry.parentId && sprites.get(entry.parentId);
@@ -843,6 +1194,13 @@ function frame() {
     }
     if (entry.removedAt !== undefined && (entry.sprite.gone || now - entry.removedAt > 4000)) {
       sprites.delete(id);
+      dirty = true;
+      replace = true;
+    }
+    if (entry.carriedAway && now - entry.awayAt > 3000) {
+      // Carried away but still in this strip's flock after 3 s: show it here again.
+      entry.carriedAway = false;
+      if (entry.sprite.held) entry.sprite.setDown(now);
       dirty = true;
       replace = true;
     }
@@ -914,11 +1272,52 @@ async function boot() {
     document.addEventListener('visibilitychange', () => log(`trace: visibility -> ${document.visibilityState}`));
   }
   follow();
+  if (display.demoDrag) demoDrag();
   if (display.snapshotAfterMs) setTimeout(snapshots, display.snapshotAfterMs);
   if (display.snapshotEveryMs) {
     let n = 0;
     setInterval(() => snapshots(`t${String(++n).padStart(2, '0')}`), display.snapshotEveryMs);
   }
+}
+
+/**
+ * Debug (`--demo --demo-drag`): a scripted drag through the same state machine and the same
+ * shell command as a real one. It presses demo sheep 2, lifts it, carries it 300 px over
+ * 2 s towards sheep 4, drops it onto sheep 4, then clicks sheep 1 without moving. With
+ * `--snapshot-every 1` it is the offline view of the feature.
+ */
+async function demoDrag() {
+  const centreOf = (id) => {
+    const e = sprites.get(id);
+    const d = e.sprite.drawInfo();
+    return { x: d.x + e.sprite.width / 2, y: d.y + e.sprite.height / 2 };
+  };
+  for (let i = 0; i < 100 && !['s-demo1', 's-demo2', 's-demo4'].every((id) => sprites.has(id)); i++) await sleep(100);
+  if (!['s-demo1', 's-demo2', 's-demo4'].every((id) => sprites.has(id))) {
+    warn('demo-drag: demo sheep 1, 2 and 4 are not on this strip');
+    return;
+  }
+  await sleep(2500);
+  const from = centreOf('s-demo2');
+  log(`demo-drag: press s-demo2 at x ${Math.round(from.x)}`);
+  pointerDown(from.x, from.y);
+  await sleep(300);
+  const dir = Math.sign(centreOf('s-demo4').x - from.x) || 1;
+  for (let k = 1; k <= 40; k++) {
+    await sleep(50);
+    gestureEvent({ type: 'move', x: from.x + (dir * 300 * k) / 40, y: from.y - 30 * Math.sin((Math.PI * k) / 40) });
+  }
+  const onto = centreOf('s-demo4');
+  gestureEvent({ type: 'move', x: onto.x, y: from.y - 10 });
+  await sleep(150);
+  log(`demo-drag: drop onto s-demo4 at x ${Math.round(onto.x)} (carried ${Math.round(Math.abs(onto.x - from.x))} px)`);
+  gestureEvent({ type: 'up', x: onto.x, y: from.y - 10 });
+  await sleep(4000);
+  const one = centreOf('s-demo1');
+  log('demo-drag: click s-demo1 without moving');
+  pointerDown(one.x, one.y);
+  await sleep(150);
+  gestureEvent({ type: 'up', x: one.x, y: one.y });
 }
 
 // Debug (--snapshot): the canvas as it is, and the same over a checkerboard so the

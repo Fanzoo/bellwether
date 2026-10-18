@@ -50,15 +50,17 @@ describe('per-monitor slots through the brain', () => {
 });
 
 describe('the shell side, by its source', () => {
-  test('still six commands; a click focuses through the locator on its own thread; each strip sees its own monitor', () => {
+  test('still seven commands; a click focuses through the locator on its own thread; each strip sees its own monitor', () => {
     const lib = read('lib.rs');
-    // The strip's six first; the rest are the onboarding window's (M7, onboarding.rs).
-    assert.match(lib, /generate_handler!\[\s*get_pet,\s*get_snapshot,\s*report_hitboxes,\s*sprite_clicked,\s*shell_log,\s*debug_snapshot,\s*onboarding::/);
+    // The strip's seven first (sprite_drag since milestone 12); the rest are the onboarding window's (M7, onboarding.rs).
+    assert.match(lib, /generate_handler!\[\s*get_pet,\s*get_snapshot,\s*report_hitboxes,\s*sprite_clicked,\s*sprite_drag,\s*shell_log,\s*debug_snapshot,\s*onboarding::/);
     const handler = /generate_handler!\[([^\]]+)\]/.exec(lib)[1].split(',').map((s) => s.trim()).filter(Boolean);
-    assert.equal(handler.filter((c) => !c.startsWith('onboarding::')).length, 6);
+    assert.equal(handler.filter((c) => !c.startsWith('onboarding::')).length, 7);
     assert.match(lib, /fn sprite_clicked\([^)]*locator: tauri::State<'_, Arc<locator::Locator>>\)/);
     assert.match(lib, /std::thread::spawn\(move \|\| \{\s*let _guard = guard;\s*let result = locator\.focus\(&terminal\);/);
     assert.match(lib, /placement::view_for\(&s, &mine, &p\.primary/);
+    // A drop is never reported to the brain: no `placed` for a dropped sheep (D10).
+    assert.match(lib, /placement::assign_slots\(&sheep, &p\.placed, &primary, &p\.book, &p\.dropped\)/);
   });
   test('AppleScript only with a hex UUID or a ps tty, only to a running app, and never when locator.appleScript is false', () => {
     const loc = read('locator.rs');
