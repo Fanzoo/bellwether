@@ -6,14 +6,14 @@ import { describe, test } from 'node:test';
 import { AGENT_DIR, tempDir } from './helpers.mjs';
 
 /**
- * The migrate and autostart tests must never touch the maintainer's live machine: no
+ * The migrate tests must never touch the maintainer's live machine: no
  * socket to the live brain's port (47417), no launchctl, no lsof. This runs those test
  * files in child processes with a preload that records any such attempt.
  */
-const FILES = ['migrate.test.mjs', 'autostart.test.mjs', 'tester-migrate.test.mjs', 'tester-migrate-recheck.test.mjs'].filter((f) => fs.existsSync(path.join(AGENT_DIR, 'test', f)));
+const FILES = ['migrate.test.mjs', 'tester-migrate.test.mjs', 'tester-migrate-recheck.test.mjs'].filter((f) => fs.existsSync(path.join(AGENT_DIR, 'test', f)));
 
 describe('live-machine guard', () => {
-  test('running the migrate and autostart test files records no attempt to reach port 47417, launchctl or lsof', () => {
+  test('running the migrate test files records no attempt to reach port 47417, launchctl or lsof', () => {
     const log = path.join(tempDir('liveguard-'), 'attempts.log');
     fs.writeFileSync(log, '');
     const r = spawnSync(process.execPath, ['--import', path.join(AGENT_DIR, 'test', 'live-guard-preload.mjs'), '--test', '--test-concurrency=1', ...FILES.map((f) => path.join(AGENT_DIR, 'test', f))], {

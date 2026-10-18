@@ -7,7 +7,8 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     match mode_of(&args) {
         // The brain never touches Tauri: nothing of the app is initialised.
-        Mode::Serve => std::process::exit(bellwether_brain::cli::run("serve", &args[2..])),
+        // A development binary needs BELLWETHER_HOME first (milestone 11; cli.rs).
+        Mode::Serve => std::process::exit(bellwether_shell_lib::cli::refused_without_home("serve").unwrap_or_else(|| bellwether_brain::cli::run("serve", &args[2..]))),
         Mode::Cli => std::process::exit(bellwether_shell_lib::cli::run(&args)),
         Mode::App => bellwether_shell_lib::run(),
     }

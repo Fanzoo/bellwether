@@ -27,8 +27,8 @@ Bellwether's own pet (pets/), CC0-1.0
 
 eSheep pet art (the sprite sheets inside desktopPet's animations.xml files): NOT included
   The eSheep art is NOT committed to this repository and NOT bundled into any build.
-  `bellwether pets fetch` downloads it on each user's machine into data/pets/
-  (gitignored) from desktopPet at the pinned commit
+  The development script scripts/fetch-pets.mjs downloads it on a developer's machine
+  into data/pets/ (gitignored) from desktopPet at the pinned commit
   1ba33bebed993439f03e502b37e9bd2daf061773, checked against the sha256 in
   pets.lock.json.
   The art's licence is unclear: the repository's MIT licence plainly covers code, not
@@ -55,7 +55,8 @@ gtk-layer-shell (system C library), LGPL-3.0: not used yet
 DEPENDENCIES
 ============
 
-Brain (Node): no dependencies at all; Node's built-ins only.
+Tests and development scripts (Node, package.json): no dependencies at all; Node's
+built-ins only.
 
 Shell (Rust/Tauri): the crates in shell/src-tauri/Cargo.lock, almost all MIT and/or
 Apache-2.0. A few use other permissive licences (Unicode-3.0, Zlib, BSD-3-Clause,

@@ -18,7 +18,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fingerprint } from '../../brain/normalise.mjs';
+// The brain's own fingerprint (the Rust brain's, through test/impl.mjs).
+import { fingerprint } from '../impl.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const CWD = '/Users/example/projects/meadow';

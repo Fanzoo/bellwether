@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { AGENT_DIR, tempDir } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+// The Rust brain's parts (test/impl.mjs).
 import { checkLocatorLog, identityOf, normalise } from './impl.mjs';
 
 /**
@@ -48,12 +48,11 @@ describe('locator.rs: nothing from a header reaches a shell or a script unvalida
 });
 
 describe('--locate with hostile terminal values (real binary, AppleScript off, fake herdr)', () => {
-  // Any build of the strip has `--locate`: BELLWETHER_STRIP_BIN if set, else the release
-  // one the LaunchAgent runs if this checkout has it, else a dev build (CI builds
-  // target-dev/debug before the suite).
-  const builds = ['target/release', 'target-dev/release', 'target-dev/debug'].map((d) => path.join(AGENT_DIR, 'shell', 'src-tauri', ...d.split('/'), 'bellwether-shell'));
+  // Any build of the strip has `--locate`: BELLWETHER_STRIP_BIN if set, else the
+  // development build `npm test` makes (target-dev/debug), else a release one in target-dev/.
+  const builds = ['target-dev/debug', 'target-dev/release'].map((d) => path.join(AGENT_DIR, 'shell', 'src-tauri', ...d.split('/'), 'bellwether-shell'));
   const bin = [process.env.BELLWETHER_STRIP_BIN, ...builds].find((b) => b && fs.existsSync(b));
-  const skip = process.platform !== 'darwin' ? 'macOS only' : !bin && 'no build of the strip in this checkout (cargo build --manifest-path shell/src-tauri/Cargo.toml)';
+  const skip = process.platform !== 'darwin' ? 'macOS only' : !bin && 'no build of the strip in this checkout (npm run build:dev)';
   const setup = () => {
     const root = tempDir('m8-');
     const log = path.join(root, 'fake.log');

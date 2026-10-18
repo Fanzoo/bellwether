@@ -2,16 +2,15 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { test } from 'node:test';
-import { PET_SOURCE, PINNED_PETS, fetchPets, petUrl } from '../brain/pets.mjs';
-import { IMPL, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+import { describe, test } from 'node:test';
+import { FetchError, PET_SOURCE, PINNED_PETS, fetchPets, parseArgs, petUrl } from '../scripts/fetch-pets.mjs';
+import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
- * `bellwether pets fetch` (the repository's), with a fake network: the pinned URL and the
- * sha256 check; and `bellwether pets import` (the app's, plan D8).
+ * scripts/fetch-pets.mjs (the dev script that fetches the eSheep art, milestone 11), with a
+ * fake network: the pinned URL and the sha256 check; and `bellwether pets import` (the
+ * app's, plan D8).
  */
-
-const FETCH = notUnderRust("`pets fetch` downloads the eSheep art into the repository's data/pets; the app imports a pet file instead (`pets import`, below)");
 
 const bytes = Buffer.from('<animations>invented test pet</animations>');
 const sha = createHash('sha256').update(bytes).digest('hex');
@@ -22,13 +21,13 @@ const fakeFetch = (body, status = 200) => async (url) => {
 };
 fakeFetch.urls = [];
 
-test('esheep64 is pinned to a commit and a sha256', FETCH, () => {
+test('esheep64 is pinned to a commit and a sha256', () => {
   assert.match(PET_SOURCE.commit, /^[0-9a-f]{40}$/);
   assert.match(PINNED_PETS.esheep64.sha256, /^[0-9a-f]{64}$/);
   assert.equal(petUrl(PINNED_PETS.esheep64), `https://raw.githubusercontent.com/Adrianotiger/desktopPet/${PET_SOURCE.commit}/Pets/esheep64/animations.xml`);
 });
 
-test('a download with the pinned hash is written, with a manifest; a second run downloads nothing', FETCH, async () => {
+test('a download with the pinned hash is written, with a manifest; a second run downloads nothing', async () => {
   const dir = tempDir();
   const r = await fetchPets(dir, { pinned, fetchImpl: fakeFetch(bytes) });
   assert.deepEqual(r, [{ folder: 'testpet', status: 'downloaded', bytes: bytes.length }]);
@@ -38,36 +37,98 @@ test('a download with the pinned hash is written, with a manifest; a second run 
   assert.equal(again[0].status, 'present');
 });
 
-test('a download whose hash differs is refused and nothing is written', FETCH, async () => {
+test('a download whose hash differs is refused and nothing is written', async () => {
   const dir = tempDir();
   await assert.rejects(fetchPets(dir, { pinned, fetchImpl: fakeFetch(Buffer.from('tampered')) }), /sha256 mismatch/);
   assert.equal(fs.existsSync(path.join(dir, 'pets', 'testpet')), false);
 });
 
-test('HTTP errors and unknown pets are reported', FETCH, async () => {
+test('HTTP errors and unknown pets are reported', async () => {
   await assert.rejects(fetchPets(tempDir(), { pinned, fetchImpl: fakeFetch(bytes, 404) }), /HTTP 404/);
-  await assert.rejects(fetchPets(tempDir(), { pinned, only: ['nope'], fetchImpl: fakeFetch(bytes) }), /unknown pet "nope"/);
+  await assert.rejects(fetchPets(tempDir(), { pinned, only: ['nope'], fetchImpl: fakeFetch(bytes) }), (e) => e instanceof FetchError && e.exitCode === 3 && /unknown pet "nope"/.test(e.message));
+});
+
+test('the script fetches into --data, else BELLWETHER_HOME, else the checkout\'s data/; it imports nothing from brain/', () => {
+  assert.equal(parseArgs(['--data', '/x/d'], {}).data, '/x/d');
+  assert.equal(parseArgs(['--data=/x/e', 'esheep64'], {}).data, '/x/e');
+  assert.deepEqual(parseArgs(['esheep64'], { BELLWETHER_HOME: '/x/home' }), { data: '/x/home', only: ['esheep64'] });
+  assert.equal(parseArgs([], {}).data, path.join(AGENT_DIR, 'data'));
+  assert.throws(() => parseArgs(['--bogus'], {}), /unknown option/);
+  assert.throws(() => parseArgs(['a', 'b'], {}), /one pet at a time/);
+  const src = fs.readFileSync(path.join(AGENT_DIR, 'scripts', 'fetch-pets.mjs'), 'utf8');
+  assert.doesNotMatch(src, /from ['"][^'"]*brain\//);
+});
+
+// BR-3K's milestone 3 probes of the fetch (tester-m3.test.mjs until milestone 11), now of the script.
+describe('the fetch, probed', () => {
+  const GOOD = Buffer.from('<animations>good</animations>');
+  const hash = (b) => createHash('sha256').update(b).digest('hex');
+  const pinned = { esheep64: { path: 'Pets/esheep64/animations.xml', sha256: hash(GOOD) } };
+  const resp = (body, init = {}) => async () => new Response(body, { status: 200, ...init });
+  const dirs = () => tempDir('pets-');
+
+  test('a good file is written and verified; a second run downloads nothing', async () => {
+    const d = dirs();
+    let n = 0;
+    const f = async () => (n++, new Response(GOOD));
+    await fetchPets(d, { fetchImpl: f, pinned });
+    assert.equal(fs.readFileSync(path.join(d, 'pets', 'esheep64', 'animations.xml')).equals(GOOD), true);
+    await fetchPets(d, { fetchImpl: f, pinned });
+    assert.equal(n, 1);
+  });
+  test('a hash mismatch writes nothing, leaves an existing good file alone, and replaces a corrupted one only with a verified one', async () => {
+    const d = dirs();
+    await assert.rejects(fetchPets(d, { fetchImpl: resp('<animations>evil</animations>'), pinned }), /sha256 mismatch/);
+    assert.equal(fs.existsSync(path.join(d, 'pets')), false, 'a rejected download left files behind');
+    await fetchPets(d, { fetchImpl: resp(GOOD), pinned });
+    const file = path.join(d, 'pets', 'esheep64', 'animations.xml');
+    fs.writeFileSync(file, 'tampered');
+    await fetchPets(d, { fetchImpl: resp(GOOD), pinned });
+    assert.equal(fs.readFileSync(file).equals(GOOD), true);
+    fs.writeFileSync(file, 'tampered');
+    await assert.rejects(fetchPets(d, { fetchImpl: resp('nope'), pinned }));
+    assert.equal(fs.readFileSync(file, 'utf8'), 'tampered', 'a failed download must not touch the file');
+  });
+  test('folder names that are not pinned pets are refused, including prototype keys and traversal', async () => {
+    const d = dirs();
+    for (const name of ['../evil', '..', '/etc', 'esheep64/../../x', '__proto__', 'constructor', 'toString', 'hasOwnProperty', '']) {
+      let called = false;
+      await assert.rejects(fetchPets(d, { only: [name], fetchImpl: async () => ((called = true), new Response(GOOD)), pinned }), /unknown pet|HTTP|mismatch/, JSON.stringify(name));
+      assert.equal(called && name !== '__proto__' && name !== 'constructor' && name !== 'toString' && name !== 'hasOwnProperty', false, `${name} reached the network`);
+    }
+    assert.deepEqual(fs.readdirSync(d), [], 'something was written');
+  });
+  test('HTTP errors, a redirect to another host, and a connection that dies mid-body each give a cause, not a stack', async () => {
+    const d = dirs();
+    await assert.rejects(fetchPets(d, { fetchImpl: async () => new Response('x', { status: 404 }), pinned }), /HTTP 404/);
+    await assert.rejects(fetchPets(d, { fetchImpl: async () => new Response('x', { status: 500 }), pinned }), /HTTP 500/);
+    await assert.rejects(fetchPets(d, { fetchImpl: async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }); }, pinned }), /download failed \(ENOTFOUND\)/);
+    const dying = async () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('<anim')); setTimeout(() => c.error(new TypeError('terminated')), 10); } }));
+    const err = await fetchPets(d, { fetchImpl: dying, pinned }).catch((e) => e);
+    assert.ok(err instanceof Error);
+    assert.equal(err.constructor.name, 'FetchError', `a partial download surfaced as ${err.constructor.name}: ${err.message}`);
+    assert.equal(fs.existsSync(path.join(d, 'pets', 'esheep64', 'animations.xml')), false);
+  });
+  test('a response that never ends is bounded (size cap enforced while reading, not after)', async () => {
+    const d = dirs();
+    let sent = 0;
+    const endless = async () => new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(1024 * 1024)); sent += 1024 * 1024; if (sent > 400 * 1024 * 1024) c.close(); } }));
+    await assert.rejects(fetchPets(d, { fetchImpl: endless, pinned }));
+    assert.ok(sent <= 64 * 1024 * 1024, `${sent >> 20} MB were read before refusing (cap is 16 MB)`);
+  });
 });
 
 // A 1×1 PNG, base64.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const petXml = (extra = '') => `<?xml version="1.0" encoding="UTF-8"?>\n<animations><header><title>Invented test pet</title></header><image><tilesx>4</tilesx><tilesy>2</tilesy><png>${PNG}</png></image><animations><animation id="1"><name>walk</name><sequence><frame>0</frame></sequence></animation><animation id="2"><name>eat</name><sequence><frame>1</frame></sequence></animation>${extra}</animations></animations>`;
 
-test('pets import (the app, plan D8): checked, copied, pinned, and a file that fails a check writes nothing; the Node CLI has only `pets fetch`', () => {
+test('pets import (the app, plan D8): checked, copied, pinned, and a file that fails a check writes nothing', () => {
   const data = path.join(tempDir(), 'data');
   const src = path.join(tempDir(), 'mypet', 'animations.xml');
   fs.mkdirSync(path.dirname(src), { recursive: true });
   fs.writeFileSync(src, petXml());
   const cli = (...a) => spawnBrainSync(['pets', 'import', ...a], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: tempDir(), BELLWETHER_DATA_DIR: data } });
   const imported = path.join(data, 'pets', 'mypet', 'animations.xml');
-  if (IMPL === 'node') {
-    // The repository's CLI predates D8: `pets import` is a usage error, and nothing is written.
-    const r = cli(src);
-    assert.equal(r.status, 3, r.stderr);
-    assert.match(r.stderr, /usage: bellwether pets fetch/);
-    assert.equal(fs.existsSync(imported), false);
-    return;
-  }
   const r = cli(src);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(fs.readFileSync(imported), fs.readFileSync(src), 'copied byte for byte');

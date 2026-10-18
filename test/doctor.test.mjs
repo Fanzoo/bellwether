@@ -3,18 +3,19 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { nodeSupported } from '../brain/doctor.mjs';
-import { startServer } from '../brain/server.mjs';
-import { EXIT } from '../brain/util.mjs';
-import { TOKEN, notUnderRust, tempDir } from './helpers.mjs';
-import { checkOtherLevels, checkSettings, globMatch, hookBlock, install, runDoctor } from './impl.mjs';
+import { TOKEN, tempDir } from './helpers.mjs';
+import { checkOtherLevels, checkSettings, globMatch, hookBlock, install, runDoctor, startBrain } from './impl.mjs';
+import { EXIT } from './support/util.mjs';
 
 /**
  * Each failure cause the plan names gets a FAIL line with a cause, and the right exit code.
- * Under BELLWETHER_IMPL=rust, doctor is the Rust binary's (`runDoctor` runs `doctor
- * --json`; test/impl.mjs) and its pure checks come from the Rust brain. The brains doctor
- * probes here are Node test servers either way: what is under test is doctor.
+ * Doctor is the binary's (`runDoctor` runs `doctor --json`; test/impl.mjs) and its pure
+ * checks come from the Rust brain. The brains it probes are Rust `serve` processes
+ * (`startBrain`, `--hang` included), the pairing users have.
  */
+
+/** A brain on a free port with this token: a Rust `serve` in a temp home. */
+const startServer = ({ token, hang = false }) => startBrain({ config: { port: 0 }, token, dataDir: tempDir('bw-doctor-brain-'), hang });
 
 const PORT = 47417;
 const byName = (checks, name) => checks.find((c) => c.name === name);
@@ -90,13 +91,6 @@ describe('checkSettings', () => {
       assert.equal(c.exitCode, EXIT.BAD_CONFIG);
       assert.match(c.detail, /hooks\.Stop\[0\]\.hooks/);
     }
-  });
-
-  test('Node 22.9 is the floor (--env-file-if-exists)', notUnderRust('the app has no Node runtime, so it has no `node` check (test/DIVERGENCES.md 14)'), () => {
-    assert.ok(!nodeSupported('22.8.0'));
-    assert.ok(!nodeSupported('20.19.0'));
-    assert.ok(nodeSupported('22.9.0'));
-    assert.ok(nodeSupported('v24.1.0'));
   });
 
   test('globMatch', () => {

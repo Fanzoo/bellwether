@@ -59,10 +59,11 @@ test('build-pet --check passes: every bundled pet and its pin are what the sourc
   assert.deepEqual(Object.keys(lock().bundled), PETS, 'no pin without sources, in the fixed order');
 });
 
-test('pets fetch still lists only esheep64: bundled pets are never downloaded', async () => {
-  const { PINNED_PETS, BUNDLED_PETS } = await import('../brain/pets.mjs');
-  assert.deepEqual(Object.keys(PINNED_PETS), ['esheep64']);
-  assert.deepEqual(Object.keys(BUNDLED_PETS), PETS);
+test('the fetch pins still list only esheep64: bundled pets are never downloaded', async () => {
+  const { PINNED_PETS } = await import('../scripts/fetch-pets.mjs');
+  assert.deepEqual(Object.keys(lock().pets), ['esheep64']);
+  assert.deepEqual(Object.keys(PINNED_PETS), ['esheep64'], 'what scripts/fetch-pets.mjs downloads');
+  assert.deepEqual(Object.keys(lock().bundled), PETS);
   for (const n of BUNDLED) assert.ok(!Object.hasOwn(lock().pets, n), `${n} isn't under "pets"`);
 });
 
@@ -169,7 +170,7 @@ for (const name of PETS) {
       if (face) assert.equal(face.rule, 1);
     });
 
-    test('(h) not a copy: no frame\'s silhouette matches an esheep64 frame at IoU >= 0.95, mirrored or not', { skip: !fs.existsSync(ESHEEP) && 'no local esheep64 (bellwether pets fetch); the tripwire is skipped' }, (t) => {
+    test('(h) not a copy: no frame\'s silhouette matches an esheep64 frame at IoU >= 0.95, mirrored or not', { skip: !fs.existsSync(ESHEEP) && 'no local esheep64 (node scripts/fetch-pets.mjs); the tripwire is skipped' }, (t) => {
       // Read programmatically only: the developer agent never looks at these pixels (D8).
       const theirs = silhouettes(petSheet(fs.readFileSync(ESHEEP, 'utf8')), true);
       const ours = silhouettes(view.base, false);

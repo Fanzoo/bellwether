@@ -1,53 +1,28 @@
 /**
  * The brain under test, for the tests that call its parts in process (distribution plan
- * D2). The same names as brain/*.mjs:
+ * D2): the Rust brain, its pure parts through the conformance build's hidden `__session`
+ * command (one synchronous call per use, over two FIFOs), `startBrain` as a `serve`
+ * process and `runDoctor` as a real `doctor --json` run of the binary (its `runClaude`
+ * answers a fake `claude` on PATH). The names are the ones the Node brain's modules had
+ * (brain/*.mjs until milestone 11), so the tests read as they always did.
  *
- *   BELLWETHER_IMPL=node (default)  brain/*.mjs itself
- *   BELLWETHER_IMPL=rust            the Rust brain: pure parts through its hidden
- *                                   `__session` command (one synchronous call per use,
- *                                   over two FIFOs), `startBrain` as a `serve` process
+ * The tools the tests drive a brain with (the HTTP client, replay, the error class) are
+ * in test/support/: test drivers, never the thing under test.
  *
- * So a test written against brain/*.mjs checks the Rust port when the parity table runs it
- * (`npm run test:rust`), call for call. What only the Node CLI has (`.env` writing, the
- * repository's LaunchAgents and `shell` control) is not here: those tests say so with
- * `notUnderRust` (helpers.mjs).
- *
- * Milestone 4 adds the installer (brain/hooks.mjs), the diff (diff.mjs) and doctor
- * (doctor.mjs): the pure parts through `__session`, and `runDoctor` as a real `doctor
- * --json` run of the binary (its `runClaude` answers a fake `claude` on PATH).
- *
- * Under rust, JS `undefined` crosses as `{"$undefined": true}`, so `{colourIndex:
- * undefined}` stays a property, as in Node.
+ * JS `undefined` crosses as `{"$undefined": true}`, so `{colourIndex: undefined}` stays a
+ * property, as in Node.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
-import { startBrain as nodeStartBrain } from '../brain/brain.mjs';
-import { call } from '../brain/client.mjs';
-import { validateConfig as nodeValidateConfig } from '../brain/config.mjs';
-import * as nodeDiff from '../brain/diff.mjs';
-import * as nodeDoctor from '../brain/doctor.mjs';
-import * as nodeHooks from '../brain/hooks.mjs';
-import * as nodeDefaults from '../brain/defaults.mjs';
-import { envValue as nodeEnvValue } from '../brain/envfile.mjs';
-import { Flock as NodeFlock, LIMITS as NODE_LIMITS } from '../brain/flock.mjs';
-import { identityOf as nodeIdentityOf } from '../brain/identity.mjs';
-import { fingerprint as nodeFingerprint, normalise as nodeNormalise } from '../brain/normalise.mjs';
-import { guardOutFile as nodeGuardOutFile, isBellwetherRecording as nodeIsRecording } from '../brain/outfile.mjs';
-import { loadState as nodeLoadState } from '../brain/persist.mjs';
-import { readShellState as nodeReadShellState, sharingProcessWarnings as nodeSharingProcessWarnings, writeShellState } from '../brain/privacy.mjs';
-import { createPublisher as nodeCreatePublisher } from '../brain/publisher.mjs';
-import { makeTextCleaner as nodeMakeTextCleaner } from '../brain/redact.mjs';
-import { burst, readRecording, rebuild as nodeRebuild, replay } from '../brain/replay.mjs';
-import { createRecorder as nodeCreateRecorder } from '../brain/server.mjs';
-import { renderStatus as nodeRenderStatus } from '../brain/status.mjs';
-import { CliError, maskToken as nodeMaskToken } from '../brain/util.mjs';
-import { IMPL, TOKEN, spawnBrain, tempDir } from './helpers.mjs';
-
-export { IMPL };
-const RUST = IMPL === 'rust';
+import { TOKEN, spawnBrain, tempDir } from './helpers.mjs';
+import { call } from './support/client.mjs';
+import { ENV_HEADERS, PALETTE_UPGRADED } from './support/hooks.mjs';
+import { writeShellState } from './support/privacy.mjs';
+import { burst, readRecording, replay } from './support/replay.mjs';
+import { CliError } from './support/util.mjs';
 
 // ------------------------------------------------------------------ the session
 
@@ -102,49 +77,41 @@ export function rust(fn, ...args) {
 
 // ------------------------------------------------------------------ config
 
-export const PALETTE_UPGRADED = nodeDefaults.PALETTE_UPGRADED;
-const palettes = RUST ? rust('palettes') : nodeDefaults;
+export { PALETTE_UPGRADED };
+const palettes = rust('palettes');
 export const DEFAULT_PALETTE = palettes.DEFAULT_PALETTE;
 export const OLD_DEFAULT_PALETTE = palettes.OLD_DEFAULT_PALETTE;
 
-export const withDefaults = RUST
-  ? (config) => {
-      const { config: merged, paletteUpgraded } = rust('withDefaults', config);
-      if (paletteUpgraded) merged[PALETTE_UPGRADED] = true;
-      return merged;
-    }
-  : nodeDefaults.withDefaults;
+export const withDefaults = (config) => {
+  const { config: merged, paletteUpgraded } = rust('withDefaults', config);
+  if (paletteUpgraded) merged[PALETTE_UPGRADED] = true;
+  return merged;
+};
 
-export const validateConfig = RUST
-  ? (config, name = 'config') => {
-      rust('validateConfig', config, name);
-      return config;
-    }
-  : nodeValidateConfig;
+export const validateConfig = (config, name = 'config') => {
+  rust('validateConfig', config, name);
+  return config;
+};
 
 // ------------------------------------------------------------------ text and events
 
-export const makeTextCleaner = RUST
-  ? ({ maxChars = 60, redactPatterns = [] } = {}) => {
-      const options = { maxChars, redactPatterns };
-      rust('cleaner', options);
-      const clean = (text) => rust('clean', options, text);
-      clean.options = options;
-      return clean;
-    }
-  : nodeMakeTextCleaner;
+export const makeTextCleaner = ({ maxChars = 60, redactPatterns = [] } = {}) => {
+  const options = { maxChars, redactPatterns };
+  rust('cleaner', options);
+  const clean = (text) => rust('clean', options, text);
+  clean.options = options;
+  return clean;
+};
 
-export const normalise = RUST
-  ? (payload, headers = {}, receivedAt = Date.now(), { clean = null } = {}) => {
-      if (clean && !clean.options) throw new Error('under rust, normalise takes a cleaner made by makeTextCleaner from test/impl.mjs');
-      return rust('normalise', payload, headers, receivedAt, clean ? clean.options : null);
-    }
-  : nodeNormalise;
+export const normalise = (payload, headers = {}, receivedAt = Date.now(), { clean = null } = {}) => {
+  if (clean && !clean.options) throw new Error('normalise takes a cleaner made by makeTextCleaner from test/impl.mjs');
+  return rust('normalise', payload, headers, receivedAt, clean ? clean.options : null);
+};
 
-export const fingerprint = RUST ? (toolName, input) => rust('fingerprint', toolName, input) : nodeFingerprint;
-export const identityOf = RUST ? (ev) => rust('identityOf', ev) : nodeIdentityOf;
-export const LIMITS = RUST ? rust('limits') : NODE_LIMITS;
-export const envValue = RUST ? (text, key) => rust('envValue', text, key) : nodeEnvValue;
+export const fingerprint = (toolName, input) => rust('fingerprint', toolName, input);
+export const identityOf = (ev) => rust('identityOf', ev);
+export const LIMITS = rust('limits');
+export const envValue = (text, key) => rust('envValue', text, key);
 
 // ------------------------------------------------------------------ the flock
 
@@ -179,7 +146,7 @@ class RustFlock {
   }
 }
 
-export const Flock = RUST ? RustFlock : NodeFlock;
+export const Flock = RustFlock;
 
 /** The fixture runner (test/fixture-runner.mjs), through the Rust reducer. */
 export function runFixtureRust(lines, config = null) {
@@ -188,43 +155,35 @@ export function runFixtureRust(lines, config = null) {
 
 // ------------------------------------------------------------------ persistence, recording, status
 
-export const loadState = RUST
-  ? (file, warn = () => {}) => {
-      const { value, warnings } = rust('loadState', file);
-      for (const w of warnings) warn(w);
-      return value;
-    }
-  : nodeLoadState;
+export const loadState = (file, warn = () => {}) => {
+  const { value, warnings } = rust('loadState', file);
+  for (const w of warnings) warn(w);
+  return value;
+};
 
-export const createRecorder = RUST
-  ? (file) => {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      return { file, write: (payload, headers, receivedAt) => rust('recorder.write', file, payload, headers, receivedAt), close: () => {} };
-    }
-  : nodeCreateRecorder;
+export const createRecorder = (file) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  return { file, write: (payload, headers, receivedAt) => rust('recorder.write', file, payload, headers, receivedAt), close: () => {} };
+};
 
-export const guardOutFile = RUST
-  ? (target, kind, { force = false } = {}) => {
-      if (kind === 'print') rust('guardPrint', target, force);
-      else rust('guardRecord', target);
-    }
-  : nodeGuardOutFile;
-export const isBellwetherRecording = RUST ? (text) => rust('isBellwetherRecording', text) : nodeIsRecording;
-export const rebuild = RUST ? (line, { tag = null } = {}) => rust('rebuild', line, tag) : nodeRebuild;
-export const renderStatus = RUST ? (snap, { palette = [], color = false } = {}) => rust('renderStatus', snap, palette, color) : nodeRenderStatus;
-export const readShellState = RUST ? (dataDir) => rust('shellState.read', dataDir) : nodeReadShellState;
+export const guardOutFile = (target, kind, { force = false } = {}) => {
+  if (kind === 'print') rust('guardPrint', target, force);
+  else rust('guardRecord', target);
+};
+export const isBellwetherRecording = (text) => rust('isBellwetherRecording', text);
+export const rebuild = (line, { tag = null } = {}) => rust('rebuild', line, tag);
+export const renderStatus = (snap, { palette = [], color = false } = {}) => rust('renderStatus', snap, palette, color);
+export const readShellState = (dataDir) => rust('shellState.read', dataDir);
 export { writeShellState };
 // The strip's copy of the sharing-name rules (shell/src-tauri/src/privacy.rs).
-export const sharingProcessWarnings = RUST ? (config, platform = process.platform) => rust('sharingProcessWarnings', config ?? null, platform) : nodeSharingProcessWarnings;
+export const sharingProcessWarnings = (config, platform = process.platform) => rust('sharingProcessWarnings', config ?? null, platform);
 
-export const maskToken = RUST
-  ? (text, token = process.env.BELLWETHER_HOOK_TOKEN, seen = undefined) => {
-      if (typeof text !== 'string') return text;
-      const r = rust('maskToken', text, token ?? null, seen ? [...seen] : null);
-      if (seen) for (const v of r.seen) seen.add(v);
-      return r.text;
-    }
-  : nodeMaskToken;
+export const maskToken = (text, token = process.env.BELLWETHER_HOOK_TOKEN, seen = undefined) => {
+  if (typeof text !== 'string') return text;
+  const r = rust('maskToken', text, token ?? null, seen ? [...seen] : null);
+  if (seen) for (const v of r.seen) seen.add(v);
+  return r.text;
+};
 
 // ------------------------------------------------------------------ the publisher
 
@@ -251,7 +210,7 @@ function rustCreatePublisher({ build, intervalMs = 250 }) {
   };
 }
 
-export const createPublisher = RUST ? rustCreatePublisher : nodeCreatePublisher;
+export const createPublisher = rustCreatePublisher;
 
 // ------------------------------------------------------------------ a running brain
 
@@ -340,34 +299,34 @@ async function rustStartBrain({ config, token, dataDir, log = () => {}, hang = f
   };
 }
 
-export const startBrain = RUST ? rustStartBrain : nodeStartBrain;
+export const startBrain = rustStartBrain;
 
 // ------------------------------------------------------------------ the installer and the diff (M4)
 
-export const EVENTS = RUST ? rust('hooks.EVENTS') : nodeHooks.EVENTS;
-export const HTTP_UNSUPPORTED_EVENTS = RUST ? rust('hooks.HTTP_UNSUPPORTED_EVENTS') : nodeHooks.HTTP_UNSUPPORTED_EVENTS;
-export const ENV_HEADERS = nodeHooks.ENV_HEADERS;
-export const hookBlock = RUST ? (port, token) => rust('hooks.hookBlock', port, token) : nodeHooks.hookBlock;
-export const install = RUST ? (settings, port, token) => rust('hooks.install', settings, port, token) : nodeHooks.install;
-export const uninstall = RUST ? (settings, port, created = null) => rust('hooks.uninstall', settings, port, created) : nodeHooks.uninstall;
-export const countGroups = RUST ? (settings, port) => rust('hooks.countGroups', settings ?? null, port) : nodeHooks.countGroups;
-export const deepEqual = RUST ? (a, b) => rust('hooks.deepEqual', a ?? null, b ?? null) : nodeHooks.deepEqual;
-export const isBellwetherHandler = RUST ? (h, port) => rust('hooks.isBellwetherHandler', h ?? null, port) : nodeHooks.isBellwetherHandler;
-export const isLegacyHandler = RUST ? (h, port) => rust('hooks.isLegacyHandler', h ?? null, port) : nodeHooks.isLegacyHandler;
-export const shapeProblems = RUST ? (settings) => rust('hooks.shapeProblems', settings ?? null) : nodeHooks.shapeProblems;
-/** planEdit's answer; under rust without `originalBytes` (the tests read the file). */
-export const planEdit = RUST ? (file, action, { port, token = null, dataDir = null }) => rust('hooks.planEdit', file, action, { port, token, dataDir }) : nodeHooks.planEdit;
-export const unifiedDiff = RUST ? (oldText, newText, options = {}) => rust('diff.unifiedDiff', oldText, newText, options) : nodeDiff.unifiedDiff;
-export const diffStats = RUST ? (oldText, newText) => rust('diff.diffStats', oldText, newText) : nodeDiff.diffStats;
+export const EVENTS = rust('hooks.EVENTS');
+export const HTTP_UNSUPPORTED_EVENTS = rust('hooks.HTTP_UNSUPPORTED_EVENTS');
+export { ENV_HEADERS };
+export const hookBlock = (port, token) => rust('hooks.hookBlock', port, token);
+export const install = (settings, port, token) => rust('hooks.install', settings, port, token);
+export const uninstall = (settings, port, created = null) => rust('hooks.uninstall', settings, port, created);
+export const countGroups = (settings, port) => rust('hooks.countGroups', settings ?? null, port);
+export const deepEqual = (a, b) => rust('hooks.deepEqual', a ?? null, b ?? null);
+export const isBellwetherHandler = (h, port) => rust('hooks.isBellwetherHandler', h ?? null, port);
+export const isLegacyHandler = (h, port) => rust('hooks.isLegacyHandler', h ?? null, port);
+export const shapeProblems = (settings) => rust('hooks.shapeProblems', settings ?? null);
+/** planEdit's answer, without `originalBytes` (the tests read the file). */
+export const planEdit = (file, action, { port, token = null, dataDir = null }) => rust('hooks.planEdit', file, action, { port, token, dataDir });
+export const unifiedDiff = (oldText, newText, options = {}) => rust('diff.unifiedDiff', oldText, newText, options);
+export const diffStats = (oldText, newText) => rust('diff.diffStats', oldText, newText);
 
 // ------------------------------------------------------------------ doctor (M4)
 
-export const checkSettings = RUST ? (settings, { port, token = null, file = 'settings' }) => rust('doctor.checkSettings', settings ?? null, { port, token, file }) : nodeDoctor.checkSettings;
-export const checkOtherLevels = RUST ? ({ projectDir = null, managedFile = null, port, userSettings = null }) => rust('doctor.checkOtherLevels', { projectDir, managedFile, port, userSettings }) : nodeDoctor.checkOtherLevels;
-export const globMatch = RUST ? (pattern, value) => rust('doctor.globMatch', String(pattern), value) : nodeDoctor.globMatch;
-export const checkLocatorLog = RUST ? (dataDir) => rust('doctor.checkLocatorLog', dataDir) : nodeDoctor.checkLocatorLog;
-/** doctor's `next` line. Under rust the app's order (no pet art, strip build or LaunchAgent steps). */
-export const nextStep = RUST ? ({ checks, installed }) => rust('doctor.nextStep', checks, !!installed) : nodeDoctor.nextStep;
+export const checkSettings = (settings, { port, token = null, file = 'settings' }) => rust('doctor.checkSettings', settings ?? null, { port, token, file });
+export const checkOtherLevels = ({ projectDir = null, managedFile = null, port, userSettings = null }) => rust('doctor.checkOtherLevels', { projectDir, managedFile, port, userSettings });
+export const globMatch = (pattern, value) => rust('doctor.globMatch', String(pattern), value);
+export const checkLocatorLog = (dataDir) => rust('doctor.checkLocatorLog', dataDir);
+/** doctor's `next` line, in the app's order (no pet art, strip build or LaunchAgent steps). */
+export const nextStep = ({ checks, installed }) => rust('doctor.nextStep', checks, !!installed);
 
 /** A port nothing listens on: bound by the OS, then released. */
 const closedPort = () =>
@@ -379,7 +338,7 @@ const closedPort = () =>
   });
 
 /**
- * `runDoctor` under rust: one `bellwether doctor --json` run of the binary, with the
+ * `runDoctor`: one `bellwether doctor --json` run of the binary, with the
  * options as its environment (the config the loader returns, the token in `env`, `home`
  * as HOME, `dataDir` as the app's home) and `projectDir` as its directory. A `runClaude`
  * is answered through a fake `claude` on PATH that asks this process over loopback, so
@@ -405,7 +364,7 @@ async function rustRunDoctor({ settingsFile, env = process.env, configLoader = n
       if (!Number.isInteger(config.port) || config.port < 1024) config.port = await closedPort();
       // A config withDefaults() upgraded: the file had the old default palette, so the
       // Rust brain gets that file and finds the upgrade itself.
-      if (loaded.config?.[PALETTE_UPGRADED]) config.pets = { ...config.pets, palette: [...nodeDefaults.OLD_DEFAULT_PALETTE] };
+      if (loaded.config?.[PALETTE_UPGRADED]) config.pets = { ...config.pets, palette: [...OLD_DEFAULT_PALETTE] };
       fs.writeFileSync(cfg, JSON.stringify(config));
     }
     childEnv.BELLWETHER_CONFIG = cfg;
@@ -462,8 +421,8 @@ q.end(JSON.stringify({ cwd: process.cwd(), hooksFile }));
   return result;
 }
 
-export const runDoctor = RUST ? rustRunDoctor : nodeDoctor.runDoctor;
+export const runDoctor = rustRunDoctor;
 
-// What tests use as tools, the same under both: the HTTP client, and the JS replay that
-// drives whichever brain is listening (`bellwether replay` itself is tested through the CLI).
+// What tests use as tools (test/support/): the HTTP client, and the JS replay that drives
+// whichever brain is listening (`bellwether replay` itself is tested through the CLI).
 export { burst, call, CliError, readRecording, replay, TOKEN };

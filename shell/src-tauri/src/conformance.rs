@@ -2,13 +2,14 @@
 //! only with the `conformance` feature, which no release build has.
 //!
 //! Each one reads cases as JSON lines on stdin and writes one JSON line per case on
-//! stdout, in order, so `scripts/differential.mjs` can send 10⁵ generated cases through
-//! one process and compare them with the Node functions line by line. A case that
-//! can't be read gets `{"error": "…"}` on its line (a difference, never a crash).
+//! stdout, in order, so many cases go through one process (`scripts/differential.mjs`
+//! compared 10⁵ generated cases a run with the Node functions this way until milestone 11;
+//! its frozen sample is crates/core/tests/frozen.rs). A case that can't be read gets
+//! `{"error": "…"}` on its line (a difference, never a crash).
 //!
 //!   __list        the areas and whether each is ported yet (JSON, no input)
 //!   __env         {"text", "key"?} -> {"value": string|null}: a .env read the way
-//!                 `node --env-file` does (settings.rs parse_env_value)
+//!                 `node --env-file` does (crates/core envfile.rs)
 //!   __redact      milestone 3: {"text", "maxChars", "redactPatterns"} -> {"value"}
 //!   __normalise   milestone 3: {"payload", "headers", "receivedAt", "clean"} -> the HookEvent
 //!   __fixture     milestone 3: a fixture's JSON lines -> its transition lines
@@ -237,7 +238,7 @@ pub fn env_case(line: &str) -> serde_json::Value {
     };
     let Some(text) = case["text"].as_str() else { return error("no \"text\"") };
     let key = case["key"].as_str().unwrap_or("BELLWETHER_HOOK_TOKEN");
-    serde_json::json!({ "value": crate::settings::parse_env_value(text, key) })
+    serde_json::json!({ "value": bellwether_core::envfile::env_value(text, key) })
 }
 
 #[cfg(test)]

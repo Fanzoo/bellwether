@@ -1,5 +1,5 @@
 {
-  "comment": "Pinned pet files. \"pets\": what `bellwether pets fetch` downloads, and the shell refuses a fetched pet whose file doesn't match; that art is never committed (see NOTICE). \"bundled\": Bellwether's own pets, committed in pets/ under CC0-1.0 and built by scripts/build-pet.mjs, which writes these pins.",
+  "comment": "Pinned pet files. \"pets\": what `node scripts/fetch-pets.mjs` downloads (a development build's eSheep), and the shell refuses a fetched pet whose file doesn't match; that art is never committed (see NOTICE). \"bundled\": Bellwether's own pets, committed in pets/ under CC0-1.0 and built by scripts/build-pet.mjs, which writes these pins.",
   "repo": "Adrianotiger/desktopPet",
   "commit": "1ba33bebed993439f03e502b37e9bd2daf061773",
   "pets": {

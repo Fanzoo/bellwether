@@ -1,27 +1,23 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { LABEL, OLD_LABELS, SHELL_LABEL, autostart, plistPath } from '../brain/autostart.mjs';
-import { adoptLegacyEnv } from '../brain/envpath.mjs';
-import { migrate } from '../brain/migrate.mjs';
-import { startServer } from '../brain/server.mjs';
-import { AGENT_DIR, FIXTURES, notUnderRust, request, spawnBrainSync, tempDir } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { AGENT_DIR, FIXTURES, spawnBrainSync, tempDir } from './helpers.mjs';
 import { hookBlock, install, uninstall } from './impl.mjs';
-
-// The repository-to-repository migration, called in process with launchd injected; the
-// app's `migrate` (into its own files, LaunchAgents left alone) runs in the CLI tests.
-const REPO_MIGRATE = notUnderRust("brain/migrate.mjs in process (the new checkout's .env and LaunchAgent plists, launchctl injected); the app's `migrate` is tested through the CLI here and in migrate.test.mjs, against both brains");
 
 /**
  * BR-3K's probes for the pasture -> bellwether rename and `migrate`. Temp directories
- * and injected fakes only: launchctl is never run, the real HOME, .env and settings are
- * never read.
+ * only: launchctl is never run, the real HOME, .env and settings are never read. The
+ * repository-to-repository migration's in-process probes (the Node brain's, launchd
+ * injected), the X-Pasture-* header mapping and the PASTURE_* variables went with the
+ * Node brain in milestone 11 (test/DIVERGENCES.md 4, 6, 15, 17 and 25); the app's
+ * `migrate --from` runs here through the binary.
  */
+
+// pasture's LaunchAgents, as an old install has them.
+const OLD_LABELS = ['local.pasture.brain', 'local.pasture.shell'];
+const plistPath = (home, label) => path.join(home, 'Library', 'LaunchAgents', `${label}.plist`);
 
 const OLD = 'oldPastureTokenNotReal_0123456789';
 const NEW = 'brandNewBellwetherTok_9876543210';
@@ -43,7 +39,7 @@ const snapshot = (...dirs) => {
   return out;
 };
 
-function world({ shellAgent = true, built = true, oldEnv, settings, newEnv, port = PORT } = {}) {
+function world({ shellAgent = true, oldEnv, settings, port = PORT } = {}) {
   const root = tempDir('bk3-mig-');
   const hub = path.join(root, 'hub');
   const old = path.join(hub, 'agents', 'pasture');
@@ -66,50 +62,19 @@ function world({ shellAgent = true, built = true, oldEnv, settings, newEnv, port
   const repo = path.join(root, 'bellwether');
   fs.mkdirSync(repo);
   fs.copyFileSync(path.join(AGENT_DIR, 'config.example.json'), path.join(repo, 'config.example.json'));
-  const shellBin = path.join(repo, 'shell', 'src-tauri', 'target', 'release', 'bellwether-shell');
-  if (built) {
-    fs.mkdirSync(path.dirname(shellBin), { recursive: true });
-    fs.writeFileSync(shellBin, '');
-  }
-  const targetEnv = path.join(repo, '.env');
-  if (newEnv !== undefined) fs.writeFileSync(targetEnv, newEnv);
-  const calls = [];
-  const opts = { from: old, home, settingsFile, agentDir: repo, dataDir: path.join(repo, 'data'), targetEnv, uid: 501, realHome: () => true, platform: 'darwin', shellBin, portHolder: () => ({ state: 'free' }), run: (c, a) => (calls.push(`${c} ${a.join(' ')}`), { ok: true, out: '' }) };
-  return { root, hub, old, home, repo, settingsFile, targetEnv, shellBin, calls, opts };
+  return { root, hub, old, home, repo, settingsFile };
 }
+
 const noTokens = (text, ...tokens) => tokens.every((t) => !String(text).includes(t));
 
 describe('migrate preview: changes nothing and never shows a token', () => {
-  test('sha256 of the old install, the new checkout and HOME are identical after a preview, and no launchctl call is made, with any mix of tokens', REPO_MIGRATE, () => {
-    for (const [oldEnv, newEnv] of [[undefined, undefined], [`PASTURE_HOOK_TOKEN=${OLD}\nBELLWETHER_HOOK_TOKEN=${NEW}\n`, undefined], [undefined, `BELLWETHER_HOOK_TOKEN=${NEW}\n`], [`PASTURE_HOOK_TOKEN=\n`, undefined], [`OTHER=1\n`, undefined]]) {
-      const w = world({ oldEnv, newEnv });
-      const before = snapshot(w.root);
-      const r = migrate({ ...w.opts, write: false });
-      assert.deepEqual(snapshot(w.root), before, JSON.stringify([oldEnv, newEnv]));
-      assert.deepEqual(w.calls, [], 'a preview ran launchctl');
-      assert.ok(noTokens(r.lines.join('\n'), OLD, NEW));
-    }
-  });
-  test('error paths do not print the token: a bad --from, an unreadable --env, an invalid settings file containing the token, a read-only target', REPO_MIGRATE, () => {
-    const w = world();
-    for (const bad of [{ from: path.join(w.root, 'missing') }, { from: w.hub }]) {
-      let msg = '';
-      try { migrate({ ...w.opts, ...bad }); } catch (e) { msg = e.message; }
-      assert.ok(noTokens(msg, OLD, NEW), msg);
-    }
-    fs.writeFileSync(w.settingsFile, `{"hooks": {"Stop": [{"hooks": [{"headers": {"X-Pasture-Token": "${OLD}" "oops": 1}}]}]}}`);
-    let msg = '';
-    try { migrate({ ...w.opts, write: true }); } catch (e) { msg = e.message; }
-    assert.ok(noTokens(msg, OLD, NEW), `an invalid settings file made migrate print the token: ${msg.slice(0, 200)}`);
-  });
   test('the CLI preview names the old hub-labelled LaunchAgents (local.<hub>.pasture.*) and changes nothing anywhere', () => {
     const w = world({ shellAgent: false });
     for (const l of OLD_LABELS) fs.rmSync(plistPath(w.home, l), { force: true });
     const hubLabels = ['local.example-hub.pasture.brain', 'local.example-hub.pasture.shell'];
     for (const l of hubLabels) fs.writeFileSync(plistPath(w.home, l), '<plist/>');
-    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(w.repo, 'brain'), { recursive: true });
     const before = snapshot(w.root);
-    const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'd'), BELLWETHER_ENV: w.targetEnv };
+    const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'd') };
     const r = spawnBrainSync(['migrate', '--from', w.old, '--settings', w.settingsFile], { root: w.repo, cwd: w.repo, encoding: 'utf8', env });
     assert.equal(r.status, 0, r.stderr);
     for (const l of hubLabels) assert.match(r.stdout, new RegExp(l.replace(/\./g, '\\.')));
@@ -119,148 +84,12 @@ describe('migrate preview: changes nothing and never shows a token', () => {
   });
   test('the CLI under temp directories: preview prints no token on stdout or stderr, even for an unknown flag or a missing --from', () => {
     const w = world();
-    const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'd'), BELLWETHER_ENV: w.targetEnv, BELLWETHER_HOOK_TOKEN: NEW };
+    const env = { PATH: process.env.PATH, HOME: w.home, BELLWETHER_DATA_DIR: path.join(w.root, 'd'), BELLWETHER_HOOK_TOKEN: NEW };
     for (const args of [['migrate', '--from', w.old, '--settings', w.settingsFile], ['migrate', '--from', path.join(w.root, 'nope')], ['migrate', '--bogus'], ['migrate', '--env', path.join(w.root, 'nope.env')]]) {
       const r = spawnBrainSync([...args], { encoding: 'utf8', env });
       assert.ok(noTokens(r.stdout + r.stderr, OLD, NEW), args.join(' '));
     }
     assert.equal(fs.existsSync(path.join(w.repo, '.env')), false);
-  });
-});
-
-describe('migrate --write: idempotence, order and recovery', REPO_MIGRATE, () => {
-  test('a second --write changes no file and calls launchctl for nothing that is already done', () => {
-    const w = world();
-    migrate({ ...w.opts, write: true });
-    const before = snapshot(w.root);
-    w.calls.length = 0;
-    migrate({ ...w.opts, write: true });
-    assert.deepEqual(snapshot(w.root), before);
-    assert.ok(!w.calls.some((c) => /bootout.*pasture/.test(c)), `second run touched the old agents: ${w.calls}`);
-  });
-  test('the hooks are never rewritten before the new brain has been loaded: at the first launchctl call the settings file still holds pasture\'s entries, or launchctl failing leaves the hooks as they were', () => {
-    const w = world();
-    let settingsAtFirstCall = null;
-    const run = (c, a) => {
-      if (settingsAtFirstCall === null) settingsAtFirstCall = fs.readFileSync(w.settingsFile, 'utf8');
-      return { ok: true, out: '' };
-    };
-    migrate({ ...w.opts, run, write: true });
-    assert.match(settingsAtFirstCall, /X-Pasture-Token/, 'the hooks already point at bellwether\'s token before the new brain is loaded');
-  });
-  test('launchctl failing partway (the new brain cannot be bootstrapped) must not leave new hooks, a removed old brain agent and no brain: either nothing changed or the old setup is still there', () => {
-    const w = world();
-    const before = snapshot(w.home);
-    const run = (c, a) => (a[0] === 'bootstrap' ? { ok: false, out: 'Bootstrap failed: 5: Input/output error' } : { ok: true, out: '' });
-    let err;
-    try { migrate({ ...w.opts, run, write: true }); } catch (e) { err = e; }
-    const settings = fs.readFileSync(w.settingsFile, 'utf8');
-    const oldAgentsLeft = OLD_LABELS.filter((l) => fs.existsSync(plistPath(w.home, l)));
-    const hooksMigrated = !/X-Pasture-Token/.test(settings);
-    assert.ok(err, 'a failed bootstrap was not reported');
-    assert.ok(noTokens(err.message, OLD, NEW));
-    assert.ok(!(hooksMigrated && oldAgentsLeft.length === 0), 'the hooks were migrated and pasture\'s agents removed, but bellwether\'s brain never loaded: every Claude Code session now prints hook errors');
-    void before;
-  });
-  test('an unwritable settings file fails with a message, leaves the settings, the old agents and the old install untouched, and a re-run after fixing it succeeds', () => {
-    const w = world();
-    fs.chmodSync(w.settingsFile, 0o444);
-    fs.chmodSync(path.dirname(w.settingsFile), 0o555);
-    const beforeSettings = sha(w.settingsFile);
-    let err;
-    try { migrate({ ...w.opts, write: true }); } catch (e) { err = e; }
-    fs.chmodSync(path.dirname(w.settingsFile), 0o755);
-    fs.chmodSync(w.settingsFile, 0o644);
-    assert.ok(err, 'a settings file that cannot be written was reported as success');
-    assert.ok(noTokens(err.message, OLD, NEW));
-    assert.doesNotMatch(String(err.stack ?? ''), /node_modules/);
-    assert.equal(sha(w.settingsFile), beforeSettings);
-    for (const l of OLD_LABELS) assert.ok(fs.existsSync(plistPath(w.home, l)), 'the old agent was removed before the settings step failed');
-    assert.deepEqual(w.calls, []);
-    const r = migrate({ ...w.opts, write: true });
-    assert.match(r.lines.join('\n'), /Done/);
-    assert.ok(!/X-Pasture-Token/.test(fs.readFileSync(w.settingsFile, 'utf8')));
-  });
-  test('a missing build moves only the brain, says so, and does not remove the old strip agent without a replacement', () => {
-    const w = world({ built: false });
-    const r = migrate({ ...w.opts, write: true });
-    assert.match(r.lines.join('\n'), /isn't built yet/);
-    assert.ok(fs.existsSync(plistPath(w.home, LABEL)));
-    assert.ok(!fs.existsSync(plistPath(w.home, SHELL_LABEL)));
-    assert.ok(fs.existsSync(plistPath(w.home, OLD_LABELS[1])), 'the old strip agent was removed while the new strip is not built: no strip at the next login');
-  });
-  test('bootout of the old brain comes before anything of the new one is loaded', () => {
-    const w = world();
-    migrate({ ...w.opts, write: true });
-    const iOld = w.calls.findIndex((c) => /bootout .*local\.pasture\.brain/.test(c));
-    const iNew = w.calls.findIndex((c) => /bootstrap .*local\.bellwether\.brain/.test(c));
-    assert.ok(iOld >= 0 && iNew > iOld, w.calls.join('\n'));
-    const iOldShell = w.calls.findIndex((c) => /bootout .*local\.pasture\.shell/.test(c));
-    assert.ok(iOldShell >= 0 && iOldShell < w.calls.findIndex((c) => /bootstrap .*local\.bellwether\.shell/.test(c)));
-  });
-  test('something already holding the brain\'s port that is not an old brain from these LaunchAgents stops migrate before anything changes, and says what holds it', () => {
-    const w = world();
-    const before = snapshot(w.home, w.hub);
-    for (const holder of [{ state: 'other', pid: 4242, command: 'python3 -m http.server 47990' }, { state: 'brain', name: 'bellwether', pid: 777 }, { state: 'brain', name: 'pasture', pid: 777 }]) {
-      // launchctl print says the old brain agent's pid is 1234, so pid 777 is not ours
-      const run = (c, a) => (c === 'launchctl' && a[0] === 'print' ? { ok: true, out: 'pid = 1234\n' } : { ok: true, out: '' });
-      let err;
-      try { migrate({ ...w.opts, run, portHolder: () => holder, write: true }); } catch (e) { err = e; }
-      assert.ok(err, JSON.stringify(holder));
-      assert.match(err.message, /not changed/);
-      assert.deepEqual(snapshot(w.home, w.hub), before, 'the LaunchAgents, the settings or the old install changed before the port check');
-    }
-  });
-});
-
-describe('the token', REPO_MIGRATE, () => {
-  const tokenIn = (f) => /^BELLWETHER_HOOK_TOKEN=(.*)$/m.exec(fs.readFileSync(f, 'utf8'))?.[1];
-  test('old token only: copied with the same value, the old .env untouched, mode 0600 for a new file; --env overrides the source', () => {
-    const w = world();
-    const old = sha(path.join(w.hub, '.env'));
-    migrate({ ...w.opts, write: true });
-    assert.equal(tokenIn(w.targetEnv), OLD);
-    assert.equal(sha(path.join(w.hub, '.env')), old);
-    assert.equal(fs.statSync(w.targetEnv).mode & 0o777, 0o600);
-    const w2 = world({ oldEnv: 'NOTHING=1\n' });
-    const other = path.join(w2.root, 'other.env');
-    fs.writeFileSync(other, `export PASTURE_HOOK_TOKEN="${OLD}"\r\n`);
-    migrate({ ...w2.opts, envFrom: other, write: true });
-    assert.equal(tokenIn(w2.targetEnv), OLD);
-  });
-  test('both names set: the new one is kept and the hooks use it; the old .env\'s differing value is not copied', () => {
-    const w = world({ newEnv: `BELLWETHER_HOOK_TOKEN=${NEW}\n` });
-    migrate({ ...w.opts, write: true });
-    assert.equal(tokenIn(w.targetEnv), NEW);
-    assert.match(fs.readFileSync(w.settingsFile, 'utf8'), new RegExp(NEW));
-  });
-  test('the last PASTURE_HOOK_TOKEN wins (as Node reads it), an empty last one means none, quotes and export are read as Node reads them', () => {
-    const w = world({ oldEnv: `PASTURE_HOOK_TOKEN=first_token_not_used_00000\nPASTURE_HOOK_TOKEN=${OLD}\n` });
-    migrate({ ...w.opts, write: true });
-    assert.equal(tokenIn(w.targetEnv), OLD);
-    const w2 = world({ oldEnv: `PASTURE_HOOK_TOKEN=${OLD}\nPASTURE_HOOK_TOKEN=\n` });
-    const r = migrate({ ...w2.opts, write: true });
-    assert.match(r.lines.join('\n'), /no PASTURE_HOOK_TOKEN found/);
-    assert.equal(fs.existsSync(w2.targetEnv), false);
-    assert.match(fs.readFileSync(w2.settingsFile, 'utf8'), /X-Pasture-Token/, 'hooks were rewritten with no token');
-  });
-  test('a symlinked target .env is written through, stays a link, keeps its mode and other lines, and leaves a .bak', () => {
-    const w = world();
-    const real = path.join(w.root, 'real.env');
-    fs.writeFileSync(real, 'ALPHA=1\r\nBETA=2', { mode: 0o640 });
-    fs.chmodSync(real, 0o640);
-    fs.symlinkSync(real, w.targetEnv);
-    migrate({ ...w.opts, write: true });
-    assert.ok(fs.lstatSync(w.targetEnv).isSymbolicLink());
-    const text = fs.readFileSync(real, 'utf8');
-    assert.match(text, /^ALPHA=1\r\nBETA=2\r\nBELLWETHER_HOOK_TOKEN=/);
-    assert.equal(fs.statSync(real).mode & 0o777, 0o640);
-    assert.equal(fs.readFileSync(`${real}.bak`, 'utf8'), 'ALPHA=1\r\nBETA=2');
-    assert.equal(fs.statSync(`${real}.bak`).mode & 0o777, 0o600);
-  });
-  test('the .bak copy of the .env (every account\'s secrets) cannot be committed: .env.* is ignored', () => {
-    const ig = fs.readFileSync(path.join(AGENT_DIR, '.gitignore'), 'utf8');
-    assert.match(ig, /^\.env\.\*$/m);
   });
 });
 
@@ -302,86 +131,5 @@ describe('legacy hook entries', () => {
     const s = { hooks: { Stop: [{ hooks: foreign }] } };
     assert.deepEqual(install(s, PORT, NEW).hooks.Stop[0], s.hooks.Stop[0]);
     assert.deepEqual(uninstall(install(s, PORT, NEW), PORT).hooks, s.hooks);
-  });
-});
-
-describe('legacy header mapping in the server', notUnderRust('the Rust brain refuses X-Pasture-* headers (test/DIVERGENCES.md 4; crates/brain hook.rs `the_guards_in_order`)'), () => {
-  const POST = (port, headers) => request(port, { method: 'POST', path: '/hook', headers: { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', ...headers }, body: '{"hook_event_name":"Stop","session_id":"s"}' });
-  test('only-old, only-new, both-matching, both-different (new wins, never either), and wrong tokens', async () => {
-    const seen = [];
-    const brain = await startServer({ port: 0, token: NEW, onEvent: (p, h) => seen.push(h) });
-    try {
-      assert.equal((await POST(brain.port, { 'X-Pasture-Token': NEW })).status, 204, 'old header with the right token');
-      assert.equal((await POST(brain.port, { 'X-Bellwether-Token': NEW })).status, 204);
-      assert.equal((await POST(brain.port, { 'X-Bellwether-Token': 'wrong_token_value_00000000', 'X-Pasture-Token': NEW })).status, 403, 'a wrong new token must not be rescued by a right old one');
-      assert.equal((await POST(brain.port, { 'X-Bellwether-Token': NEW, 'X-Pasture-Token': 'wrong_token_value_00000000' })).status, 204, 'the new header decides');
-      assert.equal((await POST(brain.port, { 'X-Pasture-Token': 'wrong_token_value_00000000' })).status, 403);
-      assert.equal((await POST(brain.port, {})).status, 403);
-      assert.equal((await POST(brain.port, { 'X-Pasture-Token': NEW, 'X-Pasture-Term-Program': 'old', 'X-Bellwether-Term-Program': 'new' })).status, 204);
-      await new Promise((r) => setTimeout(r, 30));
-      const last = seen.at(-1);
-      assert.equal(last['x-bellwether-term-program'], 'new', 'the new header must win for non-token headers too');
-      assert.equal(last['x-pasture-term-program'], undefined);
-    } finally { await brain.close(); }
-  });
-});
-
-describe('legacy environment variables', notUnderRust('the Node CLI reads PASTURE_* names and a .env for one release; the app reads neither (test/DIVERGENCES.md 6 and 15)'), () => {
-  test('PASTURE_X fills BELLWETHER_X only when that is unset; a set (even empty) BELLWETHER_X wins; unrelated names are untouched', () => {
-    const env = { PASTURE_HOOK_TOKEN: 'a', BELLWETHER_HOOK_TOKEN: 'b', PASTURE_DATA_DIR: '/x', PASTURE_E: 'e', BELLWETHER_E: '', OTHER: '1', PASTURE: 'p' };
-    const used = adoptLegacyEnv(env, new Set());
-    assert.equal(env.BELLWETHER_HOOK_TOKEN, 'b');
-    assert.equal(env.BELLWETHER_DATA_DIR, '/x');
-    assert.equal(env.BELLWETHER_E, '');
-    assert.equal(env.BELLWETHER_, undefined);
-    assert.deepEqual([...used].sort(), ['PASTURE_DATA_DIR']);
-  });
-  test('an exported PASTURE_HOOK_TOKEN beats BELLWETHER_HOOK_TOKEN in the .env (it is adopted before the file is loaded): the stale old value would win', () => {
-    const dir = tempDir('bk3-envprec-');
-    const envFile = path.join(dir, '.env');
-    fs.writeFileSync(envFile, `BELLWETHER_HOOK_TOKEN=${NEW}\n`);
-    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import('${path.join(AGENT_DIR, 'brain', 'envload.mjs').replace(/\\/g, '/')}').then(() => process.stdout.write(process.env.BELLWETHER_HOOK_TOKEN ?? ''))`], { encoding: 'utf8', env: { PATH: process.env.PATH, BELLWETHER_ENV: envFile, PASTURE_HOOK_TOKEN: OLD } });
-    assert.equal(r.stdout, NEW, `a stale exported PASTURE_HOOK_TOKEN overrode the .env's BELLWETHER_HOOK_TOKEN (got ${r.stdout === OLD ? 'the old one' : r.stdout})`);
-  });
-});
-
-describe('LaunchAgent replacement under injection', REPO_MIGRATE, () => {
-  test('autostart install with old agents present: preview removes nothing; write boots out and removes each old agent before the new ones load; the old plists are gone afterwards', () => {
-    const home = tempDir('bk3-la-');
-    fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
-    for (const l of OLD_LABELS) fs.writeFileSync(plistPath(home, l), '<plist/>');
-    const calls = [];
-    const bin = path.join(tempDir('bk3-bin-'), 'bellwether-shell');
-    fs.writeFileSync(bin, '');
-    const o = { home, uid: 501, realHome: () => true, shell: true, shellBin: bin, run: (c, a) => (calls.push(a.join(' ')), { ok: true, out: '' }) };
-    const prev = autostart('install', { ...o, write: false });
-    assert.equal(prev.wrote, false);
-    assert.deepEqual(calls, []);
-    for (const l of OLD_LABELS) assert.ok(fs.existsSync(plistPath(home, l)));
-    autostart('install', { ...o, write: true });
-    const firstBootstrap = calls.findIndex((c) => /^bootstrap /.test(c));
-    assert.ok(calls.slice(0, firstBootstrap).some((c) => /bootout .*pasture\.brain/.test(c)));
-    for (const l of OLD_LABELS) assert.ok(!fs.existsSync(plistPath(home, l)));
-  });
-  test('a temp HOME never reaches launchctl in the default (not forced) guard, old agents or not', () => {
-    const home = tempDir('bk3-la2-');
-    fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
-    for (const l of OLD_LABELS) fs.writeFileSync(plistPath(home, l), '<plist/>');
-    const bin = path.join(tempDir('bk3-bin-'), 'bellwether-shell');
-    fs.writeFileSync(bin, '');
-    autostart('install', { home, write: true, shell: true, shellBin: bin, run: () => assert.fail('launchctl was reached') });
-    autostart('uninstall', { home, write: true, shell: true, shellBin: bin, run: () => assert.fail('launchctl was reached') });
-  });
-});
-
-describe('the old LaunchAgent labels of a real install', REPO_MIGRATE, () => {
-  test('LaunchAgents named after the old hub (local.<hub>.pasture.brain / .shell, the labels pasture wrote when it lived inside a hub) are found, replaced and removed by migrate and by autostart install', () => {
-    const w = world({ shellAgent: false });
-    for (const l of OLD_LABELS) fs.rmSync(plistPath(w.home, l), { force: true });
-    const hubLabels = ['local.example-hub.pasture.brain', 'local.example-hub.pasture.shell'];
-    for (const l of hubLabels) fs.writeFileSync(plistPath(w.home, l), '<plist/>');
-    migrate({ ...w.opts, write: true });
-    for (const l of hubLabels) assert.ok(!fs.existsSync(plistPath(w.home, l)), `${l} was left installed: the old brain keeps the port and answers only X-Pasture-Token, so every hook gets a 403, while bellwether's brain crash-loops on EADDRINUSE`);
-    assert.ok(w.calls.some((c) => /bootout .*example-hub\.pasture\.brain/.test(c)), 'the old brain was never booted out');
   });
 });

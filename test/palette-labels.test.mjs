@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, test } from 'node:test';
 import { MAX_LABEL, displayLabels, terminalTag } from '../shell/src/player/labels.mjs';
 import { AGENT_DIR, TOKEN, tempDir } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+// The Rust brain's parts (test/impl.mjs).
 import { DEFAULT_PALETTE, OLD_DEFAULT_PALETTE, PALETTE_UPGRADED, runDoctor, withDefaults } from './impl.mjs';
 
 /** Milestone 10 additions: a palette you can tell apart, and same-project labels told apart. */

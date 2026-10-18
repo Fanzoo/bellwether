@@ -1,10 +1,9 @@
-import { loadConfig } from '../brain/config.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { unifiedDiff as nodeUnifiedDiff } from '../brain/diff.mjs';
-import { AGENT_DIR, FIXTURES, IMPL, TOKEN, notUnderRust, readInstallerVectors, readVectors, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, TOKEN, readInstallerVectors, readVectors, spawnBrainSync, tempDir } from './helpers.mjs';
+import { ISOLATED } from './setup.mjs';
 import { EVENTS, HTTP_UNSUPPORTED_EVENTS, checkSettings, countGroups, deepEqual, diffStats, hookBlock, install, isBellwetherHandler, planEdit, unifiedDiff, uninstall } from './impl.mjs';
 
 /**
@@ -12,12 +11,12 @@ import { EVENTS, HTTP_UNSUPPORTED_EVENTS, checkSettings, countGroups, deepEqual,
  * like a real user's (another tool's hooks, afplay sounds, herdr, a statusLine, unknown keys). The real
  * ~/.claude/settings.json is never passed to anything here.
  *
- * Under BELLWETHER_IMPL=rust the installer's parts come from the Rust brain (test/impl.mjs)
- * and the CLI is the Rust binary (distribution plan, milestone 4).
+ * The installer's parts come from the Rust brain (test/impl.mjs) and the CLI is the
+ * binary (distribution plan, milestone 4).
  */
 
 // The configured port: in the test run, the suite's own (test/setup.mjs), never the live 47417.
-const PORT = loadConfig().config.port;
+const PORT = JSON.parse(fs.readFileSync(ISOLATED.BELLWETHER_CONFIG, 'utf8')).port;
 const SAFE_HOME = tempDir('bellwether-home-');
 const fixture = () => JSON.parse(fs.readFileSync(path.join(FIXTURES, 'settings-sample.json'), 'utf8'));
 
@@ -248,15 +247,13 @@ describe('test/DIVERGENCES.md 21 and 22: wording and depth, each brain its own',
     const data = path.join(dir, 'data');
     const r = cli(['hooks', 'install', '--settings', file], data);
     assert.equal(r.code, 0, r.stderr);
-    if (IMPL === 'rust') assert.ok(r.stderr.includes(`the backup in ${path.join(data, 'backups')}/ keeps them`), r.stderr);
-    else assert.match(r.stderr, /the backup in data\/backups\/ keeps them/);
-    const none = spawnBrainSync(['hooks', 'print'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: SAFE_HOME, BELLWETHER_DATA_DIR: path.join(tempDir(), 'd'), BELLWETHER_ENV: path.join(tempDir(), 'none.env') } });
+    assert.ok(r.stderr.includes(`the backup in ${path.join(data, 'backups')}/ keeps them`), r.stderr);
+    const none = spawnBrainSync(['hooks', 'print'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: SAFE_HOME, BELLWETHER_DATA_DIR: path.join(tempDir(), 'd') } });
     assert.equal(none.status, 3);
-    if (IMPL === 'rust') assert.match(none.stderr, /no hook token: BELLWETHER_HOOK_TOKEN is not set, and .*hook-token doesn't exist or is empty\. Make one with `bellwether token init`/);
-    else assert.match(none.stderr, /BELLWETHER_HOOK_TOKEN is not set/);
+    assert.match(none.stderr, /no hook token: BELLWETHER_HOOK_TOKEN is not set, and .*hook-token doesn't exist or is empty\. Make one with `bellwether token init`/);
   });
 
-  test('a settings file nested 1100 deep: Node installs into it, the Rust brain refuses it (exit 3) and writes nothing', () => {
+  test('a settings file nested 1100 deep: the brain refuses it (exit 3) and writes nothing (Node installed into it)', () => {
     const dir = tempDir();
     const file = path.join(dir, 'settings.json');
     const text = `{"deep": ${'['.repeat(1100)}${']'.repeat(1100)}}\n`;
@@ -264,14 +261,9 @@ describe('test/DIVERGENCES.md 21 and 22: wording and depth, each brain its own',
     // The preview of 1100 levels, indented, is several MB.
     const p = spawnBrainSync(['hooks', 'install', '--write', '--settings', file], { cwd: AGENT_DIR, encoding: 'utf8', maxBuffer: 1 << 28, env: { ...process.env, BELLWETHER_HOOK_TOKEN: TOKEN, BELLWETHER_DATA_DIR: path.join(dir, 'data'), HOME: SAFE_HOME, USERPROFILE: SAFE_HOME, BELLWETHER_CWD: '' } });
     const r = { code: p.status, stderr: p.stderr };
-    if (IMPL === 'rust') {
-      assert.equal(r.code, 3, r.stderr);
-      assert.match(r.stderr, /is not valid JSON \(nested too deeply/);
-      assert.equal(fs.readFileSync(file, 'utf8'), text);
-    } else {
-      assert.equal(r.code, 0, r.stderr);
-      assert.match(fs.readFileSync(file, 'utf8'), /"hooks"/);
-    }
+    assert.equal(r.code, 3, r.stderr);
+    assert.match(r.stderr, /is not valid JSON \(nested too deeply/);
+    assert.equal(fs.readFileSync(file, 'utf8'), text);
   });
 });
 
@@ -392,7 +384,7 @@ describe('every installer vector through the CLI (milestone 4: the Rust preview 
   // The exotic vector is the one intended difference (test/DIVERGENCES.md): JSON.parse
   // moves its integer-like keys first, and the Rust brain keeps file order. Its preview and
   // bytes are pinned by crates/core/tests/installer.rs.
-  const same = (v) => IMPL === 'node' || v.group !== 'exotic';
+  const same = (v) => v.group !== 'exotic';
   for (const v of vectors.cases) {
     test(`hooks install previews ${v.name} as Node does; install then uninstall ${v.roundTrip ? 'gives back the original bytes' : "gives back Node's bytes"}`, () => {
       const dir = tempDir('bw-vec-');
@@ -403,11 +395,12 @@ describe('every installer vector through the CLI (milestone 4: the Rust preview 
       assert.equal(dry.code, 0, dry.stderr);
       const preview = dry.stdout.split(`${file} (`).join('settings.json (');
       // The exotic vector under rust: Node's bytes with the three integer-like keys back in
-      // file order (they are the settings' own lines 1-3), and the preview Node's diff
-      // (brain/diff.mjs, the oracle) makes of exactly those bytes.
+      // file order (they are the settings' own lines 1-3), and the preview the brain's diff
+      // makes of exactly those bytes (the diff itself is pinned by diff-vectors.json and the
+      // frozen sample).
       const lines = (t) => t.split('\n');
       const rustInstalled = same(v) ? v.installed : [lines(v.installed)[0], ...lines(v.settings).slice(1, 4), ...lines(v.installed).slice(4)].join('\n');
-      const rustPreview = same(v) ? v.installDiff : nodeUnifiedDiff(v.settings, rustInstalled, { oldName: 'settings.json (current)', newName: 'settings.json (after install)' });
+      const rustPreview = same(v) ? v.installDiff : unifiedDiff(v.settings, rustInstalled, { oldName: 'settings.json (current)', newName: 'settings.json (after install)' });
       assert.equal(preview, masked(rustPreview), 'the preview, byte for byte (the token masked, as on any stdout)');
       assert.equal(fs.readFileSync(file, 'utf8'), v.settings, 'a dry run writes nothing');
       assert.equal(vectorCli(['hooks', 'install', '--write', '--settings', file], dir).code, 0);
@@ -442,14 +435,6 @@ describe('untrusted keys never reach a prototype', () => {
     assert.equal(Object.getPrototypeOf(installed.hooks), Object.prototype);
     assert.equal(cli(['hooks', 'uninstall', '--write', '--settings', file], data).code, 0);
     assert.equal(fs.readFileSync(file, 'utf8'), text);
-  });
-
-  test('parseArgs keeps every flag as an own key on a null-prototype object', notUnderRust("Node's parseArgs itself; the Rust rules are crates/core cliargs.rs `strict_like_node` (`--__proto__` included), and the CLI cases below run against both"), async () => {
-    const { parseArgs } = await import('../brain/util.mjs');
-    const a = parseArgs(['--__proto__=x', '--constructor', 'y', 'pos']);
-    assert.equal(Object.getPrototypeOf(a), null);
-    assert.deepEqual(Object.keys(a).sort(), ['_', '__proto__', 'constructor']);
-    assert.equal(a.__proto__, 'x');
   });
 
   for (const flag of [['--__proto__=x'], ['--__proto__', 'x'], ['--constructor', 'x'], ['--toString']]) {

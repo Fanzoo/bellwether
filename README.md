@@ -196,6 +196,8 @@ After an update, Bellwether restarts its brain on the new version as it relaunch
 sessions may show one brief "hook error" line meanwhile. `bellwether doctor` warns if the
 brain still runs another version than the app, and says how to restart it.
 
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Uninstall
 
 Homebrew can't edit Claude Code's settings, so first remove Bellwether's hooks and its

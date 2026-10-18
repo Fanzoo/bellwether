@@ -38,7 +38,7 @@ describe('the horn mask, on every colour esheep64 uses', () => {
 });
 
 const xml = path.join(AGENT_DIR, 'data', 'pets', 'esheep64', 'animations.xml');
-describe('the horn mask, frame by frame on the real sheet', { skip: !fs.existsSync(xml) && 'no pet art here (bellwether pets fetch)' }, () => {
+describe('the horn mask, frame by frame on the real sheet', { skip: !fs.existsSync(xml) && 'no pet art here (node scripts/fetch-pets.mjs)' }, () => {
   test('every frame of every animation bellwether uses shows horns; the frames without are only bath, flower and black-sheep ones', () => {
     const text = fs.readFileSync(xml, 'utf8');
     const sheet = petSheet(text);
@@ -63,7 +63,7 @@ describe('the horn mask, frame by frame on the real sheet', { skip: !fs.existsSy
 
 describe('the tint mode', () => {
   test('pets.tint is "horns" by default, "whole" switches back; the shell passes it and the webview honours it', async () => {
-    const { withDefaults } = await import('../brain/defaults.mjs');
+    const { withDefaults } = await import('./impl.mjs');
     assert.throws(() => withDefaults({ pets: { tint: 'stripes' } }), /pets\.tint must be "horns".*or "whole"/);
     withDefaults({ pets: { tint: 'whole' } });
     assert.equal(JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8')).pets.tint, 'horns');

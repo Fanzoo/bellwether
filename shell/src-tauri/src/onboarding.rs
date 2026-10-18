@@ -151,8 +151,9 @@ impl Onboarding {
                     }
                 }
             },
-            // The repository's token lives in its .env; onboarding never makes one there.
-            Layout::Repository => crate::settings::token_now().map(Some).ok_or_else(|| "no hook token: this is a repository build, whose token is in the checkout's .env (`./bellwether token init`)".to_string()),
+            // A development build's token is its home's (BELLWETHER_HOME); onboarding never
+            // makes one there.
+            Layout::Repository => crate::settings::token_now().map(Some).ok_or_else(|| "no hook token: this is a development build; make one with `bellwether token init` under its BELLWETHER_HOME (docs/DEVELOPMENT.md)".to_string()),
         }
     }
 
@@ -542,7 +543,7 @@ impl Onboarding {
     /// D6 step 6's Import…: `pets import` on the file the user chose in the panel.
     pub fn pet_import_file(&self, source: &Path) -> Result<Value, String> {
         if self.ctx.layout != Layout::App {
-            return Err("this is a repository build: pets come from `./bellwether pets fetch`".into());
+            return Err("this is a development build: the eSheep comes from `node scripts/fetch-pets.mjs` (docs/DEVELOPMENT.md)".into());
         }
         let r = bellwether_brain::pets::import(&self.ctx.home, source, None, false).map_err(|e| e.message)?;
         log(&format!("onboarding: imported pet {} ({})", r.name, r.file.display()));
@@ -553,7 +554,7 @@ impl Onboarding {
 
     /// D6 step 7: `~/.local/bin/bellwether`, a link to this app's executable.
     pub fn cli_tool_install(&self) -> Result<Value, String> {
-        let exe = crate::identity::bundle_executable().ok_or("the command-line tool links to Bellwether.app; this is a repository build (use ./bellwether)")?;
+        let exe = crate::identity::bundle_executable().ok_or("the command-line tool links to Bellwether.app; this is a development build (docs/DEVELOPMENT.md)")?;
         let state = install_cli_link(&self.ctx.user_home, &exe, &homebrew_links())?;
         log(&format!("onboarding: command-line tool: {}", state["state"]));
         Ok(state)
@@ -562,7 +563,7 @@ impl Onboarding {
     pub fn cli_tool_state(&self) -> Value {
         match crate::identity::bundle_executable() {
             Some(exe) => cli_state(&self.ctx.user_home, &exe, &homebrew_links()),
-            None => json!({ "state": "unavailable", "detail": "a repository build: use ./bellwether in the checkout" }),
+            None => json!({ "state": "unavailable", "detail": "a development build: run it from target-dev/ (docs/DEVELOPMENT.md)" }),
         }
     }
 
@@ -841,7 +842,7 @@ pub fn open<R: Runtime>(app: &AppHandle<R>) {
         return;
     };
     if !allowed(ob.ctx.layout) {
-        log("onboarding: the setup window is Bellwether.app's; a repository install is set up with ./bellwether");
+        log("onboarding: the setup window is Bellwether.app's; a development build is set up by hand (docs/DEVELOPMENT.md)");
         return;
     }
     if let Some(w) = app.get_webview_window(LABEL) {
@@ -1004,7 +1005,7 @@ pub async fn pet_select(window: tauri::WebviewWindow, app: AppHandle, name: Stri
 pub async fn pet_import(window: tauri::WebviewWindow, app: AppHandle) -> Out {
     guard(window.label())?;
     if app.state::<Onboarding>().ctx.layout != Layout::App {
-        return Err("this is a repository build: pets come from `./bellwether pets fetch`".into());
+        return Err("this is a development build: the eSheep comes from `node scripts/fetch-pets.mjs` (docs/DEVELOPMENT.md)".into());
     }
     let a = app.clone();
     let chosen = blocking(move || choose_pet_file(&a)).await??;
@@ -1174,7 +1175,7 @@ mod tests {
         repo.layout = Layout::Repository;
         let ob = Onboarding::new(repo);
         assert!(ob.login_items_set(true).unwrap_err().contains("Bellwether.app"));
-        assert!(ob.pet_import_file(Path::new("/nonexistent")).unwrap_err().contains("repository"));
+        assert!(ob.pet_import_file(Path::new("/nonexistent")).unwrap_err().contains("development build"));
         assert!(ob.pet_select("esheep64", &Value::Null).is_err());
     }
 

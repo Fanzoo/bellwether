@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { IMPL, TOKEN, tempDir } from './helpers.mjs';
+import { TOKEN, tempDir } from './helpers.mjs';
 import { runDoctor } from './impl.mjs';
 
 /**
@@ -21,7 +21,7 @@ const pets = async (petsConfig) => {
   return r.checks.find((c) => c.name === 'pets');
 };
 
-describe(`doctor's pets line, by the strip's rules (${IMPL})`, () => {
+describe('doctor\'s pets line, by the strip\'s rules', () => {
   test('no pets.default: the sheep, bundled and matching its pin', async () => {
     const c = await pets(null);
     assert.equal(c.status, 'PASS', c.detail);

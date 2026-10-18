@@ -2,10 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { withDefaults } from '../brain/defaults.mjs';
-import { checkLocatorLog } from '../brain/doctor.mjs';
-import { Flock } from '../brain/flock.mjs';
 import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { Flock, checkLocatorLog, normalise, withDefaults } from './impl.mjs';
 
 /** Milestone 8, the parts outside Rust (the Rust side: cargo test, locator.rs and placement.rs). */
 
@@ -78,12 +76,14 @@ describe('the shell side, by its source', () => {
 
 describe('herdr header values are checked at the door (verification M8 D1)', () => {
   test('pane ids like herdr makes them, sockets as absolute paths; anything else never reaches state', async () => {
-    const { terminalFrom, HERDR_PANE_RE } = await import('../brain/normalise.mjs');
-    const t = (pane, socket) => terminalFrom({ 'x-bellwether-herdr-pane': pane, 'x-bellwether-herdr-socket': socket, 'x-bellwether-term-program': 'iTerm.app' });
+    // Headers in, the event's `terminal` out: the brain's own identification, case by case.
+    const terminal = (headers) => normalise({ hook_event_name: 'Stop', session_id: 's' }, headers, 0).terminal ?? {};
+    const t = (pane, socket) => terminal({ 'x-bellwether-herdr-pane': pane, 'x-bellwether-herdr-socket': socket, 'x-bellwether-term-program': 'iTerm.app' });
     assert.deepEqual(t('w4:p2', '/Users/x/.config/herdr/herdr.sock'), { herdrPane: 'w4:p2', herdrSocket: '/Users/x/.config/herdr/herdr.sock', program: 'iTerm.app' });
     for (const bad of ['--help', '-x', 'w1 p1', 'w1:p1;rm', 'a'.repeat(65), 'w1:p1\n']) assert.equal(t(bad, '/s').herdrPane, undefined, JSON.stringify(bad));
     for (const bad of ['relative/h.sock', '/tmp/../etc/x', '/a\u0000b', '/' + 'a'.repeat(1100)]) assert.equal(t('w1:p1', bad).herdrSocket, undefined, JSON.stringify(bad.slice(0, 20)));
-    assert.ok(HERDR_PANE_RE.test('w1') && !HERDR_PANE_RE.test(''));
+    assert.equal(terminal({ 'x-bellwether-herdr-pane': 'w1' }).herdrPane, 'w1');
+    assert.equal(terminal({ 'x-bellwether-herdr-pane': '' }).herdrPane, undefined);
   });
   test('doctor only believes lines the shell wrote itself (verification M8 D3)', () => {
     const d = tempDir();

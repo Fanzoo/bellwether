@@ -65,7 +65,7 @@ fn verify_pet(folder: &str, bytes: &[u8]) -> Result<(), String> {
     let want = entry.get("sha256").and_then(Value::as_str).ok_or_else(|| format!("{folder}'s pin in pets.lock.json has no sha256"))?;
     let got: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
     if got != want {
-        let fix = if bundled { "it is one of Bellwether's own pets: rebuild it with `node scripts/build-pet.mjs build` (a repository), or reinstall the app" } else { "run `bellwether pets fetch`" };
+        let fix = if bundled { "it is one of Bellwether's own pets: rebuild it with `node scripts/build-pet.mjs build` (a development build), or reinstall the app" } else { "fetch it again with `node scripts/fetch-pets.mjs` (a development build; see docs/DEVELOPMENT.md)" };
         return Err(format!("pets/{folder}/animations.xml doesn't match its pinned sha256 (expected {want}, got {got}); {fix}"));
     }
     Ok(())
@@ -158,8 +158,8 @@ fn pet_xml(place: &PetPlace, name: &str) -> Result<String, String> {
         }
         PetPlace::Repository { data_dir, .. } => {
             let path = data_dir.join("pets").join(name).join("animations.xml");
-            let bytes = read(&path, &format!("{} is missing: run `bellwether pets fetch`", path.display()))?;
-            // The same pins `bellwether pets fetch` uses (pets.lock.json, compiled in): a pet
+            let bytes = read(&path, &format!("{} is missing: fetch it with `node scripts/fetch-pets.mjs` (a development build; see docs/DEVELOPMENT.md)", path.display()))?;
+            // The same pins scripts/fetch-pets.mjs uses (pets.lock.json, compiled in): a pet
             // that isn't pinned, or whose file doesn't match, is refused.
             verify_pet(name, &bytes)?;
             bytes
@@ -479,7 +479,7 @@ pub fn run() {
     let checks_only = flags.selftest || flags.demo || flags.locate.is_some();
     let open_onboarding = !checks_only && onboarding::allowed(settings.layout) && (flags.onboarding || (app_layout && !bellwether_core::shellstate::onboarded(&settings.data_dir)));
     if flags.onboarding && !onboarding::allowed(settings.layout) {
-        log("--onboarding: the setup window is Bellwether.app's; a repository install is set up with ./bellwether");
+        log("--onboarding: the setup window is Bellwether.app's; a development build is set up by hand (docs/DEVELOPMENT.md)");
     }
 
     let brain_for_setup = brain.clone();
@@ -1255,7 +1255,7 @@ mod tests {
         // The repository keeps data/pets and pets.lock.json.
         let repo = PetPlace::Repository { data_dir: home.clone(), repo: None };
         assert!(pet_xml(&repo, "tiny").unwrap_err().contains("not a pinned pet"));
-        assert!(pet_xml(&repo, "nothere").unwrap_err().contains("pets fetch"));
+        assert!(pet_xml(&repo, "nothere").unwrap_err().contains("node scripts/fetch-pets.mjs"));
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&res);
     }

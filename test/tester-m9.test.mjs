@@ -145,7 +145,8 @@ describe('M9 cask: nothing outside Bellwether\'s own', () => {
 describe('M9 release check: the updater key', () => {
   function rootWith(pubkey) {
     const root = tempDir();
-    for (const f of ['package.json', 'shell/package.json', 'shell/src-tauri/tauri.conf.json', 'shell/src-tauri/Cargo.toml', 'crates/brain/Cargo.toml', 'crates/core/Cargo.toml', 'shell/src-tauri/Cargo.lock', 'brain/util.mjs', 'shell/src-tauri/tauri.dist.conf.json']) {
+    for (const f of ['package.json', 'shell/package.json', 'shell/src-tauri/tauri.conf.json', 'shell/src-tauri/Cargo.toml', 'crates/brain/Cargo.toml', 'crates/core/Cargo.toml', 'shell/src-tauri/Cargo.lock', 'shell/src-tauri/tauri.dist.conf.json', 'CHANGELOG.md']) {
+      if (!fs.existsSync(path.join(AGENT_DIR, f))) continue;
       fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
       fs.copyFileSync(path.join(AGENT_DIR, f), path.join(root, f));
     }

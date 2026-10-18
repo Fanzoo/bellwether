@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, test } from 'node:test';
 import { BUBBLE, ellipsise, layoutBubbles } from '../shell/src/player/bubbles.mjs';
 import { AGENT_DIR } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+// The Rust brain's parts (test/impl.mjs).
 import { Flock, makeTextCleaner, normalise, withDefaults } from './impl.mjs';
 
 /** Tester probes for Milestone 5: bubble layout properties, readability, text safety. */

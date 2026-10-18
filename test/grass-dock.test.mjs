@@ -5,8 +5,8 @@ import { describe, test } from 'node:test';
 import { FADE_IN_MS, FADE_OUT_MS, LINGER_MS, TUFT, fadeStep, frontmost, tuftPixels, tuftX } from '../shell/src/player/grass.mjs';
 import { familyExtent } from '../shell/src/player/lambs.mjs';
 import { familyHomes } from '../shell/src/player/layout.mjs';
-import { checkLocatorLog } from '../brain/doctor.mjs';
 import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { checkLocatorLog } from './impl.mjs';
 
 /** Milestone 10: grass while eating; sheep on the Dock's top edge. */
 
@@ -94,11 +94,12 @@ describe('sheep on the Dock (Accessibility)', () => {
     assert.match(main, /dock: view\.dock \}\);/);
     assert.match(main, /if \(dockChanged && pet\) placeFamilies\(\);/);
   });
-  test('the permission is asked only on request, by the release binary itself', () => {
-    const cli = fs.readFileSync(path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'utf8');
-    assert.match(cli, /if \(sub === 'dock-permission'\) \{[\s\S]*?spawnSync\(bin, \['--ax-prompt'\]/);
+  test('the permission is asked only on request: the binary run with --ax-prompt, or the setup window', () => {
     const lib = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'lib.rs'), 'utf8');
     assert.equal([...lib.matchAll(/ax::prompt\(\)/g)].length, 1, 'one prompt, behind --ax-prompt');
+    assert.match(lib, /if std::env::args\(\)\.any\(\|a\| a == "--ax-prompt"\) \{\s*let granted = ax::prompt\(\);/);
+    const onboarding = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'onboarding.rs'), 'utf8');
+    assert.equal([...onboarding.matchAll(/ax::prompt\(\)/g)].length, 1, 'the setup window asks once, when the user chooses to');
   });
 });
 
@@ -145,22 +146,20 @@ describe('doctor: a stale Accessibility entry after a rebuild', () => {
     return checkLocatorLog(d).find((c) => c.name === 'dock');
   };
   const start = '1 bellwether-shell: starting: x\n';
-  test('granted in an earlier run, not granted now: WARN, remove the old bellwether-shell entry, then grant again', () => {
+  test('granted in an earlier run, not granted now: WARN, remove the old entry, then grant again', () => {
     const stale = run(`${start}2 bellwether-shell: dock: Accessibility granted to this binary: x\n${start}4 bellwether-shell: dock: Accessibility not granted to this binary: the full-width strip is used\n`);
     assert.equal(stale.status, 'WARN');
-    assert.match(stale.detail, /Privacy & Security > Accessibility still lists the old bellwether-shell entry/);
-    assert.match(stale.detail, /remove it with −/);
-    assert.match(stale.detail, /shell dock-permission/);
-    assert.match(stale.detail, /after every rebuild it must be given again/i);
+    assert.match(stale.detail, /Privacy & Security > Accessibility still lists the old entry, which belongs to the previous build/);
+    assert.match(stale.detail, /remove it with −, then grant Bellwether again/);
   });
-  test('granted before and now: PASS; never granted: INFO that still mentions a leftover entry', () => {
+  test('granted before and now: PASS; never granted: INFO naming where to grant it', () => {
     assert.equal(run(`${start}2 bellwether-shell: dock: Accessibility granted to this binary: x\n${start}4 bellwether-shell: dock: Accessibility granted to this binary: x\n`).status, 'PASS');
     const never = run(`${start}2 bellwether-shell: dock: Accessibility not granted to this binary: x\n`);
     assert.equal(never.status, 'INFO');
-    assert.match(never.detail, /remove it with − and grant again/);
+    assert.match(never.detail, /turn Bellwether on in System Settings > Privacy & Security > Accessibility/);
   });
   test('docs/DEVELOPMENT.md says what to do when it was granted before and now says not granted', () => {
     const readme = fs.readFileSync(path.join(AGENT_DIR, 'docs', 'DEVELOPMENT.md'), 'utf8');
-    assert.match(readme, /Remove the old `bellwether-shell`\s+entry \(select it, then −\), run `.\/bellwether shell dock-permission`/);
+    assert.match(readme, /Remove the old `bellwether-shell`\s+entry \(select it, then −\), run the new binary with `--ax-prompt`/);
   });
 });

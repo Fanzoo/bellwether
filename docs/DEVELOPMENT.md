@@ -3,31 +3,25 @@
 This is for contributors: building Bellwether from source, running it from a checkout,
 and the tests. To use Bellwether, install the app instead (see the README).
 
-A checkout has two brains while the Rust port finishes:
+Bellwether is one Rust executable: the brain (`crates/core`, `crates/brain`) and the app
+(`shell/src-tauri`, Tauri 2), which is the CLI, the brain's server and the strip. The
+*strip* is a transparent, click-through window above the Dock with one coloured sheep per
+session, a bubble on the one that needs you, lambs for its subagents, and a menu-bar icon.
+Its web side is `shell/src/`. Node runs the test suite and the development scripts in
+`scripts/`; the app doesn't need it.
 
-- the *Rust brain*, in `crates/` and the app's own executable (`shell/src-tauri`). This
-  is what `Bellwether.app` runs, as its CLI, its brain and its strip;
-- the *Node brain* (`brain/`, the repository's `./bellwether`), a zero-dependency Node
-  CLI: hook listener, state model, `/state`, `status`, `replay`, the hook installer and
-  `doctor`, plus `pets fetch` (the eSheep pet) and LaunchAgent autostart. It is the
-  conformance oracle until milestone 11 of `docs/DISTRIBUTION-PLAN.md` deletes it.
-
-The *shell* (`shell/`, Tauri 2) is the strip: a transparent, click-through window above
-the Dock with one coloured sheep per session, a bubble on the one that needs you, lambs
-for its subagents, and a menu-bar icon.
-
-The first sections below run Bellwether from a checkout (the repository install, on the
-Node brain). Nothing is installed into your `~/.claude/settings.json` or
-`~/Library/LaunchAgents` until you run the `--write` steps in "First run". The later
-sections build the signed app.
+The Node brain (`brain/` and its shell shim: the repository install) was the first
+version and the Rust port's conformance oracle. It was deleted in v1.0.0; its last version
+is tag `v0.2.0-rc.3`, and `test/DIVERGENCES.md` records where the Rust brain deliberately
+differs from it.
 
 ## The two hook guarantees, in code
 
 1. **`/hook` never sends a body.** Claude Code treats a JSON body from an HTTP hook as
-   a decision (approve a permission, block a tool call). `brain/hook-route.mjs` has one
-   way to answer: an empty `204`, or an empty `403` when a request fails a guard. A
-   source-scan test fails if that module could write a body. The Rust brain's
-   `crates/brain/src/hook.rs` has the same two answers and no other.
+   a decision (approve a permission, block a tool call). `crates/brain/src/hook.rs` has
+   one way to answer, a `HookAnswer`: an empty `204`, or an empty `403` when a request
+   fails a guard. Its `into_response` makes a response whose body type is `Empty`, and a
+   source check fails if the `/hook` route builds any other response.
 2. **Every bellwether hook entry has `timeout: 1`.** A hung brain therefore stalls a tool
    call by one second at most (measured: exactly 1.000 s), not the 600 s default.
    `doctor` fails any entry without a timeout or above 2 s.
@@ -38,212 +32,136 @@ with an `Origin` header, a foreign `Host`, a non-JSON `Content-Type` or the wron
 
 ---
 
-## First run (from a checkout): from nothing to sheep on screen
+## First run (from a checkout)
 
-Each step says what you should see. `./bellwether doctor` ends with a `next`
-line naming the step you're on, so you can stop and come back at any point. Run from
-the repository root.
+Prerequisites: Rust (`cargo --version`, 1.99 or newer; <https://rustup.rs>), Xcode's
+command-line tools (`xcode-select --install`), and Node 22.9 or newer for the tests and
+scripts. Run from the repository root:
 
-0. **Prerequisites:** Node 22.9 or newer (`node --version`), Rust (`cargo --version`;
-   <https://rustup.rs>) and Xcode's command-line tools (`xcode-select --install`).
-1. **A token**, into `.env` in the repository root (details in Setup step 1):
-   ```
-   ./bellwether token init
-   ```
-   It adds one only if there isn't one already, so it's safe to run twice. It fills
-   an empty `BELLWETHER_HOOK_TOKEN=` line if there is one, never glues onto a last line
-   without a newline, keeps the file's permissions, and never prints the token.
-2. **Check:** `./bellwether doctor`. The token line passes. The brain line
-   fails (nothing is running yet), and that's expected.
-3. **The sheep:** nothing to do. Bellwether's own sheep is in `pets/bellwether/`, and
-   the strip draws it when config.json has no `pets.default` (config.example.json names
-   it). Optional, for the eSheep instead: `./bellwether pets fetch` downloads the pinned
-   file into `data/pets/` and checks its sha256 (run again, it says `esheep64: already
-   present and verified`); then set `"pets": { "default": "esheep64" }` in config.json.
-4. **Build the strip, and try it:** `./bellwether shell --dev --release`. It
-   compiles into `shell/src-tauri/target-dev/` (a few minutes the first time), then an
-   empty strip opens above the Dock with a sheep in the menu bar. **Quit it** (menu-bar
-   sheep > Quit Bellwether, or Ctrl-C). Then build the copy that starts at login:
-   `./bellwether shell build --release` (into `shell/src-tauri/target/release/`).
-5. **Start bellwether at login:**
-   ```
-   ./bellwether autostart install           # preview: the two LaunchAgents it would write
-   ./bellwether autostart install --write   # writes and loads them: the brain and the strip start now, and at every login
-   ```
-   `./bellwether doctor` now shows the brain running and `autostart` passing.
-6. **Install the hooks** (last, so a brain is always there to answer them):
-   ```
-   ./bellwether hooks install           # preview: the diff to ~/.claude/settings.json
-   ./bellwether hooks install --write   # backs the file up to data/backups/, then writes
-   ```
-7. **Open a new Claude Code session.** A sheep walks into the strip. Ask it to run
-   something that needs your permission: the sheep turns to face you with a bubble.
-   `doctor`'s `next` line now says `all set`.
+```
+npm run build:dev                                  # cargo build --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance
+export BELLWETHER_HOME="$PWD/data"                 # the checkout's own files, never the app's
+export BELLWETHER_CONFIG="$PWD/config.json"
+cp config.example.json config.json                 # port 47420: never the installed app's 47417
+alias bw="$PWD/shell/src-tauri/target-dev/debug/bellwether-shell"
+bw token init                                      # data/hook-token
+bw doctor
+bw serve                                           # terminal 1
+bw hooks print --out data/hooks-only.json && claude --settings data/hooks-only.json   # terminal 2
+cargo run --manifest-path shell/src-tauri/Cargo.toml   # the strip (repository layout: same home, config, token)
+node scripts/fetch-pets.mjs                        # optional: the eSheep, into data/pets
+```
 
-To undo everything: `./bellwether hooks uninstall --write`, then
-`./bellwether autostart uninstall --write`.
+In order, and what you should see:
+
+1. **Build.** `npm run build:dev` builds the development binary into
+   `shell/src-tauri/target-dev/debug/bellwether-shell` (a few minutes the first time), with
+   the `conformance` feature the tests need. A plain `cargo build` works for running it too.
+2. **Its home.** A development binary is not inside `Bellwether.app`, so it refuses every
+   command but `help` and `version` until `BELLWETHER_HOME` is set (exit 3, naming the
+   fix): otherwise it would act on the installed app's folder in Application Support.
+   `BELLWETHER_CONFIG` points it at the checkout's config.
+3. **The config.** `config.example.json` uses port 47420, so a checkout never answers on
+   (or installs hooks for) the installed app's 47417. Every key in `config.json` is
+   optional.
+4. **The token.** `bw token init` writes `data/hook-token` (mode 0600), only if there is
+   none, and never prints it. An exported `BELLWETHER_HOOK_TOKEN` wins over the file.
+5. **Check.** `bw doctor`: config and token pass; the brain line fails (nothing is
+   running yet) and so does `hooks installed`, and that's expected. Its `next` line names
+   the step you're on.
+6. **The brain.** `bw serve` in one terminal: one line per event, never a command or a
+   message.
+7. **Hooks, without touching your settings.** `bw hooks print --out data/hooks-only.json`
+   writes the hook block as its own settings file (mode 0600: it holds the token), and
+   `claude --settings data/hooks-only.json` runs a session with it. `bw status --watch`
+   (a third terminal) shows the flock. **Don't** leave a session running with these hooks
+   after you stop `serve`: with the brain down, every prompt and tool call prints a
+   visible `… hook error …` line.
+8. **The strip.** `cargo run --manifest-path shell/src-tauri/Cargo.toml` (or the binary
+   with no arguments) opens the strip with the same home, config and token. A sheep walks
+   in when the session in step 7 starts. Quit it from its menu-bar sheep or with Ctrl-C.
+9. **The eSheep (optional).** Bellwether's own sheep is in `pets/bellwether/` and is the
+   default. `node scripts/fetch-pets.mjs` downloads the pinned eSheep into
+   `$BELLWETHER_HOME/pets/` and checks its sha256; then set `"pets": {"default":
+   "esheep64"}` in config.json.
+
+Never use port 47417 or your real `~/.claude/settings.json` for development: use
+`hooks print --out` and `claude --settings`. To try the installer, give it a copy:
+`bw hooks install --settings <copy>` shows the diff, `bw hooks install --write --settings
+<copy>` writes it (a backup in `data/backups/` first), and `bw hooks uninstall --write
+--settings <copy>` takes the entries out again.
 
 ---
 
-## Setup
+## Working from a checkout
 
-Needs Node 22.9 or newer (`node --version`). There is nothing to `npm install`.
+### The development binary
 
-### 1. Generate the hook token
+`shell/src-tauri/target-dev/debug/bellwether-shell` (or `release/`) is the app's own
+executable, outside a bundle:
+- it needs `BELLWETHER_HOME` for every CLI command but `help` and `version` (above). Inside
+  a bundle nothing changes: the Homebrew symlink resolves into the bundle, so it is the app;
+- it refuses what only the app can do: `autostart install|uninstall` (no login items to
+  change, exit 2), `shell start|stop|restart` (those control Bellwether.app's strip), and
+  `migrate --to-app` or `--undo` with your real HOME;
+- it never updates itself (`shell.log` says `updates: off (…)` and why);
+- its strip reads the *repository layout* (`shell/src-tauri/src/settings.rs`): its home
+  is `BELLWETHER_HOME`, else `BELLWETHER_DATA_DIR`, else the checkout's `data/`; its token
+  an exported `BELLWETHER_HOOK_TOKEN`, else that home's `hook-token`; its config
+  `BELLWETHER_CONFIG`, else the checkout's `config.json`, else `config.example.json`. It
+  logs to `<home>/shell.log`. A checkout's `.env` and the old `PASTURE_*` names are not
+  read;
+- started before there is a token, the strip waits: it looks for one every 3 s;
+- if no brain answers on the port, the strip starts one (its own binary as `serve`, with
+  the same home and config), and stops it again when the strip quits, however it quits. A
+  brain you started yourself is never stopped by the strip;
+- it loads only pinned pets whose file matches its sha256 in `pets.lock.json`:
+  Bellwether's own from `pets/` (pinned under `bundled`), the eSheep from
+  `<home>/pets/` (the pins `node scripts/fetch-pets.mjs` uses). A changed or unknown pet
+  file is refused with a line in `shell.log`: rebuild the sheep (`node
+  scripts/build-pet.mjs build bellwether`) or fetch the eSheep again.
 
-```
-./bellwether token init
-```
+Debug flags on the strip's binary (they start the strip, not the CLI):
 
-That adds `BELLWETHER_HOOK_TOKEN=<a fresh random value>` to `.env` in the repository root
-(created if missing; `.env.example` shows the format), unless it already has one,
-reading the file the way Node does. `BELLWETHER_ENV=<file>` points bellwether at another
-`.env`. If this repository sits at `agents/<name>` inside a larger hub and has no
-`.env` of its own, the hub's `.env` two levels up is used. It never edits the file in place:
-- it writes a new copy beside it (same permissions) and swaps it in;
-- it keeps the previous contents in `.env.bak` (mode 0600, gitignored by `.env.*`);
-- it follows a symlinked `.env`;
-- it keeps CRLF line endings;
-- it refuses a read-only file.
+| Flag | Effect |
+|---|---|
+| `--demo` | one sheep per behaviour from a made-up flock; the brain isn't contacted |
+| `--selftest` | parses every configured pet with the webview's real XML parser, prints what it found, exits 0 or 1 |
+| `--snapshot <file.png> [--snapshot-after S] [--snapshot-every S]` | writes what the strip draws (plus a `-checker` copy that shows the transparency); `--snapshot-every` keeps writing `-t01`, `-t02`, … |
+| `--locate '<terminal json>'` | prints what one terminal lookup finds, and quits |
+| `--quit-after S`, `--no-spawn-brain` | for scripted runs |
+| `--onboarding` | opens the setup window (the app's; for testing) |
+| `--ax-prompt` | asks macOS for Accessibility for this binary (sheep on the Dock) |
 
-bellwether never prints the token: previews and logs show only its first four characters
-and "…".
+Set `BELLWETHER_SHELL_TRACE=1` to log hitboxes, every click-through switch, every
+snapshot the webview fetches, and a once-a-second heartbeat with the page's
+visibility. `bellwether replay <fixture> --tag <name>` plays a fixture as its own
+session and sheep, so several fixtures can drive the strip at once. Each sent event
+is printed with its time, for timing checks against `shell.log` (`alert shown`,
+`alert confirmed` and `alert cleared` lines, no bubble text). New and confirmed alerts
+skip the brain's 250 ms snapshot throttle; snapshots are still capped at 4 a second.
 
-It's a local anti-spoofing value, not an account credential: it stops another app or
-a browser tab from putting fake bubbles on your screen. Don't reuse an example value
-from anywhere; bellwether refuses known example values. `hooks install` copies it
-into the settings entries as a literal header value, so if you change it, re-run
-`hooks install --write`.
+**Test bundles.** `node scripts/build-app.mjs --adhoc --test-port 47418 --test-home <dir>`
+builds an ad-hoc `Bellwether.app` whose brain agent and strip use that port and home,
+whatever starts them, so it never meets the installed app (see "The signed app").
 
-### 2. Config (optional)
+**Test stand-ins.** Under a temp HOME only (never your real one), the app takes stand-ins
+for what it would otherwise ask macOS: `BELLWETHER_LAUNCHCTL` (launchctl),
+`BELLWETHER_LOGIN_ITEMS` (SMAppService), `BELLWETHER_STRIP` (starting and quitting the
+strip) and `BELLWETHER_UPDATE_*` (the updater). The `conformance` feature also lets
+`serve` read test timings from `BELLWETHER_TEST_*` variables. No release build has it.
 
-```
-cp config.example.json config.json
-```
+**Guard rails, kept:**
+- every build goes to `shell/src-tauri/target-dev/`: a `.cargo/config.toml` at the root,
+  in `shell/` and in `shell/src-tauri` says so, and nothing in the repository builds into
+  `shell/src-tauri/target/release` any more (an old repository install's strip lived
+  there);
+- never set `CARGO_TARGET_DIR`;
+- never use port 47417 or your real `~/.claude/settings.json` for development (use
+  `hooks print --out` and `claude --settings`).
 
-Without `config.json` the example is used, and any key missing from `config.json`
-takes its default. The brain reads `port` (default `47417`), `behaviour.*` (state
-timings), `bubble.*` (detail, length, extra redaction patterns) and `pets.palette`
-and `pets.maxLambsShown`. A `host` key is rejected: the bind address isn't
-configurable. A `bubble.redactPatterns` entry that isn't a valid regular expression
-is a config error (exit 3); `(?i)` at the start means case-insensitive.
+### What a sheep does
 
-### 3. Check it
-
-```
-./bellwether doctor
-```
-
-Expect two FAILs until you go further: `brain` (not running) and `hooks installed`.
-Exit codes: `0` all good, `2` not running or not installed, `3` bad config or `.env`,
-`1` anything else.
-
-### 4. Try it without touching your settings
-
-```
-./bellwether hooks print --out data/hooks-only.json
-./bellwether serve                  # terminal 1; one line per event
-claude --settings data/hooks-only.json   # terminal 2
-```
-
-`--out` creates `data/` if it doesn't exist yet (it doesn't on a fresh clone) and
-writes the file with mode 0600, because it contains your token. Relative paths are
-relative to the directory you run `bellwether` from.
-
-`--out` won't destroy anything by accident. It replaces an existing file only if
-that file is already a bellwether hooks file; anything else needs `--force`. It refuses a
-directory, and it always refuses a Claude Code settings file (`.claude/settings.json`,
-`.claude/settings.local.json`, `managed-settings.json`), even with `--force`. Settings
-are only ever changed by `hooks install`, which shows a diff and keeps a backup.
-`record --out` has the same guard: it appends only to an empty file or an existing
-bellwether recording.
-
-Events show up in the `serve` log as you work (event, session, agent, tool name:
-never a command or a message). In a third terminal, `./bellwether status
---watch` shows the flock: each session's state and, when it waits on you, its alert,
-for example `ALERT  Bash: git push origin main?`. **Don't** leave a session running with
-these hooks after you stop `serve`: with the brain down, every prompt and tool call
-prints a visible `… hook error … ECONNREFUSED` line (measured).
-
-### 5. Install the hooks
-
-`./bellwether hooks install` prints the diff it *would* apply to `~/.claude/settings.json`
-and writes nothing. It adds 16 matcher groups and removes zero lines; other tools' hooks
-already in the file are untouched. Adding `--write` backs the file up to `data/backups/`
-first (mode 0600).
-
-The installer keeps the file's own indentation, line endings and number literals, so
-install followed by uninstall gives back the same bytes. If a file isn't laid out the
-way bellwether writes JSON (for example an inline `[1, 2]` array), the preview says so
-and shows the reformatted lines; values never change. `--settings` must be followed
-by a path: a bare `--settings`, an unknown option (including odd names such as
-`--__proto__`) or a stray argument is refused (exit 3) rather than falling back to
-your real settings file.
-
-Install autostart (step 7) **before** the hooks: with hooks installed and no brain
-running, every session prints hook errors.
-
-To remove them: `./bellwether hooks uninstall --write`.
-
-### 6. Build and run the overlay
-
-Needs Rust (`rustc --version`, 1.99 or newer) and Xcode's command-line tools. `bellwether`
-finds cargo on PATH, in `~/.cargo/bin` or in `$CARGO_HOME/bin`; `doctor` shows which. Then:
-
-```
-./bellwether pets fetch              # optional: the eSheep pet, pinned and sha256-checked, into data/pets/
-./bellwether shell --dev --release   # builds into target-dev/ (about a minute the first time), then runs
-./bellwether shell build --release   # builds the strip the login item runs, into target/release/
-```
-
-**Two build directories, on purpose.** macOS ties the Accessibility permission (sheep
-standing on the Dock) to the exact binary the login item runs,
-`shell/src-tauri/target/release/bellwether-shell`; rebuilding it drops the permission.
-So:
-- every development build goes to `shell/src-tauri/target-dev/`: `bellwether shell --dev`,
-  `bellwether shell build` without `--release`, and plain `cargo build` / `cargo test`
-  (with or without `--release`) run from the repository root, `shell/` or
-  `shell/src-tauri`: a `.cargo/config.toml` in each says so. These never touch the
-  login item's binary;
-- only `bellwether shell build --release` writes `target/release/`. It says so before
-  it builds. Afterwards: `bellwether shell restart`, then `bellwether shell
-  dock-permission` to give Accessibility again.
-
-Only `CARGO_TARGET_DIR` (which `shell build --release` sets) overrides that; don't set
-it by hand in a checkout whose strip starts at login.
-
-After the first build, `./bellwether shell` starts it straight away. It
-runs without any macOS permission. Two are optional:
-- *Accessibility*, so sheep can stand on the Dock itself: `./bellwether shell
-  dock-permission`. The grant belongs to the built binary, so after every
-  `shell build --release` it must be given again.
-- *Automation*, for clicking a sheep into its exact iTerm2 or Terminal tab.
-
-Screen Recording is never needed.
-
-- It shows a strip along the bottom of the main screen, directly above the Dock, with
-  one sheep per Claude Code session (start one with hooks, as in step 4). The strip is
-  invisible except for the sheep.
-- Started before there is a token, it waits: it looks for `BELLWETHER_HOOK_TOKEN` every
-  3 s and connects once `bellwether token init` adds one (logged in `data/shell.log`).
-- If the brain isn't running, the shell starts one, and stops it again when the shell
-  quits: on Ctrl-C, `kill` (TERM, HUP) or a normal quit. If the shell is killed
-  outright (`kill -9`), that brain notices within a second and stops itself. A brain
-  you started yourself, or the login autostart's, is never stopped by the shell. Since
-  milestone 5 of the distribution plan the brain it starts is the Rust one, from the
-  shell's own binary (`bellwether-shell serve`), with this checkout's config, token and
-  `data/`; Node isn't involved. The login autostart runs the shell with
-  `--no-spawn-brain`, so it never starts one: its brain is the Node brain's LaunchAgent.
-- Quit it with Ctrl-C in its terminal, or from its menu-bar icon.
-- It loads only pinned pets whose file matches the sha256 in `pets.lock.json`:
-  Bellwether's own from `pets/` (pinned under `bundled`), a fetched one from
-  `data/pets/` (the pins `pets fetch` uses). A changed or unknown pet file is refused
-  with a line in `data/shell.log`: rebuild the sheep (`node scripts/build-pet.mjs build
-  bellwether`) or run `bellwether pets fetch` again.
-- Its log is `data/shell.log`: one timestamped line per snapshot, sheep and click,
-  never any bubble text.
-
-What a sheep does:
 - It **walks** (or **runs**, for Bash) while its session works, and **sits** when
   the turn ends.
 - It **grazes** after 20 s idle and **sleeps** after 10 min.
@@ -291,7 +209,7 @@ keeps its colour and slot, also across `/clear` and restarts.
 the eSheep. The rest of the pet stays as drawn, and a pet with no magenta takes no colour.
 There are eight colours (`pets.palette`): orange, blue, black, red, cyan, brown, green and
 pink, in the order sessions get them. To tint the whole sheep instead, as before, set
-`"pets": {"tint": "whole"}` in `config.json`, then run `./bellwether shell restart`. A
+`"pets": {"tint": "whole"}` in `config.json`, then restart the strip. A
 `config.json` still carrying the old default palette (white first, then pale blue) gets
 the new colours; doctor says so, and your file is left alone.
 
@@ -306,79 +224,35 @@ snout. It fades in, and fades out a moment after the sheep moves on.
 - Changes are followed within a few seconds, without a restart.
 - **On the Dock itself:** with Accessibility granted, sheep stand on the Dock's top
   edge, within its width, and turn at its ends. Families that don't fit stand beside
-  it. To allow it, run `./bellwether shell dock-permission` and turn on
-  bellwether-shell in System Settings > Privacy & Security > Accessibility, then
-  `bellwether shell restart`.
-- The grant belongs to the built binary, which is ad-hoc signed, so **after every
-  rebuild it must be given again**. Until then, the full-width strip is used.
-- **Granted before, and now `doctor` (or `data/shell.log`) says "not granted"?** The
+  it. The app asks for it in its setup window. A development strip asks when you run
+  its binary with `--ax-prompt` (`shell/src-tauri/target-dev/debug/bellwether-shell
+  --ax-prompt`); turn on bellwether-shell in System Settings > Privacy & Security >
+  Accessibility, then restart the strip.
+- A development build's grant belongs to that build, which is ad-hoc signed, so **after
+  every rebuild it must be given again**. Until then, the full-width strip is used.
+- **Granted before, and now `doctor` (or `<home>/shell.log`) says "not granted"?** The
   strip was rebuilt, and System Settings > Privacy & Security > Accessibility still
   shows the old bellwether-shell entry, switched on. That entry belongs to the previous
   binary, so switching it off and on does nothing. Remove the old `bellwether-shell`
-  entry (select it, then −), run `./bellwether shell dock-permission`, turn the new
-  entry on, and `bellwether shell restart`.
+  entry (select it, then −), run the new binary with `--ax-prompt`, turn the new entry
+  on, and restart the strip.
 
 **Two sessions in one project** get told apart in their labels and bubbles:
 `my-project · p2` and `my-project · p4` (the herdr pane). Otherwise it's the
 iTerm tab (`tab 2`), the tmux pane, or a number (`#2`). A session alone in its project
 keeps the plain name.
 
-Debug flags on the shell binary (`shell/src-tauri/target/release/bellwether-shell`):
-
-| Flag | Effect |
-|---|---|
-| `--demo` | one sheep per behaviour from a made-up flock; the brain isn't contacted |
-| `--selftest` | parses every configured pet with the webview's real XML parser, prints what it found, exits 0 or 1 |
-| `--snapshot <file.png> [--snapshot-after S] [--snapshot-every S]` | writes what the strip draws (plus a `-checker` copy that shows the transparency); `--snapshot-every` keeps writing `-t01`, `-t02`, … |
-| `--quit-after S`, `--no-spawn-brain` | for scripted runs |
-
-Set `BELLWETHER_SHELL_TRACE=1` to log hitboxes, every click-through switch, every
-snapshot the webview fetches, and a once-a-second heartbeat with the page's
-visibility. `bellwether replay <fixture> --tag <name>` plays a fixture as its own
-session and sheep, so several fixtures can drive the strip at once. Each sent event
-is printed with its time, for timing checks against `data/shell.log` (`alert shown`,
-`alert confirmed` and `alert cleared` lines, no bubble text). These lines are written
-when the bubble is drawn. New and confirmed alerts skip the brain's 250 ms snapshot
-throttle; snapshots are still capped at 4 a second.
-
-### 7. Start bellwether at login (macOS)
-
-```
-./bellwether autostart install          # shows the two LaunchAgents it would write
-./bellwether autostart install --write  # writes and loads them (below)
-./bellwether autostart status           # installed? loaded? which pid?
-./bellwether autostart uninstall --write
-```
-
-Two LaunchAgents in `~/Library/LaunchAgents`, because the brain must keep answering
-hooks even when the strip is quit or hidden:
-- `local.bellwether.brain.plist`: the brain, restarted if it crashes.
-- `local.bellwether.shell.plist`: the strip, the release build with
-  `--no-spawn-brain`. It is restarted only if it *crashes*, so Quit in the menu bar
-  keeps it quit until your next login. `./bellwether shell start` brings it
-  back sooner, and `bellwether shell restart` restarts a running one. Both go through
-  launchd.
-
-`install` refuses if the strip isn't built yet. `--brain-only` installs (or removes)
-just the brain.
-
-- The brain runs with the `node` you ran the command with. Its log is `data/brain.log`;
-  the strip's is `data/shell.log`.
-- If you switch Node versions (nvm) or move the repository, run `install --write` again;
-  `autostart status` says when the installed copy no longer matches.
-- The token comes from the `.env` (Setup step 1) each time the brain starts; it is never
-  written into the plist.
 
 ### Staying out of the way
 
 - **Menu-bar icon** (a small sheep): *Quiet (alerts only)*, *Hide everything (for screen
   sharing)*, *Show labels*, *Quit Bellwether* (Bellwether.app adds *Set up Bellwether…*).
   - **Quiet (alerts only)** is the brain's do-not-disturb, the same switch as `bellwether
-    mute` / `bellwether unmute`, kept by the brain in `data/state.json`. The strip stops
+    mute` / `bellwether unmute`, kept by the brain in `state.json` in its home. The strip stops
     animating. Only a sheep (or lamb) that needs you still shows a small "!", and clicks
     pass through the whole strip.
   - **Hide everything (for screen sharing)** hides the whole strip, "!" included. It and
-    **Show labels** are kept in `data/shell-state.json`, so they survive a restart. A
+    **Show labels** are kept in `shell-state.json` in the home, so they survive a restart. A
     hidden strip comes back hidden.
   - **The way back without the tray:** `bellwether show` (and `bellwether hide`) do the
     same as the tray's Hide everything. A running shell follows within a second, and a
@@ -390,7 +264,8 @@ just the brain.
   - The strip asks macOS to leave it out of screen captures (`privacy.captureExclusion`,
     `sharingType none`). Newer macOS capture APIs may ignore that, so it isn't relied on.
     The shell reads its config only when it starts: after changing `privacy.*` (or
-    anything else in `config.json`), run `./bellwether shell restart`.
+    anything else in `config.json`), restart the strip (`bellwether shell restart` for the
+    app's).
   - It also hides itself while a process named in `privacy.sharingProcesses` runs:
     Zoom's `CptHost`, which runs while Zoom shares. It comes back 2 s after that process
     exits.
@@ -435,8 +310,9 @@ just the brain.
 - `bellwether-shell --locate '<terminal json>'` (a debug flag) prints what one lookup
   finds, and quits.
 
-### 8. Things to check by hand once
+### Things to check by hand once
 
+Against a development strip (above) or a test bundle.
 These need your hands, your eyes or a screen permission, so they aren't automated:
 
 1. Open two Claude sessions in two iTerm2 tabs (with hooks). Two differently coloured
@@ -507,17 +383,15 @@ These need your hands, your eyes or a screen permission, so they aren't automate
 
 ## The signed app
 
-`docs/DISTRIBUTION-PLAN.md` turns Bellwether into one signed, notarized
-`Bellwether.app`, released as a DMG and a Homebrew cask. The app runs without Node. It
-doesn't replace the repository setup above by itself: `bellwether migrate --to-app` (or
-the setup window's first step) moves a repository install into it, when you choose to
-(see "Moving a repository install into the app" below). Building it never touches the
-repository strip or its LaunchAgents.
+`docs/DISTRIBUTION-PLAN.md` made Bellwether one signed, notarized `Bellwether.app`,
+released as a DMG and a Homebrew cask. The app runs without Node. A Mac that still runs
+the repository version (0.1, from a checkout with Node) moves into it with `bellwether
+migrate --to-app`, or the setup window's first step (see "Moving a repository install into
+the app" below).
 
-**The repository's strip is unchanged.** A strip built from this checkout (`bellwether
-shell build --release`, `shell --dev`) is not inside an app bundle, so it keeps the
-checkout's layout: `config.json`, the token from the environment or the `.env`, `data/`
-and `data/shell.log`. Only `Bellwether.app` reads the app's files below.
+A development build (`target-dev/`) is not inside an app bundle, so it keeps a checkout's
+layout ("Working from a checkout" above). Only `Bellwether.app` reads the app's files
+below.
 
 **One executable, three modes.** `Bellwether.app/Contents/MacOS/Bellwether`:
 - launched from Finder, it is the strip;
@@ -525,8 +399,8 @@ and `data/shell.log`. Only `Bellwether.app` reads the app's files below.
 - called as `bellwether` (a lower-case symlink on PATH), or with a subcommand, it is
   the CLI: `serve`, `record`, `status [--watch] [--json]`, `mute`/`unmute`, `show`/`hide`,
   `replay`, `token init|rotate`, `hooks print|install|uninstall`, `doctor`, `pets import`,
-  `migrate`, `autostart status|install|uninstall`, `version`, `help`. Those the Node CLI
-  has take its flags and print its output (`test/DIVERGENCES.md` lists the exceptions).
+  `migrate`, `autostart status|install|uninstall`, `version`, `help`. Their flags and
+  output are the old Node CLI's, except where `test/DIVERGENCES.md` says otherwise.
 
 Its files live in `~/Library/Application Support/Bellwether/`: `hook-token`, `config.json`
 (optional; every key has a default), `state.json`, `shell-state.json`, `recordings/` and
@@ -548,8 +422,8 @@ Install). While a repository install's LaunchAgents are still on the Mac, it nam
 won't turn on start at login or install hooks; instead its first page shows what moving
 that install into the app would change, and does it on Move it into the app. It
 finishes with Done, which it remembers in `shell-state.json`; closing it otherwise brings
-it back at the next launch. A strip built from the repository never opens it (a debug
-build does with `--onboarding`, for testing).
+it back at the next launch. A development build never opens it by itself (it does with
+`--onboarding`, for testing).
 
 **The strip** (the app opened from Finder, or `bellwether shell start`):
 - reads the port and `config.json` from that folder, and the token from `hook-token` (or
@@ -599,8 +473,8 @@ accepts the old token for one more minute), then rewrites bellwether's hook entr
 `~/.claude/settings.json` (or `--settings <path>`) with the new token, with a backup in
 `backups/`. Without `--write` it shows that diff, with the token as `<new token>`.
 
-The installer and doctor work as the Node CLI's do (`hooks install` previews are the same
-bytes), with the app's files in place of `data/`: the install record is `installs.json`
+The installer and doctor work as the Node CLI's did (`hooks install` previews are the same
+bytes), with the app's files in place of the checkout's `data/`: the install record is `installs.json`
 and backups go to `backups/` in the app's folder. Doctor also checks the token file's mode,
 the app's identity and signature, its login items, the strip's Accessibility (from its
 log, and whether a strip runs: doctor can't ask macOS itself, which would answer for the
@@ -618,8 +492,11 @@ bellwether migrate --undo [--write]                       # put the LaunchAgents
 ```
 
 **Moving a repository install into the app** (`migrate --to-app`). Only a Mac that ran
-Bellwether from a checkout (the LaunchAgents of "First run" step 5) needs this; a new user
-just installs the app. In short:
+Bellwether 0.1 from a checkout (its two LaunchAgents, `local.bellwether.brain` and
+`.shell`) needs this; a new user just installs the app. Do it before pulling v1.0.0: a
+checkout at 1.0 has no `brain/`, so its LaunchAgent brain can't start again (the migration
+still works afterwards; it reads only the old plists, `.env`, `config.json` and `data/`;
+an undo needs `git checkout v0.2.0-rc.3` first, to bring the old brain back). In short:
 - It finds the old install from `~/Library/LaunchAgents/local.bellwether.brain.plist` (or
   the older `local.pasture.brain.plist`), or `--from <repository>`; hook entries alone are
   enough. Nothing changes without `--write`, and the repository itself is never changed.
@@ -698,7 +575,6 @@ spctl -a -vvv -t exec "$A"                   # after --notarize
 "$A/Contents/MacOS/Bellwether" doctor --port 47418
 "$A/Contents/MacOS/Bellwether" autostart install --write --brain-only   # the brain at login (SMAppService)
 "$A/Contents/MacOS/Bellwether" autostart uninstall --write --brain-only
-npm run test:rust                            # the parity table: the brain's tests against both brains (see Tests)
 ```
 
 `autostart` registers the brain's login agent, which is the plist inside the bundle at
@@ -754,7 +630,7 @@ see is in the README):
   a gap of well under a second.
 - `"updates": {"check": "off"}` in `config.json` turns the automatic checks off; *Check
   for Updates…* still works.
-- Only the Developer ID app updates itself. A repository build, an ad-hoc or test build
+- Only the Developer ID app updates itself. A development build, an ad-hoc or test build
   (`--adhoc`, `--test-port`) and an app without the updater key in
   `tauri.dist.conf.json` never do; `shell.log` says `updates: off (…)` and why.
 - Releases are built by `.github/workflows/release.yml` from a pushed `v*` tag: a universal
@@ -776,7 +652,7 @@ colour (an aviator goose, `brah`, comes later). Its art is committed under CC0-1
 `pets/`, as text sources that `scripts/build-pet.mjs` builds into
 `pets/bellwether/animations.xml`; `pets/SPEC.md` describes the source form and the
 design. With no `pets.default` in config.json, the strip draws it, from the checkout
-(a repository build) or from the app's Resources, only while it matches its pin in
+(a development build) or from the app's Resources, only while it matches its pin in
 `pets.lock.json`. The names `bellwether` and `brah` can't be used by `pets import`.
 
 ```
@@ -793,102 +669,72 @@ with `node scripts/third-party.mjs` after changing a dependency (offline;
 
 ## Commands
 
-The repository's `./bellwether` (the Node brain). The app's own CLI has the same names
-and flags except where `test/DIVERGENCES.md` says otherwise; `bellwether help` lists it.
+`bellwether help` lists the CLI (the app's, and the development binary's, which needs
+`BELLWETHER_HOME`). The development scripts, all Node with no dependencies:
 
-| Command | What it does |
+| Script | What it does |
 |---|---|
-| `bellwether serve [--hang \| --slow=<ms>]` | Runs the listener in the foreground. `--hang` (accept, never answer) and `--slow` are debug flags for timeout measurements |
-| `bellwether record [--out <file>]` | `serve`, plus one line per event in `data/recordings/<ts>.jsonl`: the normalised event, the payload's **field names** (never values) and which terminal headers arrived. `--out` appends only to an empty file or an existing bellwether recording |
-| `bellwether status [--watch] [--json]` | The flock as a table: label, colour, state, alert, lambs. `--watch` redraws on every change (long-polls `/state`); this is also the terminal fallback when there's no overlay |
-| `bellwether replay <file.jsonl> [--speed N] [--port P]` | Posts a recording or fixture to a running brain with its original timing, scaled by `--speed`, and prints `/hook` latency (p50, p99, max) and the snapshot rate. Payloads are rebuilt with the real Claude Code field names |
-| `bellwether replay --burst <events/s> [--seconds S]` | A synthetic load of tool events, for the rate and latency checks |
-| `bellwether doctor [--json] [--e2e] [--settings <path>]` | Node, config, token, brain running and accepting the token, hooks installed in the settings file (timeout, token, no `"onFailure": "block"`, `disableAllHooks`, `allowedHttpHookUrls`), and the project, local and managed settings levels that can switch hooks off. `--e2e` also runs one `claude -p` with haiku and bellwether's hooks from a throwaway file (one small API call; your user settings and MCP servers are left out) and checks the events arrive |
-| `bellwether shell [--dev] [--release]` | Runs the overlay in this terminal; `--dev` builds it with cargo first |
-| `bellwether shell build [--release]` | Builds the strip. Without `--release`: the debug build, into `target-dev/`. With it: the binary the login item runs, in `target/release/`; it warns first, because the Accessibility permission has to be given again afterwards |
-| `bellwether shell dock-permission` | Asks macOS for Accessibility for the strip's release binary (shows the system prompt), so sheep can stand on the Dock. Only when you run it |
-| `bellwether shell start` / `stop` / `restart` | The strip in the background. With its LaunchAgent installed: `launchctl kickstart` / `kill TERM` / `kickstart -k`. Otherwise bellwether runs the release build itself (pid in `data/shell.pid`), and stops only that exact binary. Use `restart` after a config change |
-| `bellwether mute` / `bellwether unmute` | Do-not-disturb through the brain, the same as the tray's Quiet (alerts only); kept across restarts |
-| `bellwether show` / `bellwether hide` | Show or hide the strip, the same as the tray's Hide everything (for screen sharing); a running shell follows within a second; kept across restarts |
-| `bellwether autostart install\|uninstall [--write] [--brain-only]`, `autostart status` | The brain's and the strip's LaunchAgents (macOS). Preview by default. In Bellwether.app: its two login items (SMAppService), plus `autostart settings` |
-| `bellwether pets fetch [<pet>]` | Optional: downloads the pinned eSheep pet into `data/pets/` and checks its sha256. That art is never committed |
-| `bellwether migrate [--from <dir>] [--env <file>] [--settings <path>] [--force] [--write]` | Moves an older checkout's install over (token, config, colours and slots, hook entries, LaunchAgents). Preview unless `--write` |
-| `bellwether hooks print [--out <file> [--force]]` | The hook block as a standalone settings file, to stdout or (0600) to a file. Replaces only an earlier bellwether hooks file unless `--force`; never a Claude Code settings file |
-| `bellwether hooks install [--write] [--settings <path>]` | Dry-run diff by default. Idempotent: a second run says "already installed, no changes" |
-| `bellwether hooks uninstall [--write] [--settings <path>] [--port <old>]` | Removes exactly the entries whose URL is `http://127.0.0.1:<port>/hook` (exact match: a `…/hooks` or `…/hook2` belonging to something else is never touched). After a port change, the old entries stay until you run it with `--port <old port>`; `doctor` points them out. Event keys that existed before the install (even empty ones) stay; `data/installs.json` remembers which ones the install created. That record is advisory: if it is missing or corrupt you get a warning, and uninstall removes the event keys bellwether emptied |
-
-`npm run doctor` (and `serve`, `record`, `hooks`, `status`, `replay`) works too.
-Windows (not built yet): `bellwether.cmd`. A symlink to `bellwether` on your PATH works.
+| `node scripts/fetch-pets.mjs [--data <dir>] [<pet>]` | Downloads the pinned eSheep into `<dir>/pets/` (default `$BELLWETHER_HOME`, else `data/`) and checks its sha256. That art is never committed |
+| `node scripts/build-pet.mjs build\|review\|--check` | Bellwether's own pets, from their sources in `pets/` |
+| `node scripts/build-app.mjs [--adhoc] [--universal] [--notarize] [--test-port P --test-home D]` | Builds (and signs) `Bellwether.app` |
+| `node scripts/release.mjs version\|check\|assets\|cask` | Release steps (docs/RELEASING.md) |
+| `node scripts/third-party.mjs [--check]` | Regenerates THIRD-PARTY.md |
+| `node scripts/health-gap.mjs --port P --seconds S` | Measures the brain's longest gap in answering `/health` (across an update) |
 
 ## Tests
 
 ```
-npm test               # the JS suite
+npm test               # builds the development binary (npm run build:dev), then the suite against it
 npm run test:cargo     # the Rust tests (shell and brain), from the repository root
-npm run test:rust      # the parity table: the brain's tests against the Node and the Rust brain
-npm run test:vectors   # the shared vector files still match what the Node brain answers
-npm run differential   # Node and Rust on 10^5 generated cases per area
+cargo test --manifest-path shell/src-tauri/Cargo.toml --workspace --features bellwether-shell/conformance
 ```
 
 `cargo test` on its own has to be run in `shell/src-tauri`, where the Cargo workspace
-is; from the root, use `npm run test:cargo`.
+is; from the root, use `npm run test:cargo`. `npm run test:cargo` builds the same binary
+without the `conformance` feature, so the next `npm test` rebuilds it first; a binary
+without it makes `npm test` stop at once with the build command.
 
-**The Rust port's conformance harness** (distribution plan D2). The Node brain is the
-oracle until the Rust brain replaces it:
+- **The suite** (`test/*.test.mjs`, one `node --test`, one file at a time, at most 120 s a
+  test): the brain's tests, the player and the setup window's web side, the dev scripts,
+  the docs, and the isolation guard. Every test that starts the brain or its CLI goes
+  through `spawnBrain` in `test/helpers.mjs`, which runs `$BELLWETHER_BIN`, by default
+  the development binary (refused when it is older than its sources). The helper makes the
+  test's data dir the binary's `BELLWETHER_HOME`, passes the test's config as
+  `BELLWETHER_CONFIG`, gives it a temp HOME, refuses anything that would use port 47417 or
+  name your real settings files, and runs `autostart` only from a development binary.
+- **The brain's parts in process** come from `test/impl.mjs`: the Rust brain, called
+  synchronously through the hidden `__session` command (one call per line, over two
+  FIFOs); `startBrain` is a Rust `serve` process and `runDoctor` a `doctor --json` run of
+  the binary. The tools tests drive a brain with (an HTTP client, replay) are in
+  `test/support/`, copied from the Node brain: drivers, never the thing under test.
+- **The isolation preload** (`test/setup.mjs`) gives every test process a temp home and
+  config on a port that isn't 47417, and fails the run on any access to the checkout's
+  `.env`, a write under its `data/` (reads only in `data/pets`), a connection to 47417, or
+  any read or write of the real `~/.claude/settings.json`.
+- **Golden vectors.** `test/fixtures/` holds `redact-`, `normalise-`, `config-`, `env-`
+  and `diff-vectors.json` and `installer-vectors/`: cases with the answers the Node brain
+  gave, checked on every run by cargo (`crates/core` and `crates/brain` `tests/vectors.rs`,
+  `conformance.rs`) and by the suite through `test/impl.mjs`. A new or changed case is
+  written by hand, with the answer the Rust brain gives, and reviewed like code.
+- **The frozen sample** (`test/fixtures/frozen/`): 2 000 generated cases per area (env,
+  redact, normalise, json, diff) with the Node brain's answers, frozen before it was
+  deleted; `crates/core/tests/frozen.rs` requires the same answers. Don't edit it; a case
+  the brain should now answer differently goes into the vectors instead.
+- **The golden fixtures** (`test/fixtures/s*.jsonl`) are rebuilt with `node
+  test/fixtures/build-fixtures.mjs && node test/regen-expected.mjs`; read the diff.
+- `test/DIVERGENCES.md` is history: where the Rust brain deliberately differs from the
+  Node brain, each entry with the test that pins it. No new entries.
+- The `conformance` feature adds the hidden `__` commands (`__session`, `__json`, and
+  `__env`, `__redact`, `__normalise`, `__fixture`, `__diff`, `__list`). No release build
+  has it: `Bellwether __fixture` answers "unknown command" with exit 1.
 
-- Every test that starts the brain or its CLI goes through `spawnBrain` in
-  `test/helpers.mjs`. `BELLWETHER_IMPL=rust` runs `$BELLWETHER_BIN` instead of
-  `brain/cli.mjs`; by default that is the dev build
-  `shell/src-tauri/target-dev/debug/bellwether-shell`, which must not be older than its
-  sources. Under rust the helper makes the test's data dir the binary's
-  `BELLWETHER_HOME` and passes the test's config as `BELLWETHER_CONFIG`, refuses anything
-  that would use port 47417, and runs `autostart` only from a development binary (outside a
-  bundle it can't reach SMAppService; a binary inside a `.app` is refused it, and so is
-  `autostart settings`, which opens System Settings).
-- Tests that check the brain's parts in process take them from `test/impl.mjs`: brain/*.mjs
-  under node, and under rust the Rust brain, called synchronously through its hidden
-  `__session` command (one call per line, over two FIFOs); `startBrain` is then a Rust
-  `serve` process; `runDoctor` is a `doctor --json` run of the binary. A test of something
-  only the repository has (the Node shim, the `.env` writer, LaunchAgent `autostart` and
-  `shell start|stop`, `pets fetch`) is marked `notUnderRust(reason)` and counts as skipped
-  under rust, never as passed. Under rust the helper also gives the binary a temp HOME
-  whenever a test gives none or the real one, and the preload refuses any read or write of
-  the real `~/.claude/settings.json` in every Node test process.
-- `npm run test:rust` (`test/conformance.mjs`) runs those test files against both brains
-  and prints the parity table: test file, node, rust. `test/conformance.json` says which
-  milestone turns each row green; the run fails only when a node cell is red or a row the
-  current milestone requires is red under rust. Build the binary first, with the hidden
-  commands the harness uses:
-
-  ```
-  cargo build --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance
-  ```
-
-- The `conformance` feature adds hidden `__` commands that take cases as JSON lines:
-  `__env`, `__redact`, `__normalise`, `__fixture`, `__json` (a settings file through the
-  lossless JSON and back) and `__diff`, and `__session` (the bridge above). It also lets
-  `serve` read test timings from the environment. No release build has it:
-  `Bellwether __fixture` answers "unknown command" with exit 1.
-- The shared vectors in `test/fixtures/` (`redact-`, `normalise-`, `config-` and
-  `diff-vectors.json`, `installer-vectors/`) hold cases and the Node brain's answers. The
-  Node tests and the cargo tests read the same files. `node test/fixtures/build-vectors.mjs`
-  rewrites them; read the diff before committing it.
-- `npm run differential` (`scripts/differential.mjs`) sends generated inputs to the Node
-  functions and the Rust binary and fails on any difference. Areas the binary doesn't
-  have yet are listed as not ported.
-- Intended differences between the two brains are in `test/DIVERGENCES.md`, each with
-  the test that pins it. Anything else is a bug.
-
-**CI** (`.github/workflows/ci.yml`, GitHub Actions, no secrets): the Node suite and the
-vector check, the cargo tests with and without the `conformance` feature, the parity table
-(published as the job summary) and the differential, an unsigned universal `tauri build`
-with its DMG and updater files (signed with a key made and thrown away in the job) and
-its refusal of `__fixture`, and `cargo check` of the platform-neutral crates (`crates/core`,
-`crates/brain`) for Linux and Windows. Before the suite, CI does what a developer's
-checkout already has: `cargo fetch` (every
-platform's crates, whose licences THIRD-PARTY.md lists), a debug build of the strip, and
-`pets fetch` (the pinned, hash-checked art; never committed). The redaction time budgets
-are written for a developer's Mac and scale with the machine's speed, measured in the same
+**CI** (`.github/workflows/ci.yml`, GitHub Actions, no secrets): `suite` (`cargo fetch`,
+`npm run build:dev`, `node scripts/fetch-pets.mjs`, `npm test`, `build-pet --check`),
+`cargo` (the cargo tests with and without the `conformance` feature), `bundle` (an
+unsigned universal `tauri build` with its DMG and updater files, signed with a key made and
+thrown away in the job, and its refusal of `__fixture`), and `cross-check` (`cargo check`
+of `crates/core` and `crates/brain` for Linux and Windows). The redaction time budgets are
+written for a developer's Mac and scale with the machine's speed, measured in the same
 process (`machineSlowdown` in `test/helpers.mjs`).
 
 Runs serially (`--test-concurrency=1`): several suites use live sockets and timing.

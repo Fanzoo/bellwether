@@ -5,9 +5,7 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { loadConfig } from '../brain/config.mjs';
-import { DATA_DIR } from '../brain/util.mjs';
-import { AGENT_DIR, IMPL, REAL_HOME, TOKEN, brainCommand, isRealHome, refuseRust, rustEnv, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, REAL_HOME, TOKEN, brainCommand, isRealHome, refuseRust, rustEnv, spawnBrainSync, tempDir } from './helpers.mjs';
 import { runDoctor } from './impl.mjs';
 import { ISOLATED, isProtected, protectForTest, resolveReal, takeViolations } from './setup.mjs';
 
@@ -26,10 +24,12 @@ describe('the test run is isolated from the live install', () => {
       assert.equal(process.env[k], v, k);
       assert.ok(!v.startsWith(AGENT_DIR + path.sep), `${k} points into the checkout`);
     }
-    assert.equal(DATA_DIR, ISOLATED.BELLWETHER_DATA_DIR);
-    const { config, file } = loadConfig();
-    assert.equal(file, ISOLATED.BELLWETHER_CONFIG);
-    assert.notEqual(config.port, 47417);
+    // What the brain under test is given: the isolated home and config, a temp HOME.
+    const env = rustEnv(['doctor'], process.env);
+    assert.equal(env.BELLWETHER_HOME, ISOLATED.BELLWETHER_DATA_DIR);
+    assert.equal(env.BELLWETHER_CONFIG, ISOLATED.BELLWETHER_CONFIG);
+    assert.notEqual(JSON.parse(fs.readFileSync(env.BELLWETHER_CONFIG, 'utf8')).port, 47417);
+    assert.ok(!isRealHome(env.HOME));
   });
 
   test('the guard stops a read of the checkout\'s .env, a write or a state read under its data/, and a connection to 47417', { skip: !guarded && 'guard off' }, async () => {
@@ -84,18 +84,12 @@ describe('the test run is isolated from the live install', () => {
     }
     const mine = tempDir('iso-own-home-');
     assert.equal(rustEnv(['hooks', 'install'], { HOME: mine }).HOME, mine, "a test's own temp HOME is kept");
-    // And end to end: `hooks install` with no HOME and no --settings. The Node CLI resolves
-    // the real file from the password database and the guard stops it there; the Rust CLI
-    // gets the temp HOME and previews a file under it.
+    // And end to end: `hooks install` with no HOME and no --settings. The binary gets the
+    // temp HOME and previews a file under it.
     const r = spawnBrainSync(['hooks', 'install'], { encoding: 'utf8', env: { PATH: process.env.PATH, BELLWETHER_HOOK_TOKEN: TOKEN } });
-    if (IMPL === 'rust') {
-      assert.equal(r.status, 0, r.stderr);
-      assert.ok(!(r.stdout + r.stderr).includes(real), 'the Rust CLI named the real settings file');
-      assert.match(r.stdout, /bw-rust-HOME-.*\/\.claude\/settings\.json \(current\)/);
-    } else {
-      assert.notEqual(r.status, 0);
-      assert.match(r.stderr, /test isolation: readFileSync .*the real Claude Code settings/);
-    }
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!(r.stdout + r.stderr).includes(real), 'the CLI named the real settings file');
+    assert.match(r.stdout, /bw-rust-HOME-.*\/\.claude\/settings\.json \(current\)/);
   });
 
   test('the guard sees the real settings under other names, and stops the APIs that bypass fs wrappers (BR-3K M4 D2); nothing here reads the real file', { skip: !guarded && 'guard off' }, () => {
@@ -141,7 +135,7 @@ describe('the test run is isolated from the live install', () => {
     }
     assert.throws(() => brainCommand(['hooks', 'install', '--settings', path.join('.claude', 'settings.json')], { cwd: REAL_HOME }), /names the real Claude Code settings/, 'a relative path, against its cwd');
     // Any spelling of the live port, for every command.
-    if (IMPL === 'rust') for (const p of ['47417', '047417', '+47417', ' 47417', '47417.0']) assert.throws(() => brainCommand(['doctor', '--port', p]), /live brain's port/, p);
+    for (const p of ['47417', '047417', '+47417', ' 47417', '47417.0']) assert.throws(() => brainCommand(['doctor', '--port', p]), /live brain's port/, p);
   });
 
   test('the strip build never goes to target/: plain cargo builds, from the root, shell/ or src-tauri, use target-dev', () => {
@@ -151,8 +145,9 @@ describe('the test run is isolated from the live install', () => {
       assert.match(cfg, new RegExp(`^target-dir = "${want}"$`, 'm'), dir || '.');
     }
     assert.match(fs.readFileSync(path.join(AGENT_DIR, '.gitignore'), 'utf8'), /^shell\/src-tauri\/target-dev\/$/m);
-    const cli = fs.readFileSync(path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'utf8');
-    assert.equal([...cli.matchAll(/targetDir: 'target'(?!-)/g)].length, 1, 'only `shell build --release` builds into target/');
+    // Nothing in the repository builds into target/ (the Node CLI's `shell build --release`
+    // did, for its LaunchAgent; it went in milestone 11).
+    for (const f of fs.readdirSync(path.join(AGENT_DIR, 'scripts'))) assert.doesNotMatch(fs.readFileSync(path.join(AGENT_DIR, 'scripts', f), 'utf8'), /targetDir: 'target'(?!-)|target\/release\/bellwether-shell/, f);
   });
 });
 

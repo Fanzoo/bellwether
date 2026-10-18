@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { readJsonl, runFixture } from './fixture-runner.mjs';
-import { AGENT_DIR, FIXTURES, IMPL, readVectors } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { AGENT_DIR, FIXTURES, readVectors } from './helpers.mjs';
+// The Rust brain's parts (test/impl.mjs).
 import { Flock, LIMITS, identityOf as identityOfImpl, makeTextCleaner, normalise, withDefaults } from './impl.mjs';
 
 const identityOf = identityOfImpl;
@@ -302,8 +302,8 @@ describe('control', () => {
 describe('content never kept', () => {
   test('no brain module reads prompt, tool_output, tool_response, last_assistant_message, compact_summary, agent_transcript_path or transcript_path', () => {
     const names = ['prompt', 'tool_output', 'tool_response', 'last_assistant_message', 'compact_summary', 'agent_transcript_path', 'transcript_path', 'custom_instructions', 'requested_schema', 'form_values', 'error_details'];
-    // The brain under test: brain/*.mjs, or the Rust brain's sources (crates/core, crates/brain).
-    const dirs = IMPL === 'rust' ? ['crates/core/src', 'crates/brain/src'] : ['brain'];
+    // The brain's sources (crates/core, crates/brain).
+    const dirs = ['crates/core/src', 'crates/brain/src'];
     const sources = dirs.flatMap((d) => fs.readdirSync(path.join(AGENT_DIR, d)).filter((f) => /\.(mjs|rs)$/.test(f)).map((f) => path.join(d, f)));
     assert.ok(sources.length > 5, sources.join());
     for (const f of sources) {

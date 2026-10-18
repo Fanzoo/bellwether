@@ -6,9 +6,10 @@ import { test } from 'node:test';
 import { FIXTURES, tempDir } from './helpers.mjs';
 
 /**
- * test/fixtures/env-vectors.json pins how `node --env-file` reads BELLWETHER_HOOK_TOKEN.
- * The shell's Rust parser is tested against the same file (settings.rs), so the two
- * can't drift apart. This test re-checks every vector against the Node running it.
+ * test/fixtures/env-vectors.json pins how `node --env-file` reads BELLWETHER_HOOK_TOKEN
+ * (the migration reads a legacy token from a checkout's .env that way). The Rust parser
+ * answers the same file here through test/impl.mjs, and in cargo (conformance.rs), so the
+ * two can't drift apart. This test also re-checks every vector against the Node running it.
  */
 const { vectors } = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'env-vectors.json'), 'utf8'));
 
@@ -28,8 +29,8 @@ test('every shared .env vector matches what node --env-file actually does', () =
   assert.ok(vectors.length >= 20);
 });
 
-test('brain/envfile.mjs (the one JS parser, used by `token init`) agrees with every vector', async () => {
-  const { envValue } = await import('../brain/envfile.mjs');
+test('the brain\'s .env reader (crates/core envfile.rs, through test/impl.mjs) agrees with every vector', async () => {
+  const { envValue } = await import('./impl.mjs');
   const mismatches = vectors.filter((v) => envValue(v.text, 'BELLWETHER_HOOK_TOKEN') !== v.expected).map((v) => `${v.name}: parser says ${JSON.stringify(envValue(v.text, 'BELLWETHER_HOOK_TOKEN'))}, vector ${JSON.stringify(v.expected)}`);
   assert.deepEqual(mismatches, []);
 });

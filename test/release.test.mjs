@@ -134,14 +134,15 @@ describe('the workflows keep secrets where D7 puts them', () => {
 describe('scripts/release.mjs', () => {
   test('the version is the same everywhere it lives', () => {
     const v = versions();
-    assert.equal(Object.keys(v).length, 10);
+    // The three JSON files, the three Cargo.toml files and the three Cargo.lock entries.
+    assert.equal(Object.keys(v).length, 9);
     assert.equal(new Set(Object.values(v)).size, 1, JSON.stringify(v));
     assert.ok(isVersion(Object.values(v)[0]));
   });
 
   test('`version` changes only the version strings, in every file', () => {
     const root = tempDir();
-    const files = ['package.json', 'shell/package.json', 'shell/src-tauri/tauri.conf.json', 'shell/src-tauri/Cargo.toml', 'crates/brain/Cargo.toml', 'crates/core/Cargo.toml', 'shell/src-tauri/Cargo.lock', 'brain/util.mjs', 'shell/src-tauri/tauri.dist.conf.json'];
+    const files = ['package.json', 'shell/package.json', 'shell/src-tauri/tauri.conf.json', 'shell/src-tauri/Cargo.toml', 'crates/brain/Cargo.toml', 'crates/core/Cargo.toml', 'shell/src-tauri/Cargo.lock', 'shell/src-tauri/tauri.dist.conf.json'];
     for (const f of files) {
       fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
       fs.copyFileSync(path.join(AGENT_DIR, f), path.join(root, f));
@@ -178,6 +179,29 @@ describe('scripts/release.mjs', () => {
     dist.plugins.updater.endpoints = ['https://example.com/latest.json'];
     fs.writeFileSync(path.join(root, 'shell/src-tauri/tauri.dist.conf.json'), JSON.stringify(dist));
     assert.equal(releaseProblems('v0.2.0-rc.1', root).length, 2);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('a full release needs its CHANGELOG.md section; a pre-release does not (milestone 11)', () => {
+    const root = tempDir();
+    for (const f of ['package.json', 'shell/package.json', 'shell/src-tauri/tauri.conf.json', 'shell/src-tauri/Cargo.toml', 'crates/brain/Cargo.toml', 'crates/core/Cargo.toml', 'shell/src-tauri/Cargo.lock', 'shell/src-tauri/tauri.dist.conf.json']) {
+      fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+      fs.copyFileSync(path.join(AGENT_DIR, f), path.join(root, f));
+    }
+    const distPath = path.join(root, 'shell/src-tauri/tauri.dist.conf.json');
+    const dist = JSON.parse(fs.readFileSync(distPath, 'utf8'));
+    dist.plugins.updater.pubkey = Buffer.from('untrusted comment: minisign public key: 0123456789ABCDEF\nRWTbFnn95HDssSP6fw6ObUGPZhfItnBBkUtpVDirMTkvyp4ckge5Mx1j\n').toString('base64');
+    fs.writeFileSync(distPath, JSON.stringify(dist));
+    setVersion('1.0.0-rc.1', root);
+    assert.deepEqual(releaseProblems('v1.0.0-rc.1', root), [], 'a pre-release needs no CHANGELOG');
+    setVersion('1.0.0', root);
+    const missing = releaseProblems('v1.0.0', root);
+    assert.equal(missing.length, 1, missing.join('\n'));
+    assert.match(missing[0], /1\.0\.0 is a full release, but CHANGELOG\.md has no "## 1\.0\.0" section/);
+    fs.writeFileSync(path.join(root, 'CHANGELOG.md'), '# Changelog\n\n## 1.0.0-rc.1\n\n## 1.0.0 (soon)\n');
+    assert.equal(releaseProblems('v1.0.0', root).length, 1, 'only the exact heading counts');
+    fs.writeFileSync(path.join(root, 'CHANGELOG.md'), '# Changelog\n\n## 1.0.0\n\nNotes.\n');
+    assert.deepEqual(releaseProblems('v1.0.0', root), []);
     fs.rmSync(root, { recursive: true, force: true });
   });
 

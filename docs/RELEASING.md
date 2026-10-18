@@ -30,8 +30,8 @@ notarization if you still have the files.
      `shell/node_modules` (gitignored): `npm ci --prefix shell`. Step 3 runs it.
    - The GitHub CLI, signed in as an admin of Fanzoo/bellwether (`brew install gh`, then
      `gh auth login`); steps 5 and 7 use it to set secrets. Check with `gh auth status`.
-   - For the suites on a fresh clone, what CI does first: `cargo build --manifest-path
-     shell/src-tauri/Cargo.toml` and `node brain/cli.mjs pets fetch`.
+   - For the suites on a fresh clone, what CI does first: `npm run build:dev` and `node
+     scripts/fetch-pets.mjs` (`npm test` builds too, but the eSheep fetch is yours).
 
 1. **Developer ID Application certificate, as a `.p12`.** In Keychain Access, find
    "Developer ID Application: … (your Team ID)" under My Certificates, export it with its
@@ -98,7 +98,11 @@ notarization if you still have the files.
 
 ## Each release
 
-1. Bump the version everywhere it lives, run the suite, commit:
+These steps were used as written for 0.2.0-rc.1, rc.2 and rc.3.
+
+1. Bump the version everywhere it lives, run the suite, commit (for a full release such as
+   1.0.0, write its `## <version>` section in `CHANGELOG.md` first: `check` refuses a full
+   release without it):
 
    ```
    node scripts/release.mjs version 0.2.0-rc.1
@@ -130,8 +134,10 @@ notarization if you still have the files.
    `SHA256SUMS` it checks came in the same artifact. What makes the files trustworthy is
    that only the reviewed, environment-gated build job made them; these checks of yours are
    the ones against Apple's notarization.)
-5. Publish: edit the draft, leave **Set as a pre-release unchecked** and **Set as the
-   latest release checked**, then Publish. The updater reads
+5. Publish: edit the draft; for a full release, paste the version's section of
+   `CHANGELOG.md` into its body (the draft's own notes are GitHub's generated list). Leave
+   **Set as a pre-release unchecked** and **Set as the latest release checked**, then
+   Publish. The updater reads
    `releases/latest/download/latest.json`, and GitHub's "latest" skips drafts and
    pre-releases, so a pre-release never reaches installed apps (useful when you want an rc
    only for yourself: publish it as a pre-release and install its DMG by hand). **Publish in
@@ -169,7 +175,9 @@ fanzootechnology` should print nothing.
    rm /tmp/release-log.txt
    ```
 
-   Every count must be 0 (GitHub shows masked values as `***`).
+   Every count must be 0 (GitHub shows masked values as `***`). This needs repeating only
+   when `release.yml`, the signing steps or the secrets' handling change; v1.0.0 changed
+   none of them.
 3. **Install rc.1.** Publish rc.1 as the latest release (step 5). Quit any running
    Bellwether, drag the DMG's app to /Applications, open it, and in the setup window turn
    on start at login, grant Accessibility (sheep on the Dock) and Automation for your

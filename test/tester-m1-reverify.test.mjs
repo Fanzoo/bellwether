@@ -4,12 +4,14 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, TOKEN, notUnderRust, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, TOKEN, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
  * Tester re-verification of Milestone 1 after the developer's fixes (D1-D7, M1-6..17).
- * Runs the real shim from a temp copy laid out as <root>/agents/bellwether, with HOME,
- * BELLWETHER_DATA_DIR and the port all isolated. Nothing can reach the real settings file.
+ * Runs the binary from a caller directory beside a temp config laid out as
+ * <root>/agents/bellwether, with HOME, the data dir and the port all isolated. Nothing can
+ * reach the real settings file. (The /bin/sh shim and its Node-version floor went with the
+ * Node brain in milestone 11.)
  */
 
 let root, agent, home, port, env, defaultSettings, caller;
@@ -22,8 +24,8 @@ const freePort = () =>
     });
   });
 
-function bellwether(args, { cwd = caller, extraEnv = {}, bin = path.join(agent, 'bellwether'), pathEnv } = {}) {
-  const r = spawnBrainSync([...args], { root: agent, shim: bin, encoding: 'utf8', cwd, env: { ...env, ...(pathEnv ? { PATH: pathEnv } : {}), ...extraEnv }, timeout: 30000 });
+function bellwether(args, { cwd = caller, extraEnv = {} } = {}) {
+  const r = spawnBrainSync([...args], { root: agent, encoding: 'utf8', cwd, env: { ...env, ...extraEnv }, timeout: 30000 });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 const read = (f) => fs.readFileSync(f, 'utf8');
@@ -36,8 +38,7 @@ before(async () => {
   home = path.join(root, 'home');
   fs.mkdirSync(caller, { recursive: true });
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-  fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(agent, 'brain'), { recursive: true });
-  for (const f of ['package.json', 'bellwether']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(agent, f));
+  fs.mkdirSync(agent, { recursive: true });
   port = await freePort();
   const cfg = JSON.parse(read(path.join(AGENT_DIR, 'config.example.json')));
   cfg.port = port;
@@ -119,7 +120,7 @@ describe('M1-7: relative paths mean what the caller typed', () => {
     assert.ok(fs.existsSync(path.join(caller, 'sub', 'dir', 'hooks-only.json')));
   });
 
-  test('a stale INIT_CWD or BELLWETHER_CWD in the environment cannot redirect the shim', () => {
+  test('a stale INIT_CWD or BELLWETHER_CWD in the environment cannot redirect the CLI', () => {
     const f = mk('rel2.json', j({ theme: 'dark' }));
     const elsewhere = path.join(root, 'elsewhere');
     fs.mkdirSync(elsewhere);
@@ -129,37 +130,6 @@ describe('M1-7: relative paths mean what the caller typed', () => {
     assert.ok(JSON.parse(read(f)).hooks, 'caller file edited');
     assert.equal(JSON.parse(read(path.join(elsewhere, 'rel2.json'))).hooks, undefined, 'the other directory was not touched');
   });
-
-  test('a symlink to the shim on PATH works', notUnderRust('the /bin/sh shim runs the Node CLI; the app\'s lower-case symlink is shell/src-tauri dispatch.rs, tested there'), () => {
-    const bin = path.join(root, 'bin');
-    fs.mkdirSync(bin, { recursive: true });
-    fs.symlinkSync(path.join(agent, 'bellwether'), path.join(bin, 'bellwether'));
-    const r = bellwether(['hooks', 'print'], { bin: path.join(bin, 'bellwether') });
-    assert.equal(r.code, 0, r.err);
-    assert.ok(JSON.parse(r.out).hooks.Stop);
-  });
-});
-
-describe('M1-13: Node version floor in the shim', notUnderRust('the /bin/sh shim and bellwether.cmd run the Node CLI; the app has neither'), () => {
-  for (const [v, ok] of [['v20.10.0', false], ['v22.8.0', false], ['v22.9.0', true], ['v22.10.1', true], ['v23.0.0', true], ['v100.0.0', true]]) {
-    test(`${v} -> ${ok ? 'runs' : 'exit 3 with a message'}`, () => {
-      const fake = path.join(root, 'fakenode-' + v);
-      fs.mkdirSync(fake, { recursive: true });
-      const real = process.execPath;
-      // A node that reports `v`: it answers the shim's version probe and --version, and otherwise defers to the real node.
-      fs.writeFileSync(
-        path.join(fake, 'node'),
-        `#!/bin/sh\nif [ "$1" = "-e" ]; then V="${v.slice(1)}"; MA=\${V%%.*}; R=\${V#*.}; MI=\${R%%.*}; if [ "$MA" -gt 22 ] || { [ "$MA" -eq 22 ] && [ "$MI" -ge 9 ]; }; then exit 0; else exit 1; fi; fi\nif [ "$1" = "--version" ]; then echo ${v}; exit 0; fi\nexec "${real}" "$@"\n`,
-        { mode: 0o755 },
-      );
-      const r = bellwether(['hooks', 'print'], { pathEnv: `${fake}:/usr/bin:/bin` });
-      if (ok) assert.equal(r.code, 0, r.err);
-      else {
-        assert.equal(r.code, 3);
-        assert.match(r.err, /22\.9/);
-      }
-    });
-  }
 });
 
 describe('M1-8/M1-9: lossless layout, numbers and the install record', () => {
@@ -354,7 +324,7 @@ describe('new write paths: hooks print --out and record --out', () => {
   test('record --out refuses a file that is not a bellwether recording', () => {
     const precious = j({ theme: 'dark' });
     fs.writeFileSync(defaultSettings, precious);
-    const child = spawnBrain(['record', '--out', defaultSettings], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
+    const child = spawnBrain(['record', '--out', defaultSettings], { root: agent, cwd: caller, env });
     return new Promise((resolve) => {
       let err = '';
       child.stderr.on('data', (d) => (err += d));
@@ -383,26 +353,8 @@ describe('M1-14/15: doctor', () => {
     }
   });
 
-  test('an already-exported token wins over the .env (Node does not override)', notUnderRust('the .env is read by the Node CLI only; the app reads its token file (test/DIVERGENCES.md)'), () => {
-    fs.writeFileSync(path.join(root, '.env'), 'BELLWETHER_HOOK_TOKEN=q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh\n');
-    try {
-      const r = bellwether(['hooks', 'print']);
-      assert.equal(r.code, 0, r.err);
-      assert.ok(!r.out.includes(TOKEN), 'stdout must be masked (M10-7)');
-      assert.match(r.out, new RegExp(`"X-Bellwether-Token": "${TOKEN.slice(0, 4)}…"`));
-      const outFile = path.join(caller, 'exported-wins.json');
-      assert.equal(bellwether(['hooks', 'print', '--out', outFile]).code, 0);
-      assert.ok(read(outFile).includes(TOKEN), 'the exported token (not the .env one) is what the --out file holds');
-      assert.ok(!read(outFile).includes('q3V0mZ8x2k1rT9bN4cW7yL5pA6sD0fGh'));
-      const n = bellwether(['hooks', 'print'], { extraEnv: { BELLWETHER_HOOK_TOKEN: '' } });
-      assert.equal(n.code, 3, 'an empty exported token must not silently fall through to .env');
-    } finally {
-      fs.rmSync(path.join(root, '.env'));
-    }
-  });
-
   function brainProc(args) {
-    const c = spawnBrain(['serve', ...args], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
+    const c = spawnBrain(['serve', ...args], { root: agent, cwd: caller, env });
     return new Promise((resolve) => {
       let err = '';
       c.stderr.on('data', (d) => {
@@ -413,7 +365,7 @@ describe('M1-14/15: doctor', () => {
   }
   const doctorAsync = (args) =>
     new Promise((resolve) => {
-      const c = spawnBrain([...args], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
+      const c = spawnBrain([...args], { root: agent, cwd: caller, env });
       let out = '';
       c.stdout.on('data', (d) => (out += d));
       c.on('close', (code) => resolve({ code, out }));
@@ -447,7 +399,7 @@ describe('M1-14/15: doctor', () => {
 describe('M1-16: event names', () => {
   test('a non-identifier hook_event_name is recorded and logged as unknown', async () => {
     const rec = path.join(caller, 'ev.jsonl');
-    const c = spawnBrain(['record', '--out', rec], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
+    const c = spawnBrain(['record', '--out', rec], { root: agent, cwd: caller, env });
     let err = '';
     await new Promise((r) => { c.stderr.on('data', (d) => { err += d; if (err.includes('recording to')) r(); }); });
     const body = JSON.stringify({ hook_event_name: 'Pre\nSECRET_EVENT text', session_id: 's' });

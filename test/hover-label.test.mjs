@@ -36,7 +36,9 @@ function stripScript() {
   const main = fs.readFileSync(path.join(SRC, 'main.js'), 'utf8');
   for (const [, , from] of imports(main)) load(from);
   // The test's handle on the strip's own state (top-level lets are visible to code in the same script).
-  const handle = 'globalThis.__strip = { sprites, frame, apply, applyView, hovered: () => hovered };';
+  // `draw` and `setHovered` let a test draw with a hover that went stale between two
+  // updates, to check draw's own guard (it never labels a leaving or gone sprite).
+  const handle = 'globalThis.__strip = { sprites, frame, apply, applyView, hovered: () => hovered, draw, setHovered: (id) => { hovered = id; } };';
   return `${out.join('\n\n')}\n\n${asConst(main)}\n${handle}`;
 }
 
@@ -225,6 +227,30 @@ describe('the hover label (deviation 136)', () => {
     strip.docListeners.visibilitychange?.();
     strip.step(2);
     assert.deepEqual(strip.labels(), [], 'hidden page: the pointer is no longer known');
+  });
+
+  test('goes on pointercancel (the system took the pointer: a gesture, the window losing it)', async () => {
+    const strip = await bootStrip();
+    hoverOn(strip);
+    // The shell's poll still says the cursor is on the sheep; only the event tells.
+    strip.pointer('pointercancel', -1, -1);
+    assert.deepEqual(strip.labels(), [], 'pointercancel forgets the pointer, as pointerleave does');
+    assert.equal(strip.S.hovered(), null);
+  });
+
+  test('draw never labels a sprite that is leaving or gone, even with a hover left over from before', async () => {
+    for (const mark of ['removedAt', 'gone']) {
+      const strip = await bootStrip();
+      hoverOn(strip);
+      const entry = strip.sheep();
+      if (mark === 'removedAt') entry.removedAt = 1;
+      else entry.sprite.gone = true;
+      // A hover that went stale between updates, drawn straight away.
+      strip.S.setHovered('s1');
+      strip.screen.length = 0;
+      strip.S.draw(2000);
+      assert.deepEqual(strip.labels(), [], `${mark}: the label was drawn for a sprite that is going`);
+    }
   });
 
   test('Hide everything, Quiet, and Show labels off or on clear it; it comes back only with the cursor', async () => {

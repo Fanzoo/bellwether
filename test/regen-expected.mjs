@@ -1,7 +1,7 @@
 /**
  * Regenerates test/fixtures/*.expected.jsonl from the reducer. The expected files are
  * golden files: after regenerating, read the diff and check every changed transition
- * against the state model and clearing rules (brain/flock.mjs) before committing it.
+ * against the state model and clearing rules (crates/core flock.rs) before committing it.
  *
  *   node test/regen-expected.mjs
  */

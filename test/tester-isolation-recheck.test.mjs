@@ -4,11 +4,12 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { checkoutBinaries, strayStrips } from '../brain/stripproc.mjs';
 import { AGENT_DIR, tempDir } from './helpers.mjs';
 
 /**
- * Re-check of the isolation guard (test/setup.mjs) and the strip-process checks.
+ * Re-check of the isolation guard (test/setup.mjs) and the build target. (The Node CLI's
+ * detection of strips it started went with it in milestone 11; the
+ * app's is shell/src-tauri identity.rs, with its `runs` test.)
  * The guard is exercised on a COPY in a temp "fake checkout" whose live port is 47556
  * and whose .env/data/ are throwaway, so a bypass writes nothing real and reaches nothing live.
  */
@@ -111,9 +112,9 @@ describe('the guard: the live port', () => {
 });
 
 describe('the guard in the default run', () => {
-  test('npm test sets the preload and a temp port, and the live port and repo .env are not what a test sees', () => {
+  test('npm test sets the preload, a temp home and a temp port, and the live port and repo data are not what a test sees', () => {
     assert.match(process.env.NODE_OPTIONS ?? '', /test\/setup\.mjs/, 'not run through npm test: no preload');
-    assert.ok(process.env.BELLWETHER_ENV && !process.env.BELLWETHER_ENV.startsWith(AGENT_DIR));
+    assert.ok(process.env.BELLWETHER_HOME && !process.env.BELLWETHER_HOME.startsWith(AGENT_DIR));
     assert.ok(process.env.BELLWETHER_DATA_DIR && !process.env.BELLWETHER_DATA_DIR.startsWith(AGENT_DIR));
     const port = JSON.parse(fs.readFileSync(process.env.BELLWETHER_CONFIG, 'utf8')).port;
     assert.ok(port >= 47990 && port < 48890, String(port));
@@ -135,15 +136,7 @@ describe('the guard in the default run', () => {
   });
 });
 
-describe('strip processes and the build target', () => {
-  const shellBin = '/r/shell/src-tauri/target/release/bellwether-shell';
-  test('a strip started by hand with `shell --dev` / `--dev --release` (target-dev/) is seen as another strip', () => {
-    for (const bin of ['target-dev/release', 'target-dev/debug', 'target/debug', 'target/release']) {
-      const p = `/r/shell/src-tauri/${bin}/bellwether-shell`;
-      const found = strayStrips({ shellBin, processes: () => new Map([[10, p]]), parents: () => new Map([[10, 500]]) });
-      assert.equal(found.length, 1, `${bin} is not detected (checkoutBinaries: ${checkoutBinaries(shellBin).join(', ')})`);
-    }
-  });
+describe('the build target', () => {
   test('cargo, run from the repo root or from shell/ against the strip manifest, builds into target-dev/, never target/', (t) => {
     const cargo = path.join(process.env.HOME, '.cargo', 'bin', 'cargo');
     if (!fs.existsSync(cargo)) return t.skip('no cargo at ~/.cargo/bin');
@@ -152,11 +145,10 @@ describe('strip processes and the build target', () => {
       assert.equal(JSON.parse(r.stdout).target_directory, path.join(AGENT_DIR, 'shell', 'src-tauri', 'target-dev'), `cargo from ${path.relative(AGENT_DIR, cwd) || '.'} would build into target/`);
     }
   });
-  test('nothing in the default test path or the npm scripts builds with cargo --release', () => {
+  test('nothing in the default test path or the npm scripts builds with cargo --release, or anywhere but target-dev/', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'package.json'), 'utf8')).scripts;
     const shellPkg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'shell', 'package.json'), 'utf8')).scripts;
-    for (const [n, s] of Object.entries({ ...pkg, ...shellPkg })) assert.doesNotMatch(s, /cargo build|--release/, `script ${n}: ${s}`);
-    const cli = fs.readFileSync(path.join(AGENT_DIR, 'brain', 'cli.mjs'), 'utf8');
-    assert.equal([...cli.matchAll(/cargoBuild\([^)]*release: true, targetDir: 'target'/g)].length, 1);
+    // The one cargo build is `npm run build:dev` (milestone 11): a debug build, into target-dev/.
+    for (const [n, s] of Object.entries({ ...pkg, ...shellPkg })) assert.doesNotMatch(s, /--release|--target-dir|CARGO_TARGET_DIR/, `script ${n}: ${s}`);
   });
 });

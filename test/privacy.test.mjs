@@ -3,8 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { AGENT_DIR, TOKEN, spawnBrainSync, tempDir } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs): the sharing
-// rules are the strip's Rust copy there.
+// The Rust brain (test/impl.mjs): the sharing rules are the strip's Rust copy.
 import { readShellState, runDoctor, sharingProcessWarnings, writeShellState } from './impl.mjs';
 
 /** Milestone 7 fixes (verification D1, D2): the way back for a hidden strip, and sharing names that can't match. */

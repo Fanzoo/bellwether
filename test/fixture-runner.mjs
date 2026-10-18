@@ -1,6 +1,5 @@
 import fs from 'node:fs';
-// The brain under test: brain/flock.mjs, or under BELLWETHER_IMPL=rust the Rust reducer,
-// called through test/impl.mjs, so this same loop drives both.
+// The brain under test: the Rust reducer, called through test/impl.mjs.
 import { Flock, withDefaults } from './impl.mjs';
 
 /**

@@ -1,8 +1,5 @@
 {
-  "port": 47417,
-  "brain": {
-    "nodePath": "node"
-  },
+  "port": 47420,
   "strip": {
     "placement": "terminal",
     "fallbackMonitor": "primary",
@@ -77,6 +74,5 @@
   },
   "chaos": {
     "enabled": false
-  },
-  "autostart": false
+  }
 }

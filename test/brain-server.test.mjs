@@ -4,8 +4,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { AGENT_DIR, FIXTURES, TOKEN, machineSlowdown, spawnBrain, spawnBrainSync, tempDir, unlessStarved } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs): startBrain is a
-// Rust `serve` there. `call`, `replay`, `burst` and `readRecording` are the tests' HTTP tools.
+// The Rust brain (test/impl.mjs): startBrain is a Rust `serve`. `call`, `replay`, `burst` and `readRecording` are the tests' HTTP tools.
 import { Flock, burst, call, createPublisher, readRecording, rebuild, renderStatus, replay, startBrain, withDefaults } from './impl.mjs';
 
 /**
@@ -234,7 +233,6 @@ describe('the CLI end to end (serve, replay, status)', () => {
   let env;
   before(async () => {
     root = tempDir('bellwether-cli-');
-    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(root, 'brain'), { recursive: true });
     port = await new Promise((res) => {
       const s = net.createServer().listen(0, '127.0.0.1', () => {
         const p = s.address().port;
@@ -308,7 +306,6 @@ describe('the CLI end to end (serve, replay, status)', () => {
 
   test('status with the brain down: exit 2 and the reason', () => {
     const dead = tempDir('bellwether-cli-dead-');
-    fs.cpSync(path.join(root, 'brain'), path.join(dead, 'brain'), { recursive: true });
     const cfg = JSON.parse(fs.readFileSync(path.join(root, 'config.example.json'), 'utf8'));
     fs.writeFileSync(path.join(dead, 'config.example.json'), JSON.stringify({ ...cfg, port: 1 + ((port + 7) % 60000) + 1024 }));
     const r = spawnBrainSync(['status'], { root: dead, env, cwd: dead, encoding: 'utf8', timeout: 10000 });

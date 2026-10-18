@@ -1,12 +1,11 @@
 # Where the Rust brain differs from the Node brain, on purpose
 
-The Node brain is the oracle until it is deleted (distribution plan D2). The same tests run
-against both (`npm run test:rust`), and the differential (`npm run differential`) feeds both
-the same generated inputs. Every difference they find is a bug, unless it is listed here
-with the test that pins the Rust behaviour.
-
-Add an entry when a port milestone makes a difference on purpose. Each entry says what Node
-does, what Rust does and why, and names the test.
+The Node brain was deleted in v1.0.0 (distribution plan, milestone 11); its last version is
+tag `v0.2.0-rc.3`. Until then it was the Rust port's oracle: the same tests ran against both,
+and a differential fed both the same generated inputs. The entries below record where the
+Rust brain deliberately differs from it, each with the test that pins the Rust behaviour;
+those tests remain (the tests of the Node side, and the parity runner and differential this
+file mentions, went with the Node brain). This file is history: no new entries.
 
 ## In effect
 
@@ -401,9 +400,3 @@ Neither shape is in a `.env` that `token init` wrote, and the app doesn't write 
 files (plan D3), so this matters only for importing a legacy token (milestone 3). Found in
 milestone 2. `scripts/differential.mjs` reports these two shapes as known and fails on
 any other difference from `node --env-file`.
-
-## Expected with the port, not yet in effect
-
-From plan D2 and R2. Each becomes an entry above, with its test, in the milestone that makes
-it. Milestone 4 made the last three: integer-like keys (16), escapes (16, the same as Node),
-and doctor without its `node` check (14). None is left.

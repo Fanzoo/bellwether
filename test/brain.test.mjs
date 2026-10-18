@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { AGENT_DIR, FIXTURES, IMPL, readVectors, tempDir } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { AGENT_DIR, FIXTURES, readVectors, tempDir } from './helpers.mjs';
+// The Rust brain's parts (test/impl.mjs).
 import { PALETTE_UPGRADED, createRecorder, fingerprint, guardOutFile, isBellwetherRecording, normalise, validateConfig, withDefaults } from './impl.mjs';
 
 describe('package', () => {
@@ -14,8 +14,8 @@ describe('package', () => {
   });
 
   test('no brain module opens transcript_path', () => {
-    // The brain under test: brain/*.mjs, or the Rust brain's sources.
-    for (const d of IMPL === 'rust' ? ['crates/core/src', 'crates/brain/src'] : ['brain']) {
+    // The brain's sources.
+    for (const d of ['crates/core/src', 'crates/brain/src']) {
       for (const f of fs.readdirSync(path.join(AGENT_DIR, d))) {
         assert.doesNotMatch(fs.readFileSync(path.join(AGENT_DIR, d, f), 'utf8'), /transcript_path/, f);
       }
@@ -36,7 +36,7 @@ describe('config', () => {
   const want = (v) => (v.ok ? (v.step === 'withDefaults' ? { ok: true, effective: v.effective, paletteUpgraded: v.paletteUpgraded } : { ok: true }) : { ok: false, exitCode: v.exitCode, error: v.error });
   // test/DIVERGENCES.md: for a pattern that doesn't compile, the Rust message names the
   // pattern the same way, but the reason in brackets is the regex crate's, not V8's.
-  const reasonDiffers = (v) => IMPL === 'rust' && !v.ok && / is not a valid regular expression \(/.test(v.error);
+  const reasonDiffers = (v) => !v.ok && / is not a valid regular expression \(/.test(v.error);
   const same = (got, v) => {
     if (!reasonDiffers(v)) return assert.deepEqual(got, want(v), v.name);
     const head = v.error.slice(0, v.error.indexOf(' is not a valid regular expression (') + ' is not a valid regular expression ('.length);

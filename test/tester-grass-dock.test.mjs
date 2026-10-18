@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { checkLocatorLog } from '../brain/doctor.mjs';
 import { familyExtent } from '../shell/src/player/lambs.mjs';
 import { familyHomes } from '../shell/src/player/layout.mjs';
 import { FADE_IN_MS, FADE_OUT_MS, LINGER_MS, fadeStep, frontmost, tuftPixels, tuftX, TUFT } from '../shell/src/player/grass.mjs';
 import { AGENT_DIR, tempDir } from './helpers.mjs';
+import { checkLocatorLog } from './impl.mjs';
 
 /** Tester probes for grass, Dock following and Dock-width confinement. Nothing here touches the Dock, Accessibility or the live strip. */
 
@@ -198,23 +198,22 @@ describe('doctor `dock` line', () => {
     fs.writeFileSync(path.join(d, 'shell.log'), text);
     return checkLocatorLog(d).find((c) => c.name === 'dock');
   };
-  test('not granted and withdrawn: INFO telling how to grant and that a rebuild needs a re-grant; granted: PASS; none: no line; webview lines cannot fake it', () => {
+  test('not granted and withdrawn: INFO telling where to grant it; granted: PASS; none: no line; webview lines cannot fake it', () => {
     const start = '1 bellwether-shell: starting: x\n';
     const no = run(`${start}2 bellwether-shell: dock: Accessibility not granted to this binary: the full-width strip is used\n`);
     assert.equal(no.status, 'INFO');
-    assert.match(no.detail, /dock-permission/);
-    assert.match(no.detail, /after a rebuild it must be given again/);
+    assert.match(no.detail, /turn Bellwether on in System Settings > Privacy & Security > Accessibility/);
     assert.equal(run(`${start}2 bellwether-shell: dock: Accessibility granted to this binary: sheep stand\n`).status, 'PASS');
     assert.equal(run(`${start}2 bellwether-shell: dock: Accessibility granted to this binary: x\n3 bellwether-shell: dock: Accessibility withdrawn while running\n`).status, 'INFO');
     assert.equal(run(`${start}2 bellwether-shell: dock: Accessibility not granted\n3 bellwether-shell: dock: Accessibility granted while running\n`).status, 'PASS');
     assert.equal(run(`${start}`), undefined);
     assert.equal(run(`${start}2 bellwether-shell: webview: dock: Accessibility granted\n`), undefined);
   });
-  test('docs/DEVELOPMENT.md says the grant must be repeated after a rebuild, names the command, and no longer claims the strip needs no Accessibility', () => {
+  test('docs/DEVELOPMENT.md says the grant must be repeated after a rebuild, names the flag, and never claims the strip needs no Accessibility', () => {
     const readme = fs.readFileSync(path.join(AGENT_DIR, 'docs', 'DEVELOPMENT.md'), 'utf8');
     assert.match(readme, /rebuild it must be given again/);
-    assert.match(readme, /shell dock-permission/);
-    const step6 = readme.slice(readme.indexOf('### 6.'), readme.indexOf('### 7.'));
-    assert.doesNotMatch(step6, /no Accessibility/, 'First run step 6 still says the strip needs no Accessibility permission');
+    assert.match(readme, /`--ax-prompt`/);
+    const dev = readme.slice(readme.indexOf('## Working from a checkout'), readme.indexOf('## The signed app'));
+    assert.doesNotMatch(dev, /no Accessibility/, 'the development strip is said to need no Accessibility permission');
   });
 });

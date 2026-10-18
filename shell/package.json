@@ -1,6 +1,6 @@
 {
   "name": "bellwether-shell",
-  "version": "0.2.0-rc.3",
+  "version": "1.0.0-rc.1",
   "private": true,
   "description": "bellwether's overlay (Tauri 2). The Tauri CLI is needed only to bundle a .app; `cargo build` in src-tauri builds and runs the shell without it.",
   "scripts": {

@@ -1,9 +1,28 @@
+/**
+ * A test driver, copied from the Node brain at v0.2.0-rc.3 (brain/replay.mjs): it drives
+ * whichever brain is listening, so tests can replay a recording or a burst into the Rust
+ * brain and measure it. Not the brain: no test checks it as one (`bellwether replay`
+ * itself is tested through the binary). The normaliser's field lists it needs are copied
+ * with it.
+ */
 import fs from 'node:fs';
 import { call } from './client.mjs';
-import { READ_FIELDS, SUMMARY_FIELDS, TERMINAL_HEADERS } from './normalise.mjs';
 import { CliError, EXIT } from './util.mjs';
 
-/**
+// From brain/normalise.mjs at v0.2.0-rc.3 (crates/core/src/normalise.rs has the same lists).
+const TERMINAL_HEADERS = {
+  program: 'x-bellwether-term-program',
+  itermSession: 'x-bellwether-iterm-session',
+  termSession: 'x-bellwether-term-session',
+  wtSession: 'x-bellwether-wt-session',
+  tmuxPane: 'x-bellwether-tmux-pane',
+  herdrPane: 'x-bellwether-herdr-pane',
+  herdrSocket: 'x-bellwether-herdr-socket',
+};
+const SUMMARY_FIELDS = ['command', 'file_path', 'notebook_path', 'url', 'query', 'pattern', 'subagent_type'];
+const READ_FIELDS = ['hook_event_name', 'session_id', 'agent_id', 'agent_type', 'tool_name', 'tool_use_id', 'notification_type', 'source', 'reason', 'trigger', 'mcp_server_name', 'mode', 'permission_mode', 'is_interrupt', 'stop_hook_active', 'cwd', 'error', 'background_tasks', 'tool_input', 'message'];
+
+/*
  * `bellwether replay`: posts a recording or fixture to a running brain with its original
  * timing (scaled by --speed), so the overlay can be driven without Claude, and
  * measures /hook latency and the snapshot rate while it does.

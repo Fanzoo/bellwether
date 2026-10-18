@@ -2,9 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, FIXTURES, IMPL, notUnderRust, request, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, request, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
-const ENV_WRITER = notUnderRust('the .env writer is retired with the Node CLI; the app writes a token file (test/DIVERGENCES.md 6; token.test.mjs runs `token init` against both)');
 
 /**
  * Tester full regression (2026-10-09). A copy of the brain on its own port, throwaway
@@ -20,7 +19,6 @@ const AGENT = path.join(HUB, 'agents', 'bellwether');
 const DATA = path.join(ROOT, 'data');
 const HOME = path.join(ROOT, 'home');
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');
-const CLI = path.join(AGENT, 'brain', 'cli.mjs');
 const env = { PATH: process.env.PATH, HOME, BELLWETHER_DATA_DIR: DATA, BELLWETHER_HOOK_TOKEN: TOKEN };
 let server;
 let serverErr = '';
@@ -78,8 +76,7 @@ const stopServer = () =>
 
 before(async () => {
   fs.mkdirSync(path.join(AGENT, 'data'), { recursive: true });
-  fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(AGENT, 'brain'), { recursive: true });
-  for (const f of ['package.json', 'config.example.json']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(AGENT, f));
+  fs.copyFileSync(path.join(AGENT_DIR, 'config.example.json'), path.join(AGENT, 'config.example.json'));
   const cfg = JSON.parse(fs.readFileSync(path.join(AGENT, 'config.example.json'), 'utf8'));
   cfg.port = PORT;
   fs.writeFileSync(path.join(AGENT, 'config.json'), JSON.stringify(cfg));
@@ -363,55 +360,16 @@ describe('hooks install against a temp settings file, and the real one stays unt
 });
 
 describe('first run, on a fresh clone (M10)', () => {
-  test('token init fills a missing .env in the repository root once, never prints the token, and is a no-op the second time', ENV_WRITER, () => {
-    const top = tempDir('bellwether-fr-');
-    const repo = path.join(top, 'bellwether');
-    fs.cpSync(AGENT, repo, { recursive: true });
-    const e = { PATH: process.env.PATH, HOME: top, BELLWETHER_DATA_DIR: path.join(top, 'd') };
-    const run = () => spawnBrainSync(['token', 'init'], { root: repo, encoding: 'utf8', timeout: 20000, env: e, cwd: top });
-    const a = run();
-    assert.equal(a.status, 0, a.stderr);
-    const text = fs.readFileSync(path.join(repo, '.env'), 'utf8');
-    const tok = /BELLWETHER_HOOK_TOKEN=(\S+)/.exec(text)?.[1];
-    assert.ok(tok && tok.length >= 16);
-    assert.ok(!(a.stdout + a.stderr).includes(tok), 'token printed');
-    const b = run();
-    assert.equal(b.status, 0);
-    assert.equal(fs.readFileSync(path.join(repo, '.env'), 'utf8'), text);
-    assert.ok(!(b.stdout + b.stderr).includes(tok));
-    // and the CLI reads it from there: the hooks file carries the token, with none exported
-    const out = path.join(top, 'hooks-only.json');
-    const p = spawnBrainSync(['hooks', 'print', '--out', out], { root: repo, encoding: 'utf8', timeout: 20000, env: e, cwd: top });
-    assert.equal(p.status, 0, p.stderr);
-    assert.ok(fs.readFileSync(out, 'utf8').includes(tok), 'hooks print uses the token from the repository .env');
-    fs.rmSync(top, { recursive: true, force: true });
-  });
-  test('inside a hub (agents/<name>) with a hub .env and none of its own, the hub .env is used and kept', ENV_WRITER, () => {
-    const hub = tempDir('bellwether-frhub-');
-    const repo = path.join(hub, 'agents', 'bellwether');
-    fs.mkdirSync(path.dirname(repo), { recursive: true });
-    fs.cpSync(AGENT, repo, { recursive: true });
-    fs.writeFileSync(path.join(hub, '.env'), 'OTHER_SECRET=keep-me\n');
-    const e = { PATH: process.env.PATH, HOME: hub, BELLWETHER_DATA_DIR: path.join(hub, 'd') };
-    const a = spawnBrainSync(['token', 'init'], { root: repo, encoding: 'utf8', timeout: 20000, env: e, cwd: hub });
-    assert.equal(a.status, 0, a.stderr);
-    const text = fs.readFileSync(path.join(hub, '.env'), 'utf8');
-    assert.match(text, /^OTHER_SECRET=keep-me$/m);
-    assert.match(text, /^BELLWETHER_HOOK_TOKEN=\S{16,}$/m);
-    assert.equal(fs.existsSync(path.join(repo, '.env')), false, 'no second .env');
-    fs.rmSync(hub, { recursive: true, force: true });
-  });
   test('autostart install without --write previews and writes nothing under HOME', () => {
     const r = cli(['autostart', 'install']);
-    // node: the copy has no built shell, so this is also the "strip not built" failure.
-    // rust: a development binary outside Bellwether.app has no login items (test/DIVERGENCES.md 23).
-    // Either way: exit 2 with a cause, and no LaunchAgents folder.
+    // A development binary outside Bellwether.app has no login items (test/DIVERGENCES.md
+    // 23): exit 2 with a cause, and no LaunchAgents folder.
     assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(r.stdout + r.stderr, IMPL === 'rust' ? /not running from Bellwether\.app[\s\S]*nothing was registered or written/ : /shell|build|bellwether-shell/i);
+    assert.match(r.stdout + r.stderr, /not running from Bellwether\.app[\s\S]*nothing was registered or written/);
     assert.doesNotMatch(r.stderr, /\n\s+at .*\.mjs/);
     assert.equal(fs.existsSync(path.join(HOME, 'Library', 'LaunchAgents')), false);
   });
-  test('pets fetch with no network target is not run here; the pinned lock file names a sha256 for every pet', () => {
+  test('the eSheep fetch is not run here; the pinned lock file names a sha256 for every pet', () => {
     const lock = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'pets.lock.json'), 'utf8'));
     const pets = lock.pets ?? lock;
     assert.ok(JSON.stringify(pets).match(/[a-f0-9]{64}/), 'no sha256 pinned');

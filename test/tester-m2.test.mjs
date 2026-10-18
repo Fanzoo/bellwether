@@ -5,8 +5,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, IMPL, TOKEN, cleaningProblems, notUnderRust, portValue, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
-// brain/*.mjs, or the Rust brain under BELLWETHER_IMPL=rust (test/impl.mjs).
+import { AGENT_DIR, TOKEN, cleaningProblems, portValue, readVectors, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+// The Rust brain's parts (test/impl.mjs).
 import { Flock, call, makeTextCleaner, normalise, rebuild, startBrain, withDefaults } from './impl.mjs';
 
 /**
@@ -613,7 +613,7 @@ describe('data/state.json corruption and persistence', () => {
 let root, agent, home, port, env, caller;
 const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => r(p)); }); });
 function bellwether(args, { extraEnv = {}, cwd } = {}) {
-  const r = spawnBrainSync([...args], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: cwd ?? caller, env: { ...env, ...extraEnv }, timeout: 60_000 });
+  const r = spawnBrainSync([...args], { root: agent, encoding: 'utf8', cwd: cwd ?? caller, env: { ...env, ...extraEnv }, timeout: 60_000 });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 const read = (f) => fs.readFileSync(f, 'utf8');
@@ -626,8 +626,7 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
     home = path.join(root, 'home');
     fs.mkdirSync(caller, { recursive: true });
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(agent, 'brain'), { recursive: true });
-    for (const f of ['package.json', 'bellwether']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(agent, f));
+    fs.mkdirSync(agent, { recursive: true });
     port = await freePort();
     const cfg = JSON.parse(read(path.join(AGENT_DIR, 'config.example.json')));
     cfg.port = port;
@@ -679,9 +678,9 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
     assert.ok(urls.includes(`http://127.0.0.1:${oldPort}/hooks`), 'foreign /hooks on the old port was removed');
     assert.equal(urls.filter((u) => u === `http://127.0.0.1:${port}/hook`).length, 16, 'the configured install was disturbed');
     for (const bad of ['--port', '--port=', '--port=abc', '--port=047417', '--port=047500', '--port=+47500', '--port= 47500', '--port=1e4', '--port=80', '--port=70000', '--port=-1']) {
-      // Under rust the harness itself refuses any spelling of the live port before the
-      // binary runs (test/helpers.mjs); the CLI's own refusal is the other spellings.
-      if (IMPL === 'rust' && portValue(bad.split('=')[1]) === 47417) {
+      // The harness itself refuses any spelling of the live port before the binary runs
+      // (test/helpers.mjs); the CLI's own refusal is the other spellings.
+      if (portValue(bad.split('=')[1]) === 47417) {
         assert.throws(() => bellwether(['hooks', 'uninstall', '--write', '--settings', f, bad]), /live brain's port/);
         continue;
       }
@@ -720,18 +719,18 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   });
 
   test('replay and status against a live brain: the S2-shaped flow, and --json', async () => {
-    const child = spawnBrain(['serve'], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
+    const child = spawnBrain(['serve'], { root: agent, cwd: caller, env });
     let err = '';
     await new Promise((r) => { child.stderr.on('data', (d) => { err += d; if (err.includes('listening on')) r(); }); });
     try {
       const fixture = path.join(AGENT_DIR, 'test', 'fixtures', 's2-permission-approve.jsonl');
-      const rep = spawnBrainSync(['replay', fixture, '--speed', '50'], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env });
+      const rep = spawnBrainSync(['replay', fixture, '--speed', '50'], { root: agent, encoding: 'utf8', cwd: caller, env });
       assert.equal(rep.status, 0, rep.stderr);
       assert.match(rep.stdout, /every \/hook answer was an empty 204/);
-      const js = spawnBrainSync(['status', '--json'], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env });
+      const js = spawnBrainSync(['status', '--json'], { root: agent, encoding: 'utf8', cwd: caller, env });
       assert.equal(js.status, 0, js.stderr);
       JSON.parse(js.stdout);
-      const wrong = spawnBrainSync(['status'], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env: { ...env, BELLWETHER_HOOK_TOKEN: 'someOtherTokenValue1234567890' } });
+      const wrong = spawnBrainSync(['status'], { root: agent, encoding: 'utf8', cwd: caller, env: { ...env, BELLWETHER_HOOK_TOKEN: 'someOtherTokenValue1234567890' } });
       assert.equal(wrong.status, 3);
       assert.match(wrong.stderr, /refused the token/);
     } finally {
@@ -741,16 +740,16 @@ describe('CLI: exact-URL ownership, --port, status, replay, doctor --e2e', () =>
   });
 
   test('a rejected replay-marker check: a hostile recording line cannot inject a bubble through a field that is not allowlisted', async () => {
-    const child = spawnBrain(['serve'], { root: agent, shim: path.join(agent, 'bellwether'), cwd: caller, env });
+    const child = spawnBrain(['serve'], { root: agent, cwd: caller, env });
     let err = '';
     await new Promise((r) => { child.stderr.on('data', (d) => { err += d; if (err.includes('listening on')) r(); }); });
     try {
       const line = { normalised: { receivedAt: 1, event: 'PreToolUse', sessionId: 's', toolName: 'Bash', toolUseId: 't', toolFingerprint: 'f', toolSummary: 'echo hi', terminal: {} }, rawKeys: { top: ['tool_input', 'prompt', 'tool_response'], tool_input: ['command'] }, headersPresent: [] };
       const f = path.join(caller, 'hostile.jsonl');
       fs.writeFileSync(f, JSON.stringify(line) + '\n');
-      const rep = spawnBrainSync(['replay', f], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env });
+      const rep = spawnBrainSync(['replay', f], { root: agent, encoding: 'utf8', cwd: caller, env });
       assert.equal(rep.status, 0, rep.stderr);
-      const js = spawnBrainSync(['status', '--json'], { root: agent, shim: path.join(agent, 'bellwether'), encoding: 'utf8', cwd: caller, env });
+      const js = spawnBrainSync(['status', '--json'], { root: agent, encoding: 'utf8', cwd: caller, env });
       assert.doesNotMatch(js.stdout, /replay:/);
     } finally {
       child.kill('SIGTERM');

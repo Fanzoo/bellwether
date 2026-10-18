@@ -174,3 +174,24 @@ pub fn bundle_processes() -> Vec<(i32, i32, String)> {
     let Some(exe) = bundle_executable() else { return Vec::new() };
     processes_of(&exe)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `runs` for a process whose executable was deleted (the update case, deviation 135):
+    /// its argv must be the path itself, or the path then a space and arguments. Never the
+    /// path inside a longer argv, or as the start of a longer name (milestone 11, (a)).
+    #[test]
+    fn runs_matches_a_deleted_executable_by_its_argv_prefix_only() {
+        let exe = Path::new("/Applications/Bellwether.app/Contents/MacOS/Bellwether");
+        let e = exe.to_string_lossy().into_owned();
+        assert!(runs(&Exe::Deleted, &e, exe));
+        assert!(runs(&Exe::Deleted, &format!("{e} serve --port 47999"), exe));
+        for other in [format!("/x {e} serve"), format!("/x {e}"), format!("{e}2"), format!("{e}-old serve"), "/usr/bin/Bellwether".to_string(), String::new()] {
+            assert!(!runs(&Exe::Deleted, &other, exe), "{other:?}");
+        }
+        assert!(!runs(&Exe::At(PathBuf::from("/nonexistent/Bellwether")), &e, exe), "another file");
+        assert!(!runs(&Exe::Unknown("no such process".into()), &e, exe));
+    }
+}

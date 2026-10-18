@@ -6,12 +6,12 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { AGENT_DIR, FIXTURES, TOKEN, hookHeaders, notUnderRust, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR, FIXTURES, TOKEN, hookHeaders, spawnBrain, spawnBrainSync, tempDir } from './helpers.mjs';
 
 /**
- * Independent tester probes for Milestone 1. Everything runs against a COPY of the
- * brain in a temp directory (own port, own data dir, HOME pointed at a temp dir), so
- * nothing here can reach ~/.claude/settings.json or the real .env.
+ * Independent tester probes for Milestone 1. Everything runs in a temp directory (its own
+ * config and port, own data dir, HOME pointed at a temp dir), so nothing here can reach
+ * ~/.claude/settings.json or the real .env.
  */
 
 const freePort = () =>
@@ -71,8 +71,6 @@ before(async () => {
   root = tempDir('bellwether-br3k-');
   home = path.join(root, 'home');
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-  fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(root, 'brain'), { recursive: true });
-  fs.copyFileSync(path.join(AGENT_DIR, 'package.json'), path.join(root, 'package.json'));
   port = await freePort();
   const cfg = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8'));
   cfg.port = port;
@@ -382,16 +380,6 @@ describe('installer ownership and unusual settings shapes', () => {
     }
   });
 
-  test('a file changed between plan and write is detected and not overwritten', notUnderRust('plans and applies in this process; the Rust check is crates/core hooks.rs `a_file_changed_between_plan_and_write_is_not_overwritten`'), async () => {
-    const { planEdit, applyPlan } = await import(path.join(root, 'brain', 'hooks.mjs'));
-    const f = path.join(root, 'race.json');
-    fs.writeFileSync(f, '{\n  "theme": "dark"\n}\n');
-    const plan = planEdit(f, 'install', { port, token: TOKEN });
-    fs.writeFileSync(f, '{\n  "theme": "light"\n}\n');
-    assert.throws(() => applyPlan(plan, path.join(root, 'data', 'backups-race')), /changed while bellwether was editing/);
-    assert.match(sh(f), /light/);
-  });
-
   test('hooks print -> hand-made install produce the same entries', () => {
     // The token is masked on stdout by design (M10-7); the real value goes only to --out files.
     const stdout = cli(['hooks', 'print']).out;
@@ -593,43 +581,15 @@ describe('fixtures and recordings', () => {
     const blob = files.map((f) => fs.readFileSync(path.join(FIXTURES, f), 'utf8')).join('\n');
     // the only home directory is the invented one
     assert.doesNotMatch(blob, /\/Users\/(?!example\/)[^/\s"]+/);
-    // every session id is one of the invented, patterned ones
-    for (const [, id] of blob.matchAll(/"(?:session_id|sessionId)":"([^"]*)"/g)) assert.match(id, /^0f0e0d0c-\d{4}-4aaa-8bbb-0{9}\d{3}$/, id);
-    for (const [, id] of blob.matchAll(/"itermSession":"([^"]*)"/g)) assert.match(id, /^w\dt\dp\d:00000000-AAAA-4BBB-8CCC-0{9}\d{3}$/, id);
+    // every session id is one of the invented, patterned ones (the frozen differential
+    // sample in frozen/ is generated: its ids are random words, never recorded ones)
+    const recorded = files.filter((f) => !f.startsWith(`frozen${path.sep}`)).map((f) => fs.readFileSync(path.join(FIXTURES, f), 'utf8')).join('\n');
+    for (const [, id] of recorded.matchAll(/"(?:session_id|sessionId)":"([^"]*)"/g)) assert.match(id, /^0f0e0d0c-\d{4}-4aaa-8bbb-0{9}\d{3}$/, id);
+    for (const [, id] of recorded.matchAll(/"itermSession":"([^"]*)"/g)) assert.match(id, /^w\dt\dp\d:00000000-AAAA-4BBB-8CCC-0{9}\d{3}$/, id);
   });
 
   test('the fixture settings file holds only invented commands', () => {
     const blob = fs.readFileSync(path.join(FIXTURES, 'settings-sample.json'), 'utf8');
     assert.doesNotMatch(blob, /\/Users\/(?!example\/)[^/\s"]+/);
-  });
-});
-
-describe('shim', notUnderRust('the /bin/sh shim and bellwether.cmd run the Node CLI; the app has neither'), () => {
-  test('exits 3 with a message when node is not on PATH, and passes the exit code through otherwise', { skip: process.platform === 'win32' }, () => {
-    const shim = path.join(AGENT_DIR, 'bellwether');
-    const noNode = spawnBrainSync(['doctor'], { shim, encoding: 'utf8', env: { PATH: '/nonexistent' } });
-    assert.equal(noNode.status, 3);
-    assert.match(noNode.stderr, /node is not installed/);
-    const unknown = spawnBrainSync(['bogus-command'], { shim, encoding: 'utf8', env: { PATH: process.env.PATH, BELLWETHER_DATA_DIR: path.join(root, 'd2') }, cwd: os.tmpdir() });
-    assert.equal(unknown.status, 1);
-    assert.match(unknown.stderr, /unknown command/);
-  });
-
-  test('works from another directory and from a path with spaces', { skip: process.platform === 'win32' }, () => {
-    const spaced = path.join(root, 'dir with spaces');
-    fs.mkdirSync(path.join(spaced, 'agents', 'bellwether'), { recursive: true });
-    fs.cpSync(path.join(AGENT_DIR, 'brain'), path.join(spaced, 'agents', 'bellwether', 'brain'), { recursive: true });
-    for (const f of ['bellwether', 'package.json', 'config.example.json']) fs.copyFileSync(path.join(AGENT_DIR, f), path.join(spaced, 'agents', 'bellwether', f));
-    const r = spawnBrainSync(['hooks', 'print'], { root: path.join(spaced, 'agents', 'bellwether'), shim: path.join(spaced, 'agents', 'bellwether', 'bellwether'), encoding: 'utf8', cwd: os.tmpdir(), env: { PATH: process.env.PATH, BELLWETHER_HOOK_TOKEN: TOKEN } });
-    assert.equal(r.status, 0, r.stderr);
-    assert.ok(JSON.parse(r.stdout).hooks.Stop);
-  });
-
-  test('bellwether.cmd: CRLF, forwards args and exit code, restores the directory', () => {
-    const cmd = fs.readFileSync(path.join(AGENT_DIR, 'bellwether.cmd'), 'latin1');
-    assert.ok(cmd.split('\n').filter(Boolean).every((l) => l.endsWith('\r')), 'every line ends in CRLF');
-    assert.match(cmd, /node brain\/cli\.mjs %\*/);
-    assert.match(cmd, /exit \/b %BELLWETHER_EXIT%/);
-    assert.match(cmd, /popd/);
   });
 });

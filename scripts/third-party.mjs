@@ -116,7 +116,7 @@ function render() {
     '',
     `## npm (${npm.length})`,
     '',
-    'The brain (`package.json`) has **no dependencies**. The shell has one devDependency, used only to',
+    'The root `package.json` (the tests and dev scripts) has **no dependencies**. The shell has one devDependency, used only to',
     'bundle a `.app`; `cargo build` does not need it.',
     '',
     '| Package | Version | Where | Licence |',

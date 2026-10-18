@@ -1,139 +1,25 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 import { describe, test } from 'node:test';
-import { SHELL_LABEL, plistPath, shellPlistText } from '../brain/autostart.mjs';
-import { runDoctor } from '../brain/doctor.mjs';
-import { shellControl } from '../brain/shellctl.mjs';
-import { AGENT_DIR, IMPL, TOKEN, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+import { TOKEN, spawnBrainSync, tempDir } from './helpers.mjs';
 
-// The repository's strip control, which the app replaces (milestone 5).
-const REPO_SHELL = notUnderRust("the repository's `shell start|stop|restart` (its LaunchAgent, or a detached copy of target/release/bellwether-shell); the app's `shell start|stop|restart` controls Bellwether.app's own strip (test/DIVERGENCES.md 19). The argument checks at the end run against both");
+/**
+ * `bellwether shell start | stop | restart` through the binary (temp HOME only: launchd and
+ * the live strip are never touched). The app's strip control is Bellwether.app's own
+ * (test/DIVERGENCES.md 19); the repository's (its LaunchAgent, or a detached copy of
+ * target/release/bellwether-shell) went with the Node brain in milestone 11.
+ */
 
-/** `bellwether shell start | stop | restart` (temp HOME and fakes only: launchd and the live strip are never touched). */
-
-const withAgent = (shellBin = '/x/target/release/bellwether-shell') => {
-  const home = tempDir();
-  fs.mkdirSync(path.dirname(plistPath(home, SHELL_LABEL)), { recursive: true });
-  fs.writeFileSync(plistPath(home, SHELL_LABEL), shellPlistText({ shellBin }));
-  return home;
-};
-// The login item's strip: its parent is launchd and its command line is the agent's ProgramArguments.
-const loginStrip = (pid, shellBin) => ({ processes: () => new Map([[pid, shellBin]]), parents: () => new Map([[pid, 1]]), commands: () => new Map([[pid, `${shellBin} --no-spawn-brain`]]) });
-
-describe('with the strip LaunchAgent installed: launchctl, behind the real-home guard', REPO_SHELL, () => {
-  test('restart is kickstart -k, start is kickstart, stop is kill TERM; each says what it did', async () => {
-    const calls = [];
-    const run = (cmd, args) => (calls.push([cmd, ...args].join(' ')), { ok: true, out: '' });
-    // The process table shows the login item's strip (its parent is launchd) once it runs.
-    const shellBin = '/x/target/release/bellwether-shell';
-    const o = { home: withAgent(), uid: 501, realHome: () => true, run, platform: 'darwin', shellBin, ...loginStrip(99, shellBin) };
-    assert.deepEqual((await shellControl('restart', o)).lines, ['restarted the strip (LaunchAgent): the strip is running (pid 99, started by its LaunchAgent)']);
-    assert.deepEqual((await shellControl('start', o)).lines, ['started the strip (LaunchAgent): the strip is running (pid 99, started by its LaunchAgent)']);
-    assert.match((await shellControl('stop', o)).lines[0], /^stopped the strip \(LaunchAgent\)/);
-    assert.deepEqual(calls, [`launchctl kickstart -k gui/501/${SHELL_LABEL}`, `launchctl kickstart gui/501/${SHELL_LABEL}`, `launchctl kill TERM gui/501/${SHELL_LABEL}`]);
-  });
-  test('another strip holding the single instance: start and restart say so and don\'t kickstart; a start whose strip never runs is not reported as started', async () => {
-    const shellBin = '/x/target/release/bellwether-shell';
-    const calls = [];
-    const run = (cmd, args) => (calls.push(args[0]), { ok: true, out: '' });
-    const dev = { home: withAgent(), uid: 501, realHome: () => true, run, platform: 'darwin', shellBin, processes: () => new Map([[4242, '/x/target/debug/bellwether-shell']]), parents: () => new Map([[4242, 777]]), waitMs: 0 };
-    for (const a of ['start', 'restart']) await assert.rejects(shellControl(a, dev), new RegExp(`a strip is already running \\(pid 4242, not the login item's\\); quit it from the menu bar \\(Quit Bellwether\\), then run \`bellwether shell ${a}\``));
-    assert.deepEqual(calls, [], 'nothing was kickstarted');
-    const r = await shellControl('start', { ...dev, processes: () => new Map(), parents: () => new Map() });
-    assert.match(r.lines.join('\n'), /^asked launchd to start the strip, but its strip is not running/);
-    assert.doesNotMatch(r.lines.join('\n'), /^started/);
-    assert.deepEqual(calls, ['kickstart']);
-  });
-  test('a temp HOME never reaches launchctl; a launchctl failure is one clean line', async () => {
-    const r = await shellControl('restart', { home: withAgent(), uid: 501, platform: 'darwin', run: () => assert.fail('launchctl was called') });
-    assert.match(r.lines.join('\n'), /launchctl not called/);
-    await assert.rejects(shellControl('start', { home: withAgent(), uid: 501, realHome: () => true, platform: 'darwin', processes: () => new Map(), run: () => ({ ok: false, out: 'Could not find service' }) }), /launchctl kickstart .* failed: Could not find service/);
-  });
-});
-
-describe('without it: bellwether\'s own detached copy, found by pid file or exact binary path', REPO_SHELL, () => {
-  const setup = () => {
-    const dataDir = tempDir();
-    const shellBin = path.join(tempDir(), 'bellwether-shell');
-    fs.writeFileSync(shellBin, '');
-    const procs = new Map([[10, '/usr/bin/other'], [11, `${shellBin}-not-quite`]]);
-    const killed = [];
-    const spawned = [];
-    const o = {
-      home: tempDir(),
-      dataDir,
-      shellBin,
-      platform: 'darwin',
-      run: () => assert.fail('no launchctl without the agent'),
-      processes: () => new Map(procs),
-      kill: (pid, sig) => (killed.push([pid, sig]), procs.delete(pid)),
-      spawnDetached: (bin, args) => (spawned.push([bin, ...args]), procs.set(4242, bin), 4242),
-      brainUp: async () => true,
-    };
-    return { o, procs, killed, spawned, dataDir, shellBin };
-  };
-  test('start runs the release binary detached with --no-spawn-brain when a brain is up, and records its pid', async () => {
-    const { o, spawned, dataDir, shellBin } = setup();
-    assert.deepEqual((await shellControl('start', o)).lines, ['started the strip (pid 4242)']);
-    assert.deepEqual(spawned, [[shellBin, '--no-spawn-brain']]);
-    assert.equal(fs.readFileSync(path.join(dataDir, 'shell.pid'), 'utf8'), '4242');
-    assert.match((await shellControl('start', o)).lines[0], /already running \(pid 4242\)/);
-  });
-  test('with no brain up, the strip may start its own', async () => {
-    const { o, spawned } = setup();
-    const r = await shellControl('start', { ...o, brainUp: async () => false });
-    assert.deepEqual(spawned[0].slice(1), []);
-    assert.match(r.lines[0], /with its own brain/);
-  });
-  test('stop signals only the pid in this data dir\'s shell.pid, and only if it is still exactly the binary', async () => {
-    const { o, procs, killed, dataDir, shellBin } = setup();
-    fs.writeFileSync(path.join(dataDir, 'shell.pid'), '10'); // now someone else's pid
-    assert.deepEqual((await shellControl('stop', o)).lines, ['the strip was not running']);
-    assert.deepEqual(killed, []);
-    procs.set(77, shellBin); // a strip started some other way (launchd, another data dir): left alone
-    assert.deepEqual((await shellControl('stop', o)).lines, ['the strip was not running']);
-    assert.deepEqual(killed, []);
-    fs.writeFileSync(path.join(dataDir, 'shell.pid'), '77'); // ours
-    assert.deepEqual((await shellControl('stop', o)).lines, ['stopped the strip']);
-    assert.deepEqual(killed, [[77, 'SIGTERM']]);
-  });
-  test('restart stops then starts; an unbuilt strip says how to build it; a bad action is a usage error', async () => {
-    const { o, procs, killed, spawned, shellBin, dataDir } = setup();
-    procs.set(55, shellBin);
-    fs.writeFileSync(path.join(dataDir, 'shell.pid'), '55');
-    assert.deepEqual((await shellControl('restart', o)).lines, ['restarted the strip (pid 4242)']);
-    assert.deepEqual(killed, [[55, 'SIGTERM']]);
-    assert.equal(spawned.length, 1);
-    await assert.rejects(shellControl('start', { ...o, processes: () => new Map(), shellBin: '/nope/bellwether-shell' }), /isn't built yet .* shell build --release/);
-    await assert.rejects(shellControl('reboot', o), /usage: bellwether shell/);
-  });
-});
-
-describe('doctor and the CLI', () => {
-  test('doctor says `bellwether shell start` when the strip agent is installed but no strip runs', REPO_SHELL, async () => {
-    const home = withAgent();
-    fs.writeFileSync(plistPath(home), '');
-    const run = (running) => runDoctor({ env: { BELLWETHER_HOOK_TOKEN: TOKEN }, settingsFile: path.join(home, 'none.json'), configLoader: () => ({ config: { port: 1 }, usingExample: false }), home, dataDir: tempDir(), probeTimeoutMs: 100, isStripRunning: () => running });
-    if (process.platform !== 'darwin') return;
-    assert.match((await run(false)).checks.find((c) => c.name === 'strip running').detail, /bellwether shell start/);
-    assert.equal((await run(true)).checks.find((c) => c.name === 'strip running'), undefined);
-  });
+describe('the CLI', () => {
   test('`bellwether shell bogus` and `shell start --dev` are refused (exit 3) without doing anything', () => {
     const env = { PATH: process.env.PATH, HOME: tempDir(), BELLWETHER_DATA_DIR: tempDir(), BELLWETHER_HOOK_TOKEN: TOKEN };
     const cli = (...a) => spawnBrainSync(['shell', ...a], { encoding: 'utf8', env });
     assert.equal(cli('bogus').status, 3);
     assert.equal(cli('start', '--dev').status, 3);
   });
-  test('`shell stop` outside the app: the repository stops its own detached strip (none here); the app\'s CLI refuses outside a bundle', () => {
+  test('`shell stop` outside the app: a development binary refuses it (the app\'s strip is Bellwether.app\'s)', () => {
     const env = { PATH: process.env.PATH, HOME: tempDir(), BELLWETHER_DATA_DIR: tempDir(), BELLWETHER_HOOK_TOKEN: TOKEN };
     const r = spawnBrainSync(['shell', 'stop'], { encoding: 'utf8', env });
-    if (IMPL === 'rust') {
-      assert.equal(r.status, 2, r.stderr);
-      assert.match(r.stderr, /controls Bellwether\.app's strip, and this is a development binary outside the app/);
-    } else {
-      assert.equal(r.status, 0, r.stderr);
-      assert.match(r.stdout, /the strip was not running/);
-    }
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /controls Bellwether\.app's strip, and this is a development binary outside the app/);
   });
 });

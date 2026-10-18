@@ -14,11 +14,12 @@ import { AGENT_DIR, spawnBrainSync, tempDir } from './helpers.mjs';
 const read = (...p) => fs.readFileSync(path.join(AGENT_DIR, ...p), 'utf8');
 
 describe('licensing documents', () => {
-  test('NOTICE credits desktopPet (MIT), says web-esheep (GPL) is not vendored, the art is fetched not committed, and the LGPL Linux library', () => {
+  test('NOTICE credits desktopPet (MIT), says web-esheep (GPL) is not vendored, the art is fetched (by the dev script) not committed, and the LGPL Linux library', () => {
     const n = read('NOTICE');
     assert.match(n, /desktopPet[\s\S]*MIT/);
     assert.match(n, /web-esheep[\s\S]*GPL-3\.0: NOT vendored/);
-    assert.match(n, /NOT committed[\s\S]*pets fetch[\s\S]*1ba33bebed993439f03e502b37e9bd2daf061773/);
+    assert.match(n, /NOT committed[\s\S]*scripts\/fetch-pets\.mjs[\s\S]*1ba33bebed993439f03e502b37e9bd2daf061773/);
+    assert.doesNotMatch(n, /Brain \(Node\)|pets fetch/);
     assert.match(n, /gtk-layer-shell[\s\S]*LGPL-3\.0/);
     assert.match(n, /THIRD-PARTY\.md/);
     const pin = JSON.parse(read('pets.lock.json'));
@@ -29,7 +30,7 @@ describe('licensing documents', () => {
     assert.equal(r.status, 0, r.stderr);
     const t = read('THIRD-PARTY.md');
     assert.equal([...t.matchAll(/^\| [a-z0-9_-]+ \| \d[^|]* \| [^|]+ \|$/gm)].length, lockedCrates(read('shell', 'src-tauri', 'Cargo.lock')).length);
-    assert.match(t, /The brain \(`package\.json`\) has \*\*no dependencies\*\*/);
+    assert.match(t, /The root `package\.json` \(the tests and dev scripts\) has \*\*no dependencies\*\*/);
     assert.deepEqual(JSON.parse(read('package.json')).dependencies, undefined);
   });
   test('the licence reader takes the [package] licence, not a dependency\'s', () => {
@@ -46,10 +47,11 @@ test('--check skips cleanly with no cargo registry (a fresh clone before the fir
 });
 
 describe('repository setup', () => {
-  test('.gitignore keeps secrets, local state and build output out; .env.example has the token line, empty', () => {
+  test('.gitignore keeps secrets, local state and build output out; there is no .env.example (nothing reads a checkout\'s .env since milestone 11)', () => {
     const gi = read('.gitignore').split('\n');
-    for (const line of ['.env', '.env.*', '!.env.example', 'data/', 'config.json', 'shell/src-tauri/target/', 'shell/src-tauri/gen/']) assert.ok(gi.includes(line), line);
-    assert.match(read('.env.example'), /^BELLWETHER_HOOK_TOKEN=$/m);
+    for (const line of ['.env', '.env.*', 'data/', 'config.json', 'shell/src-tauri/target/', 'shell/src-tauri/gen/']) assert.ok(gi.includes(line), line);
+    assert.equal(fs.existsSync(path.join(AGENT_DIR, '.env.example')), false);
+    assert.ok(!gi.includes('!.env.example'));
   });
   test('the README credits desktopPet, says the art is fetched rather than included, and has no hub paths', () => {
     const r = read('README.md');
@@ -90,12 +92,34 @@ describe('repository setup', () => {
     const page = read('shell', 'src', 'onboarding.html');
     for (const s of ['Start at login', 'Show the changes', 'Install', 'Import…', 'Ask iTerm2', 'Ask Terminal', '~/.local/bin/bellwether']) assert.ok(page.includes(s) && r.includes(s), `setup window: ${s}`);
   });
-  test('docs/DEVELOPMENT.md\'s first run puts autostart before hooks, and quitting the trial strip before autostart', () => {
+  test('docs/DEVELOPMENT.md\'s first run: build, home, token, doctor, then hooks, on port 47420 with a home of its own', () => {
     const r = read('docs', 'DEVELOPMENT.md');
-    const first = r.slice(r.indexOf('## First run'), r.indexOf('## Setup'));
+    const first = r.slice(r.indexOf('## First run'), r.indexOf('## Working from a checkout'));
     const at = (s) => first.indexOf(s);
-    for (const s of ['pets fetch', 'shell --dev --release', '**Quit it**', 'autostart install --write', 'hooks install --write', 'all set']) assert.ok(at(s) > 0, s);
-    assert.ok(at('pets fetch') < at('shell --dev --release') && at('**Quit it**') < at('autostart install --write') && at('autostart install --write') < at('hooks install --write'));
+    const steps = ['npm run build:dev', 'export BELLWETHER_HOME="$PWD/data"', 'bw token init', 'bw doctor', 'bw serve', 'bw hooks print --out data/hooks-only.json'];
+    for (const s of steps) assert.ok(at(s) > 0, s);
+    for (let i = 1; i < steps.length; i++) assert.ok(at(steps[i - 1]) < at(steps[i]), `${steps[i - 1]} before ${steps[i]}`);
+    assert.match(first, /port 47420: never the installed app's 47417/);
+    assert.equal(JSON.parse(read('config.example.json')).port, 47420);
+    assert.equal(JSON.parse(read('config.example.json')).brain, undefined, 'no brain.nodePath');
+    assert.match(r, /`v0\.2\.0-rc\.3`/, 'says once where brain/ lives on');
+  });
+  test('CHANGELOG.md has the package version\'s section, and its migration note names migrate --to-app', () => {
+    const c = read('CHANGELOG.md');
+    const v = JSON.parse(read('package.json')).version;
+    // A pre-release (0.2.0-rc.3 before milestone 11's version step) has no section of its own.
+    if (!v.includes('-')) assert.ok(c.split('\n').includes(`## ${v}`), `## ${v}`);
+    assert.ok(c.split('\n').includes('## 1.0.0'));
+    const migration = c.slice(c.indexOf('### Coming from a repository install'));
+    assert.match(migration, /bellwether migrate --to-app/);
+    assert.match(migration, /migrate --undo --write/);
+    assert.match(migration, /\*\*before\*\* pulling v1\.0\.0/);
+  });
+  test('`npm run test:rust` and `./bellwether` are named only in the history files', () => {
+    const history = new Set([path.join('docs', 'DISTRIBUTION-PLAN.md'), path.join('test', 'DIVERGENCES.md'), 'CHANGELOG.md']);
+    const docs = ['README.md', 'NOTICE', 'THIRD-PARTY.md', 'CHANGELOG.md', path.join('docs', 'DEVELOPMENT.md'), path.join('docs', 'RELEASING.md'), path.join('docs', 'DISTRIBUTION-PLAN.md'), path.join('test', 'DIVERGENCES.md'), path.join('pets', 'SPEC.md')].filter((f) => fs.existsSync(path.join(AGENT_DIR, f)));
+    const bad = docs.filter((f) => !history.has(f) && /npm run test:rust|\.\/bellwether\b/.test(read(f)));
+    assert.deepEqual(bad, []);
   });
 });
 

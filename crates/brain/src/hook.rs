@@ -299,4 +299,28 @@ mod tests {
         }
         assert_eq!(HookAnswer::Forbidden.into_response().headers()["content-length"], "0");
     }
+
+    /// The Node brain's "source scan: the /hook module has no way to write a body"
+    /// (hook-route.test.mjs, until milestone 11), for the Rust brain: the `/hook` route
+    /// returns only a `HookAnswer`, converted by `into_response` (a status and an empty
+    /// body, by its type), and nothing in the route or this module builds another response.
+    #[test]
+    fn the_hook_route_returns_only_a_hook_answer() {
+        let lib = include_str!("lib.rs");
+        let route = lib.split("async fn route(").nth(1).expect("lib.rs route()");
+        let branch = route.split("if path == \"/hook\" && req.method() == Method::POST {").nth(1).expect("the /hook branch").split("\n    }").next().unwrap();
+        let code: String = branch.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+        assert_eq!(code.trim(), "return Ok(hook::handle(brain, req).await.into_response().map(|b| b.boxed()));", "the /hook branch does more than return the HookAnswer");
+        let src = include_str!("hook.rs");
+        let module = src.split("\n#[cfg(test)]\nmod tests").next().unwrap();
+        assert!(module.contains("pub(crate) async fn handle(brain: Arc<Brain>, req: Request<Incoming>) -> HookAnswer {"));
+        assert!(module.contains("pub fn into_response(self) -> Response<Empty<Bytes>> {"), "into_response must give an Empty body by its type");
+        let outside = module.split("pub fn into_response(").collect::<Vec<_>>();
+        let after = outside[1].split_once("\n    }\n").map(|(_, rest)| rest).unwrap_or("");
+        for (part, what) in [(outside[0], "before into_response"), (after, "after into_response")] {
+            for built in ["Response::builder", "Response::new", "Full::", ".body(", "BoxBody"] {
+                assert!(!part.contains(built), "hook.rs builds a response {what}: {built}");
+            }
+        }
+    }
 }

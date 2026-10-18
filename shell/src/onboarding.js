@@ -92,7 +92,7 @@ function render() {
   // Start at login.
   const login = status.login;
   if (!login) {
-    lines('login-lines', ['This is a repository build: start at login is set up with ./bellwether autostart.']);
+    lines('login-lines', ['This is a development build: it has no start at login (docs/DEVELOPMENT.md).']);
   } else {
     lines('login-lines', [`Brain at login: ${LOGIN_WORDS[login.brain] ?? login.brain}`, `Strip at login: ${LOGIN_WORDS[login.app] ?? login.app}`, ...(login.waiting || login.stale ? login.lines : [])]);
   }

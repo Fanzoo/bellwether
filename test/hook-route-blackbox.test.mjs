@@ -1,20 +1,14 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import net from 'node:net';
-import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { spawn } from 'node:child_process';
-import { AGENT_DIR, IMPL, TOKEN, brainCommand, hookHeaders, request, spawnBrain, tempDir } from './helpers.mjs';
+import { TOKEN, brainCommand, hookHeaders, request, spawnBrain, tempDir } from './helpers.mjs';
 
 /**
- * The /hook guard matrix from hook-route.test.mjs, black-box: against a brain process,
- * reading its counters from /health instead of from memory. It runs against either
- * implementation (distribution plan D2), through the switch in helpers.mjs:
- *
- *   npm test                 the Node brain (brain/cli.mjs serve)
- *   npm run test:rust        the Rust brain: $BELLWETHER_BIN serve, by default the dev
- *                            build shell/src-tauri/target-dev/debug/bellwether-shell,
- *                            refused when it is older than the Rust sources
+ * The /hook guard matrix (the Node brain's in-process hook-route.test.mjs, until milestone
+ * 11), black-box: against a brain process, $BELLWETHER_BIN serve, by default the
+ * development build in target-dev/ (test/helpers.mjs), reading its counters from /health
+ * instead of from memory.
  *
  * Every response from /hook must be status-only: an empty 204, or an empty 403.
  */
@@ -40,18 +34,9 @@ async function startBrain(extra = [], { fdSoftLimit = null, readStderr = true } 
   const port = await freePort();
   const dir = tempDir('bw-blackbox-');
   const env = { ...process.env, BELLWETHER_HOOK_TOKEN: TOKEN };
-  let args;
-  if (IMPL === 'rust') {
-    // The Rust brain takes the port as an argument and keeps its files in a home.
-    args = ['serve', '--port', String(port), ...extra];
-    env.BELLWETHER_HOME = dir;
-  } else {
-    const config = path.join(dir, 'config.json');
-    fs.writeFileSync(config, JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'config.example.json'), 'utf8')), port }));
-    args = ['serve', ...extra];
-    env.BELLWETHER_CONFIG = config;
-    env.BELLWETHER_DATA_DIR = path.join(dir, 'data');
-  }
+  // The brain takes the port as an argument and keeps its files in a home.
+  const args = ['serve', '--port', String(port), ...extra];
+  env.BELLWETHER_HOME = dir;
   let child;
   if (fdSoftLimit) {
     const { file, args: a, options } = brainCommand(args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
@@ -69,7 +54,7 @@ async function startBrain(extra = [], { fdSoftLimit = null, readStderr = true } 
     } catch {}
     if (child.exitCode !== null || Date.now() > deadline) {
       child.kill();
-      throw new Error(`the ${IMPL} brain didn't start: ${stderr}`);
+      throw new Error(`the brain didn't start: ${stderr}`);
     }
     await new Promise((r) => setTimeout(r, 50));
   }
@@ -92,7 +77,7 @@ function assertEmpty(res, status) {
   assert.equal(res.headers['transfer-encoding'], undefined, 'no chunked body');
 }
 
-describe(`/hook, black-box (${IMPL} brain)`, () => {
+describe('/hook, black-box', () => {
   let brain;
   before(async () => {
     brain = await startBrain();
@@ -216,7 +201,7 @@ describe(`/hook, black-box (${IMPL} brain)`, () => {
   });
 });
 
-describe(`connections, black-box (${IMPL} brain)`, () => {
+describe('connections, black-box', () => {
   // The M1 review found new hooks waiting for the 10 s header timeout once about 250 idle
   // connections were open (launchd gives an agent 256 file descriptors). Milestone 3 bounds
   // connections (crates/brain/src/conns.rs).
@@ -255,7 +240,7 @@ describe(`connections, black-box (${IMPL} brain)`, () => {
   });
 });
 
-describe(`a stderr nobody reads, black-box (${IMPL} brain)`, () => {
+describe('a stderr nobody reads, black-box', () => {
   // BR-3K's M3 finding: with stderr piped and never read, logging blocked the Rust brain's
   // only thread at about 64 KB, and /hook with it. The brain's logging may drop lines; /hook
   // must never wait (plan D1).
@@ -274,14 +259,14 @@ describe(`a stderr nobody reads, black-box (${IMPL} brain)`, () => {
       const after = await health(brain.port);
       assert.equal(after.counters.accepted, before.counters.accepted + 3000);
       // The Rust brain drops log lines it can't write, and says how many (DIVERGENCES 3).
-      if (IMPL === 'rust') assert.ok(after.counters.logDropped > 0, JSON.stringify(after.counters));
+      assert.ok(after.counters.logDropped > 0, JSON.stringify(after.counters));
     } finally {
       await brain.stop();
     }
   });
 });
 
-describe(`/hook debug modes, black-box (${IMPL} brain)`, () => {
+describe('/hook debug modes, black-box', () => {
   test('--slow answers with an empty 204 after the delay', async () => {
     const brain = await startBrain(['--slow=150']);
     try {

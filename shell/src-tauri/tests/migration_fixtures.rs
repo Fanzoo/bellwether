@@ -328,6 +328,9 @@ impl World {
             .env_clear()
             .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
             .env("HOME", &self.home)
+            // A development binary needs BELLWETHER_HOME (milestone 11): the temp HOME's own
+            // Application Support, where the app's files would be anyway.
+            .env("BELLWETHER_HOME", &self.app)
             .env("BELLWETHER_TEST_ROOT", &self.base)
             .env("BELLWETHER_LAUNCHCTL", self.state.join("fake-launchctl"))
             .env("BELLWETHER_LOGIN_ITEMS", self.state.join("fake-login-items"))

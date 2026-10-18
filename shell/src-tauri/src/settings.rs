@@ -7,11 +7,13 @@
 //!   checked as the Rust brain checks it), the token from `BELLWETHER_HOOK_TOKEN` or the
 //!   home's `hook-token`, `shell-state.json`, imported pets. It logs to
 //!   `~/Library/Logs/Bellwether/shell.log` (`<home>/logs/` for any other home).
-//! - **Repository**: any binary outside an app bundle: `target/release/bellwether-shell`,
-//!   which a repository install's LaunchAgent runs with `--no-spawn-brain` next to the Node
-//!   brain, and the `target-dev/` builds. It keeps the checkout's layout until milestone 8
-//!   moves repository installs into the app: `config.json` of the checkout, the token
-//!   from the environment or the `.env` (the Node CLI's rule), `data/`, `data/shell.log`.
+//! - **Repository**: any binary outside an app bundle, a development build in
+//!   `target-dev/` (docs/DEVELOPMENT.md). It reads the same files as the development CLI
+//!   (milestone 11, M11-b): its home is `BELLWETHER_HOME`, else `BELLWETHER_DATA_DIR`, else
+//!   the checkout's `data/`; the token is an exported `BELLWETHER_HOOK_TOKEN`, else that
+//!   home's `hook-token`, read as the app reads it; the config is `BELLWETHER_CONFIG`, else
+//!   the checkout's `config.json`, else `config.example.json`; it logs to
+//!   `<home>/shell.log`. The checkout's `.env` and the `PASTURE_*` names are not read.
 //!
 //! A test build (`scripts/build-app.mjs --test-port/--test-home`) carries its port and
 //! home in the bundled brain agent's plist. The strip takes them from there too, so a test
@@ -40,15 +42,17 @@ pub struct Settings {
     /// BELLWETHER_PARENT_PID: the same home (and, for a repository, config).
     pub brain_env: Vec<(String, PathBuf)>,
     /// Repository only: the brain the strip starts gets the token in its environment
-    /// (the checkout's `.env` is not the app's `hook-token`).
+    /// (an exported token, or the home's `hook-token`, which the brain would read too).
     pub brain_gets_token: bool,
     /// App only: `Contents/Resources`, where bundled pets live.
     pub resources: Option<PathBuf>,
 }
 
-/// Where the token comes from, for `token_now`.
+/// Where the token comes from, for `token_now`: the home whose `hook-token` is read when
+/// BELLWETHER_HOOK_TOKEN isn't set (the app's, or a checkout's).
 enum TokenSource {
     App(PathBuf),
+    /// A checkout's home (M11-b): read the same way as the app's.
     Repository(PathBuf),
 }
 
@@ -95,18 +99,18 @@ impl Settings {
     }
 
     fn load_repository() -> Result<Settings, String> {
-        // BELLWETHER_AGENT_DIR wins; otherwise the agent directory this binary was built
-        // from: the shell runs from a checkout, next to its brain and config.
-        let agent_dir = env_os("AGENT_DIR")
+        // BELLWETHER_AGENT_DIR wins; otherwise the checkout this binary was built from.
+        let var = |name: &str| std::env::var_os(format!("BELLWETHER_{name}")).filter(|v| !v.is_empty());
+        let agent_dir = var("AGENT_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(".."));
         let agent_dir = agent_dir.canonicalize().map_err(|e| format!("agent directory {}: {e}", agent_dir.display()))?;
-        let data_dir = env_os("DATA_DIR").map(PathBuf::from).unwrap_or_else(|| agent_dir.join("data"));
+        let data_dir = repository_home(var, &agent_dir);
 
         // BELLWETHER_CONFIG (a test aid, read-only like the rest): another config file,
         // e.g. one with a dummy name in privacy.sharingProcesses (Milestone 7 (b)).
         let real = agent_dir.join("config.json");
-        let file = match env_os("CONFIG") {
+        let file = match var("CONFIG") {
             Some(p) => PathBuf::from(p),
             None if real.exists() => real,
             None => agent_dir.join("config.example.json"),
@@ -115,10 +119,9 @@ impl Settings {
         let config: Value = serde_json::from_str(&text).map_err(|e| format!("{} is not valid JSON: {e}", file.display()))?;
         let port = config.get("port").and_then(Value::as_u64).filter(|p| (1024..=65535).contains(p)).ok_or("config: port must be 1024–65535")? as u16;
 
-        // The token, in the CLI's order (brain/envload.mjs): an exported
-        // BELLWETHER_HOOK_TOKEN, then one in the .env (env_file), then the old name,
-        // exported, then in the .env.
-        let _ = TOKEN_SOURCE.set(TokenSource::Repository(agent_dir.clone()));
+        // The token, as the development CLI reads it with BELLWETHER_HOME set to the same
+        // home: an exported BELLWETHER_HOOK_TOKEN, else the home's `hook-token`.
+        let _ = TOKEN_SOURCE.set(TokenSource::Repository(data_dir.clone()));
         let token = token_now();
         let file = file.canonicalize().unwrap_or(file);
         Ok(Settings {
@@ -165,171 +168,50 @@ pub fn app_home(env_home: Option<PathBuf>, bundle: (Option<u16>, Option<String>)
     }
 }
 
-/// `BELLWETHER_<name>` from the environment, or else the name it had before the
-/// rename, `PASTURE_<name>` (read for one release; brain/envpath.mjs does the same).
+/// `BELLWETHER_<name>` from the environment, or else the name it had before the rename,
+/// `PASTURE_<name>`. Since milestone 11 only `SHELL_TRACE` is read through it (the strip's
+/// debug trace, in both layouts); the repository layout's names are read without the old
+/// one (`load_repository`).
 pub fn env_os(name: &str) -> Option<std::ffi::OsString> {
     std::env::var_os(format!("BELLWETHER_{name}")).or_else(|| std::env::var_os(format!("PASTURE_{name}")))
 }
 
-/// Which .env holds the token: the same rule as the CLI (brain/envpath.mjs). BELLWETHER_ENV
-/// if set; else the repository's own `.env`; else, when the repository sits at
-/// `agents/<name>` inside a hub and has no `.env` of its own, the hub's.
-pub fn env_file(agent_dir: &Path) -> PathBuf {
-    if let Some(p) = env_os("ENV").filter(|p| !p.is_empty()) {
-        return PathBuf::from(p);
-    }
-    let own = agent_dir.join(".env");
-    if own.exists() {
-        return own;
-    }
-    if agent_dir.parent().and_then(|p| p.file_name()).is_some_and(|n| n == "agents") {
-        let hub = agent_dir.join("..").join("..").join(".env");
-        if hub.exists() {
-            return hub;
-        }
-    }
-    own
+/// A checkout's home (M11-b): `BELLWETHER_HOME`, else `BELLWETHER_DATA_DIR`, else the
+/// checkout's `data/`. `var` answers `BELLWETHER_<name>` (empty counts as unset).
+fn repository_home(var: impl Fn(&str) -> Option<std::ffi::OsString>, agent_dir: &Path) -> PathBuf {
+    var("HOME").or_else(|| var("DATA_DIR")).map(PathBuf::from).unwrap_or_else(|| agent_dir.join("data"))
 }
 
 /// The hook token as it is right now, read again on every call. A strip started before
 /// there is a token uses it to connect once one appears (brain.rs), without a restart.
-/// - App: BELLWETHER_HOOK_TOKEN, else the home's `hook-token`; a token that fails the
-///   brain's check (too short, a published example) counts as none.
-/// - Repository: the environment, then the `.env`, as the Node CLI reads them.
+/// In both layouts: BELLWETHER_HOOK_TOKEN, else the home's `hook-token`; a token that fails
+/// the brain's check (too short, a published example) counts as none.
 pub fn token_now() -> Option<String> {
-    match TOKEN_SOURCE.get()? {
-        TokenSource::App(home) => bellwether_core::token::read(home, std::env::var("BELLWETHER_HOOK_TOKEN").ok()).ok().map(|(t, _)| t),
-        TokenSource::Repository(agent_dir) => token_from(Some(agent_dir), |k| std::env::var(k).ok()),
-    }
+    let (TokenSource::App(home) | TokenSource::Repository(home)) = TOKEN_SOURCE.get()?;
+    token_at(home, std::env::var("BELLWETHER_HOOK_TOKEN").ok())
+}
+
+/// The token for a home: `env` (an exported BELLWETHER_HOOK_TOKEN) if set, and only
+/// otherwise the home's `hook-token`, by the app's rules (`bellwether_core::token::read`).
+fn token_at(home: &Path, env: Option<String>) -> Option<String> {
+    bellwether_core::token::read(home, env).ok().map(|(t, _)| t)
 }
 
 /// Why there is no usable token, in words (never the token).
 pub fn token_problem() -> String {
     match TOKEN_SOURCE.get() {
-        Some(TokenSource::App(home)) => match bellwether_core::token::read(home, std::env::var("BELLWETHER_HOOK_TOKEN").ok()) {
+        Some(TokenSource::App(home) | TokenSource::Repository(home)) => match bellwether_core::token::read(home, std::env::var("BELLWETHER_HOOK_TOKEN").ok()) {
             Ok(_) => "the token is usable now".into(),
             // The token module's message already says what to run.
             Err(e) => e.message,
         },
-        _ => "BELLWETHER_HOOK_TOKEN is not set (environment or the .env; `bellwether token init` adds one)".into(),
+        None => "no hook token: BELLWETHER_HOOK_TOKEN is not set (`bellwether token init` makes one)".into(),
     }
-}
-
-/// The repository's token: the environment first; the `.env` is read only when the
-/// environment has neither name.
-fn token_from(agent_dir: Option<&Path>, var: impl Fn(&str) -> Option<String>) -> Option<String> {
-    let set = |v: Option<String>| v.filter(|v| !v.is_empty());
-    if let Some(t) = set(var("BELLWETHER_HOOK_TOKEN")) {
-        return Some(t);
-    }
-    let text = agent_dir.and_then(|d| std::fs::read_to_string(env_file(d)).ok()).unwrap_or_default();
-    token_in_order(var, &text)
-}
-
-/// The hook token: an exported BELLWETHER_HOOK_TOKEN, then the .env's, then the old
-/// name exported, then the old name in the .env. Only those keys are read from the
-/// file; every other line is ignored and never kept or logged. Empty means unset.
-fn token_in_order(var: impl Fn(&str) -> Option<String>, env_text: &str) -> Option<String> {
-    let set = |v: Option<String>| v.filter(|v| !v.is_empty());
-    set(var("BELLWETHER_HOOK_TOKEN"))
-        .or_else(|| set(parse_env_value(env_text, "BELLWETHER_HOOK_TOKEN")))
-        .or_else(|| set(var("PASTURE_HOOK_TOKEN")))
-        .or_else(|| set(parse_env_value(env_text, "PASTURE_HOOK_TOKEN")))
-}
-
-#[cfg(test)]
-fn token_from_env_file(path: &Path) -> Option<String> {
-    token_in_order(|_| None, &std::fs::read_to_string(path).ok()?)
-}
-
-/// Reads one key the way Node's `--env-file` does (Node 22.14, which the brain runs
-/// with), so the shell and the brain always see the same token. The rules, pinned by
-/// the shared vectors in test/fixtures/env-vectors.json:
-/// - `\r\n` counts as `\n`; a line starting with `#` (after leading spaces) is skipped;
-/// - the key is what precedes the first `=`, trimmed of spaces, with one `export `
-///   prefix removed (`export  KEY`, two spaces, is not KEY);
-/// - a value starting with `"`, `'` or `` ` `` is what lies before the matching
-///   closing quote (`\n` becomes a newline inside double quotes); with no closing
-///   quote the value is the rest of the line, quote included;
-/// - an unquoted value stops at `#` and is trimmed of spaces (tabs are kept);
-/// - the last assignment wins.
-pub fn parse_env_value(text: &str, wanted: &str) -> Option<String> {
-    let text = text.replace("\r\n", "\n");
-    let mut found = None;
-    for raw in text.split('\n') {
-        let line = raw.trim_start_matches(' ');
-        if line.starts_with('#') {
-            continue;
-        }
-        let Some(eq) = line.find('=') else { continue };
-        let mut key = line[..eq].trim_matches(' ');
-        if let Some(rest) = key.strip_prefix("export ") {
-            key = rest;
-        }
-        if key != wanted {
-            continue;
-        }
-        let v = line[eq + 1..].trim_start_matches(' ');
-        let value = match v.chars().next() {
-            Some(q @ ('"' | '\'' | '`')) => match v[1..].find(q) {
-                Some(end) => {
-                    let inner = &v[1..1 + end];
-                    if q == '"' { inner.replace("\\n", "\n") } else { inner.to_string() }
-                }
-                None => v.trim_end_matches(' ').to_string(),
-            },
-            _ => v[..v.find('#').unwrap_or(v.len())].trim_matches(' ').to_string(),
-        };
-        found = Some(value);
-    }
-    found
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The same vectors test/env-vectors.test.mjs checks against Node itself.
-    #[test]
-    fn matches_nodes_env_file_parser() {
-        let json: serde_json::Value = serde_json::from_str(include_str!("../../../test/fixtures/env-vectors.json")).unwrap();
-        let vectors = json["vectors"].as_array().unwrap();
-        assert!(vectors.len() >= 20);
-        let mut failures = Vec::new();
-        for v in vectors {
-            let text = v["text"].as_str().unwrap();
-            let expected = v["expected"].as_str().map(str::to_string);
-            let got = parse_env_value(text, "BELLWETHER_HOOK_TOKEN");
-            if got != expected {
-                failures.push(format!("{}: expected {:?}, got {:?}", v["name"], expected, got));
-            }
-        }
-        assert!(failures.is_empty(), "{}", failures.join("\n"));
-    }
-
-    #[test]
-    fn empty_means_unset_and_other_lines_are_ignored() {
-        let dir = std::env::temp_dir().join(format!("bellwether-env-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let f = dir.join(".env");
-        std::fs::write(&f, "OTHER=secret\n# comment\nexport BELLWETHER_HOOK_TOKEN=\"abc_DEF-123\" # mine\n").unwrap();
-        assert_eq!(token_from_env_file(&f).as_deref(), Some("abc_DEF-123"));
-        std::fs::write(&f, "BELLWETHER_HOOK_TOKEN=\n").unwrap();
-        assert_eq!(token_from_env_file(&f), None);
-        // the name before the rename is still read, and the new one wins over it
-        std::fs::write(&f, "PASTURE_HOOK_TOKEN=old_TOKEN-123\n").unwrap();
-        assert_eq!(token_from_env_file(&f).as_deref(), Some("old_TOKEN-123"));
-        std::fs::write(&f, "PASTURE_HOOK_TOKEN=old_TOKEN-123\nBELLWETHER_HOOK_TOKEN=new_TOKEN-456\n").unwrap();
-        assert_eq!(token_from_env_file(&f).as_deref(), Some("new_TOKEN-456"));
-        // the order with the environment: exported new, file new, exported old, file old
-        let file_new_and_old = "PASTURE_HOOK_TOKEN=file_old\nBELLWETHER_HOOK_TOKEN=file_new\n";
-        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
-        assert_eq!(token_in_order(env(&[("BELLWETHER_HOOK_TOKEN", "env_new"), ("PASTURE_HOOK_TOKEN", "env_old")]), file_new_and_old).as_deref(), Some("env_new"));
-        assert_eq!(token_in_order(env(&[("PASTURE_HOOK_TOKEN", "env_old")]), file_new_and_old).as_deref(), Some("file_new"), "a stale exported old name doesn't beat the .env's new one");
-        assert_eq!(token_in_order(env(&[("PASTURE_HOOK_TOKEN", "env_old")]), "PASTURE_HOOK_TOKEN=file_old\n").as_deref(), Some("env_old"));
-        assert_eq!(token_in_order(env(&[]), "PASTURE_HOOK_TOKEN=file_old\n").as_deref(), Some("file_old"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 
     #[test]
     fn the_app_home_is_the_environment_or_the_test_builds_or_the_default() {
@@ -344,23 +226,53 @@ mod tests {
         assert!(e.contains("the bundle decides") && e.contains("/tmp/bw-m5"), "{e}");
     }
 
-    /// The `.env` is a FIFO nobody writes to, so opening it blocks: `token_from` must finish
-    /// without touching it when the environment has the token. (A test that only checked the
-    /// answer passed even with the read moved above the early return.)
+    /// A checkout's home: BELLWETHER_HOME beats BELLWETHER_DATA_DIR, which beats `data/`;
+    /// an empty value counts as unset (M11-b).
     #[test]
-    fn the_repository_reads_the_env_file_only_when_the_environment_has_no_token() {
+    fn a_checkouts_home_is_bellwether_home_then_the_data_dir_then_data() {
+        let agent = Path::new("/x/checkout");
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| std::ffi::OsString::from(v)).filter(|v| !v.is_empty());
+        assert_eq!(repository_home(env(&[("HOME", "/h"), ("DATA_DIR", "/d")]), agent), PathBuf::from("/h"));
+        assert_eq!(repository_home(env(&[("DATA_DIR", "/d")]), agent), PathBuf::from("/d"));
+        assert_eq!(repository_home(env(&[("HOME", ""), ("DATA_DIR", "/d")]), agent), PathBuf::from("/d"));
+        assert_eq!(repository_home(env(&[]), agent), agent.join("data"));
+        // The old name is not read.
+        assert_eq!(repository_home(env(&[("PASTURE_DATA_DIR", "/p")]), agent), agent.join("data"));
+    }
+
+    /// The token: an exported one, then the home's `hook-token`, then nothing; a `.env`
+    /// beside it (with a different token, under either name) is never read.
+    #[test]
+    fn a_checkouts_token_is_the_environment_then_hook_token_never_a_dotenv() {
+        let dir = std::env::temp_dir().join(format!("bellwether-token-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".env"), "BELLWETHER_HOOK_TOKEN=fromDotEnv_0123456789ab\nPASTURE_HOOK_TOKEN=oldDotEnv_0123456789ab\n").unwrap();
+        assert_eq!(token_at(&dir, None), None, "no hook-token: nothing, whatever the .env holds");
+        assert_eq!(token_at(&dir, Some(String::new())), None, "an empty export counts as none");
+        std::fs::write(dir.join("hook-token"), "fromFile_0123456789abcd\n").unwrap();
+        assert_eq!(token_at(&dir, None).as_deref(), Some("fromFile_0123456789abcd"));
+        assert_eq!(token_at(&dir, Some("fromEnv_0123456789abcd".into())).as_deref(), Some("fromEnv_0123456789abcd"), "an exported token beats hook-token");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `hook-token` is a FIFO nobody writes to, so opening it blocks: the token file must be
+    /// read only when the environment has no token. (A test that only checked the answer
+    /// passed even with the read moved above the early return.)
+    #[test]
+    fn the_token_file_is_read_only_when_the_environment_has_no_token() {
         let dir = std::env::temp_dir().join(format!("bellwether-lazy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let fifo = std::ffi::CString::new(dir.join(".env").to_string_lossy().as_bytes()).unwrap();
+        let fifo = std::ffi::CString::new(dir.join("hook-token").to_string_lossy().as_bytes()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0, "mkfifo");
         let (tx, rx) = std::sync::mpsc::channel();
         let d = dir.clone();
         // If the FIFO is opened, this thread blocks for good; the test fails on the timeout.
         std::thread::spawn(move || {
-            let _ = tx.send(token_from(Some(&d), |k| (k == "BELLWETHER_HOOK_TOKEN").then(|| "fromEnv_0123456789abcd".to_string())));
+            let _ = tx.send(token_at(&d, Some("fromEnv_0123456789abcd".to_string())));
         });
-        let got = rx.recv_timeout(std::time::Duration::from_secs(3)).expect("token_from blocked: it opened the .env although the environment has the token");
+        let got = rx.recv_timeout(std::time::Duration::from_secs(3)).expect("token_at blocked: it opened hook-token although the environment has the token");
         assert_eq!(got.as_deref(), Some("fromEnv_0123456789abcd"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -370,25 +282,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bellwether-later-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(token_from(Some(&dir), |_| None), None, "no token yet");
-        std::fs::write(dir.join(".env"), "BELLWETHER_HOOK_TOKEN=appearedLater_0123456789\n").unwrap();
-        assert_eq!(token_from(Some(&dir), |_| None).as_deref(), Some("appearedLater_0123456789"));
+        assert_eq!(token_at(&dir, None), None, "no token yet");
+        std::fs::write(dir.join("hook-token"), "appearedLater_0123456789\n").unwrap();
+        assert_eq!(token_at(&dir, None).as_deref(), Some("appearedLater_0123456789"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Source check: the repository layout reads no `.env` and no `PASTURE_*` name.
     #[test]
-    fn the_env_file_is_the_repos_own_then_a_hubs() {
-        let base = std::env::temp_dir().join(format!("bellwether-envfile-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let alone = base.join("bellwether");
-        std::fs::create_dir_all(&alone).unwrap();
-        assert_eq!(env_file(&alone), alone.join(".env"), "no .env anywhere: the repo's own (where token init writes)");
-        let agent = base.join("hub").join("agents").join("bellwether");
-        std::fs::create_dir_all(&agent).unwrap();
-        std::fs::write(base.join("hub").join(".env"), "BELLWETHER_HOOK_TOKEN=x\n").unwrap();
-        assert_eq!(env_file(&agent), agent.join("..").join("..").join(".env"), "inside a hub with no .env of its own");
-        std::fs::write(agent.join(".env"), "BELLWETHER_HOOK_TOKEN=y\n").unwrap();
-        assert_eq!(env_file(&agent), agent.join(".env"), "its own .env wins");
-        let _ = std::fs::remove_dir_all(&base);
+    fn the_repository_layout_reads_no_dotenv_and_no_old_names() {
+        let src = include_str!("settings.rs");
+        let repo = src.split("fn load_repository()").nth(1).unwrap().split("\n    pub fn f64_at").next().unwrap();
+        assert!(!repo.contains("env_os(") && !repo.contains(".env\"") && !repo.contains("PASTURE"), "load_repository reads an old name or a .env");
     }
 }

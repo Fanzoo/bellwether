@@ -6631,3 +6631,134 @@ Recorded by the developer while fixing the flaky Rust throughput test (2026-10-1
      - Not verified: on a real strip (no GUI strip was started). A walking sheep's box is
        reported at most every 250 ms with 8 px of padding, so the label may blink off
        briefly under a still cursor, the same lag click-through already has.
+
+137. **Milestone 11 built: the Node brain removed, version 1.0.0 (status).** Steps 1–9 as
+     planned, each run green before the next; not committed, tagged or pushed.
+     - **Step 1.** `config.example.json` per M11-c, vectors regenerated with the Node brain,
+       the frozen sample written (`scripts/differential.mjs --freeze test/fixtures/frozen`,
+       seed 1) and `crates/core/tests/frozen.rs` added. Disabling the `bearer` rule in a
+       scratch build failed its redact (294 of 2 000) and normalise (18) tests. Baseline:
+       `npm run test:rust` 30 of 30 rows green on both columns; differential 10⁵ cases per
+       area, 0 unexplained differences; `npm test` 1 116 tests.
+     - **Step 2.** `test/support/` (`client.mjs`, `replay.mjs`, `util.mjs`, `privacy.mjs`,
+       `hooks.mjs`), each headed as a test driver copied from v0.2.0-rc.3;
+       `scripts/fetch-pets.mjs` (`--data`, default `BELLWETHER_HOME`, else `data/`); CI's two
+       fetch steps call it. It fetched and verified esheep64 into a scratch `--data` dir.
+     - **Step 3, deletions and their reasons** (the table's rows): `autostart.test` (10,
+       SMAppService is the app's), `envload.test` (7, no `.env`), `hook-route.test` (22,
+       Node's in-process server; Rust twins in hook-route-blackbox and http.rs, plus the new
+       `/hook` source check); in other files: doctor's Node floor (1); hooks' `parseArgs` (1);
+       token's `.env` writer (7); rename's `PASTURE_*` adoption (4), `X-Pasture-*` (2),
+       repository LaunchAgents (5) and the `pasture` shim tests (2, one of them had run green
+       under rust: it only read `pasture.cmd`); migrate's in-process migration, launchd,
+       "which token wins" and cargo describes (19); tester-migrate's (20) and
+       tester-migrate-recheck's (15, `probe.mjs` included); shellctl's repository strip
+       control (8) and tester-shellctl's (14); tester-m1's shim describe and plan/write case
+       (4); tester-m1-reverify's shim symlink, Node floor (6) and "exported token wins over
+       the .env" (8 in all); tester-m3's autostart describe; tester-m10's autostart, `next`
+       walk and `.env` token init (the old docs walk is replaced, below); tester-regression's
+       two `.env` cases; tester-isolation-recheck's `stripproc` case.
+     - **Step 4.** helpers.mjs, impl.mjs and setup.mjs are Rust only (`BELLWETHER_HOME` set,
+       `BELLWETHER_ENV` and `PASTURE_*` gone); `build:dev`, `pretest`, `test
+       --test-timeout=120000`; `test/conformance.mjs` and `conformance.json` deleted. With a
+       binary built without the feature (`BELLWETHER_BIN`, a scratch build), the suite ended
+       in 32 s, every file failing at once with "has no conformance commands … Build it with
+       `npm run build:dev` …".
+     - **Step 5.** cli.rs refuses every command but help/version outside a bundle without
+       `BELLWETHER_HOME` (exit 3, naming `export BELLWETHER_HOME="$PWD/data"` and
+       docs/DEVELOPMENT.md); the repository layout per M11-b; the strings; `identity::runs`
+       and the `/hook` source test; `token.rs` `an_exported_token_beats_the_file`; settings.rs
+       tests for the home order, the token order (a `.env` beside it ignored) and the FIFO
+       rule. New `shell/src-tauri/tests/dev_home.rs` through the binary: `doctor`, `serve`,
+       `token init`, `hooks print`, `status` exit 3 without the home, help and version work,
+       with it `token init` and `hooks print` work, and a copy in a scratch
+       `Bellwether.app/Contents/MacOS/Bellwether` reached through a symlink writes the temp
+       HOME's Application Support `hook-token` without it. Mutations: `args.contains` in
+       `runs` and a body-writing `/hook` response each failed their test. `load_app` is
+       byte-identical to rc.3's.
+     - **Steps 6–8.** Deleted `brain/`, the four shims, `.env.example`,
+       `scripts/differential.mjs`, `test/fixtures/build-vectors.mjs`; `build-fixtures.mjs`
+       takes `fingerprint` from impl (rerun: no fixture changed); `release.mjs` has nine
+       version places and the CHANGELOG rule (`check v1.0.0` refused without the section,
+       accepted with it; `v1.0.0-rc.1` needs none: release.test); NOTICE, THIRD-PARTY.md,
+       package.json; ci.yml per "CI after M11" (actionlint 1.7.12, Docker, on all three
+       workflows: no findings; release.yml and tap.yml unchanged since v0.2.0-rc.3);
+       docs/DEVELOPMENT.md rewritten, RELEASING.md (b) and (c), DIVERGENCES.md frozen,
+       CHANGELOG.md, the README line, docs.test and tester-m10 (a new walk of the First run's
+       `bw` lines through the binary). The First run walked in a scratch copy of the working
+       tree (no `.git`, `.env`, `config.json` or `data/`) with temp HOME and
+       `BELLWETHER_HOME`: `doctor` failed only `brain` and `hooks installed`; then `serve`,
+       `hooks print --out`, a replayed s2 fixture and `status` showing its sheep.
+     - **Step 9.** First `release.mjs version 1.0.0` with every suite green and `check
+       v1.0.0` passing; then, after BR-3K's verification, **1.0.0-rc.1** (below).
+     - **Decision 7's outcome: v1.0.0-rc.1 first.** Decision 7 allowed 1.0.0 directly only if
+       the changes under `shell/src-tauri/src` and `crates/` touch non-bundle paths, wording
+       and tests. M11's own changes do (`load_app` is byte-identical; main.rs's new check
+       answers nothing inside a bundle). But `git diff v0.2.0-rc.3` also holds the hover-label
+       fix (deviation 136, commit 9a94aac: clickthrough.rs, brain.rs, `shell/src/main.js`,
+       `shell/src/player/hover.mjs`), which changes the bundled strip and has never run on a
+       real one. So the maintainer chose `v1.0.0-rc.1` first (the plan's fallback: publish it
+       as the latest release, prove by-hand steps 4–5 on it, then cut 1.0.0). CHANGELOG.md names the fix under
+       `## 1.0.0-rc.1` and in 1.0.0's "Since 0.2.0-rc.3" (which no longer says "nothing
+       changes in the app"); the only other change a user of the app could see is the wording
+       of a pet-pin error. The version is now `1.0.0-rc.1`: `release.mjs check v1.0.0-rc.1`
+       passes, and `check v1.0.0` still requires the `## 1.0.0` section (release.test).
+     - **After BR-3K's verification:** a development binary's doctor no longer suggests
+       `autostart install` (which it refuses): cli.rs `dev_binary_wording` rewords the shared
+       `next`, `brain` and `hook errors` lines to `bellwether serve` outside a bundle only
+       (unit test `a_development_binarys_doctor_suggests_serve_not_autostart`, which also
+       fails if crates/brain doctor.rs stops saying the phrases it replaces). Bellwether.app's
+       doctor is unchanged.
+     - **Coverage audit** (step 1's rust column → final): every file unchanged except
+       doctor 33 → 33 and hooks 75 → 75 (their Node-only skips deleted), docs 12 → 14,
+       hover-label 9 → 11 (138), release 19 → 20, pets 1 → 11 (138), tester-m10 5 → 7,
+       rename 10 → 9 (the `pasture.cmd` row), tester-isolation-recheck 10 → 9 (`stripproc`);
+       migrate 8, shellctl 2, tester-migrate 5, tester-migrate-recheck 2, tester-m1 36,
+       tester-m1-reverify 62, tester-m3 8, tester-regression 25, tester-shellctl 12, token 6
+       (each its rust passes, the Node-only skips deleted); three files deleted.
+     - Not verified: the PR's `ci` run (nothing was pushed), and a real Claude Code session
+       against the development First run (`claude --settings` was not run).
+
+138. **Deviations in building milestone 11.**
+     - **The frozen sample is 4.9 MB, not under 3 MB.** 2 000 cases per area as planned
+       (env 2 000, redact 2 000, normalise 2 000, json 1 600 with 400 integer-like-key cases
+       skipped, diff 2 000): redact (2.1 MB) and normalise (1.7 MB) cases are long. Git stores
+       the five files in about 0.9 MB (gzip -9 of all of them). Kept every case, since the
+       sample is there for R1's reach; `--freeze` with `--cases 1000` would fit 3 MB, at half
+       the reach, if the maintainer prefers.
+     - **Two vector cases changed with the example, not one:** "an older config without
+       thinkingTimeoutSec" is built from the example too. And after the walk in step 8,
+       `"autostart": false` also left `config.example.json` (the Rust doctor WARNs about it as
+       obsolete, so a checkout's first `doctor` had a WARN); its five vector cases were edited
+       by hand (M11-e). The vector files' comments now say they are golden.
+     - **`env_os` keeps its `PASTURE_` fallback**, used now only for `SHELL_TRACE`.
+       Dropping it would change the bundled strip (an old-named debug variable ignored); per
+       maintainer decision 7 the bundle's behaviour stays as it was. `load_repository` reads
+       `BELLWETHER_*` names only, so M11-b holds.
+     - **`serve` needed main.rs too:** dispatch sends `serve` straight to the brain, past
+       `cli::run`. main.rs asks `cli::refused_without_home("serve")` first; inside a bundle
+       it answers nothing, so the app's path is unchanged. A unit test pins both call sites.
+     - **migration_fixtures.rs** now sets `BELLWETHER_HOME` (the temp HOME's own Application
+       Support, where the app's files went anyway) for the binary runs; dev_home.rs is new.
+     - **Kept rather than deleted:** tester-m3's five `pets fetch` probes (traversal names,
+       mid-body failure, size cap) now test `scripts/fetch-pets.mjs`, in pets.test.mjs.
+     - **The `dock` line assertions** in grass-dock and tester-grass-dock checked Node's
+       wording (`bellwether-shell entry`, `shell dock-permission`); they now check the Rust
+       line's. Their docs checks name `--ax-prompt`, the development strip's way to ask for
+       Accessibility. grass-dock's "asked only on request" source check reads lib.rs and
+       onboarding.rs instead of `brain/cli.mjs`; isolation.test's "nothing builds into
+       target/" checks `scripts/`.
+     - **tester-isolation-recheck** forbade `cargo build` in any npm script; it now forbids
+       `--release`, `--target-dir` and `CARGO_TARGET_DIR`, so `build:dev` passes.
+       **tester-m8** no longer prefers `target/release` (the old LaunchAgent strip) for
+       `--locate`; it takes the development build.
+     - **Strings outside the plan's list** also named `./bellwether`: cli.rs `NOT_THE_APP`,
+       and the pet errors in lib.rs and onboarding.rs; all reworded for a development build.
+       `pets.lock.json`'s comment names the fetch script (the pins are unchanged).
+     - **The step 3 grep** also listed `test/fixtures/build-vectors.mjs` until step 6 deleted
+       it, as the plan's own order implies.
+     - **The hover label (from BR-3K's check of 136):** hover-label.test.mjs gains "goes on
+       pointercancel" (fails with main.js's `pointercancel` listener removed) and "draw never
+       labels a sprite that is leaving or gone, even with a hover left over from before"
+       (fails with the `sprite.gone` / `removedAt` guard in `draw` removed; the test's handle
+       on the strip now also exposes `draw` and a hover setter). Both mutations were run.

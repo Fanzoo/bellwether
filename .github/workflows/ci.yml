@@ -1,5 +1,6 @@
-# Tests, the parity table, the cross-platform check (distribution plan, milestone 2) and an
-# unsigned universal app with its release files (milestone 9, plan D7).
+# The test suite against the Rust brain, the cargo tests, the cross-platform check
+# (distribution plan, milestones 2 and 11) and an unsigned universal app with its release
+# files (milestone 9, plan D7).
 #
 # Needs no secrets: nothing here signs with a Developer ID, notarizes or publishes, no job
 # names an environment, and the token has read access only, so a pull request from a fork
@@ -22,12 +23,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # The suite's Node; brain/ needs >= 22.9 (package.json engines).
+  # The Node the test suite and the dev scripts run on (package.json engines: >= 22.9).
   NODE_VERSION: "22.14.0"
 
 jobs:
-  node:
-    name: Node suite (npm test)
+  suite:
+    name: Test suite against the Rust brain (npm test)
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -45,18 +46,16 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             shell/src-tauri/target-dev
-          key: cargo-node-suite-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+          key: cargo-suite-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
       # What the suite reads besides the checkout, as a developer's machine has it:
       - name: Every platform's crates (the THIRD-PARTY.md check reads their licences)
         run: cargo fetch --locked --manifest-path shell/src-tauri/Cargo.toml
-      - name: A build of the strip (debug, into target-dev/; tester-m8 runs its --locate)
-        run: cargo build --locked --manifest-path shell/src-tauri/Cargo.toml
+      - name: The conformance build npm test needs (debug, into target-dev/; tester-m8 runs its --locate)
+        run: npm run build:dev
       - name: The pet art, pinned and sha256-checked (fetched, never committed; see NOTICE)
-        run: node brain/cli.mjs pets fetch
+        run: node scripts/fetch-pets.mjs
       - name: npm test
         run: npm test
-      - name: The shared vectors match what the Node brain answers
-        run: npm run test:vectors
       - name: Bellwether's own pets match their sources (plan D8)
         run: node scripts/build-pet.mjs --check
 
@@ -84,43 +83,6 @@ jobs:
         run: npm run test:cargo
       - name: cargo test with the conformance feature
         run: cargo test --manifest-path shell/src-tauri/Cargo.toml --workspace --features bellwether-shell/conformance
-
-  conformance:
-    name: Parity table (npm run test:rust) and the differential
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Rust toolchain
-        run: rustup toolchain install stable --profile minimal && rustup default stable
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            shell/src-tauri/target-dev
-          key: cargo-conformance-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
-      # The same as the Node suite job has, so the node column agrees with it.
-      - name: Every platform's crates (the THIRD-PARTY.md check reads their licences)
-        run: cargo fetch --locked --manifest-path shell/src-tauri/Cargo.toml
-      - name: The pet art, pinned and sha256-checked (fetched, never committed; see NOTICE)
-        run: node brain/cli.mjs pets fetch
-      - name: Build the Rust binary with the conformance feature (debug, into target-dev/)
-        run: cargo build --locked --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance
-      - name: Parity table (published as this job's summary)
-        # Fails only when a node cell is red, or a row the current milestone requires
-        # is red under rust (test/conformance.json).
-        run: npm run test:rust
-      - name: Differential, 10^5 cases per area
-        run: |
-          set -o pipefail
-          npm run --silent differential | tee differential.txt
-          { echo '## Differential'; echo; echo '```'; cat differential.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   bundle:
     name: Unsigned universal app, DMG and updater files; no hidden commands

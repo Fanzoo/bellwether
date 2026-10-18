@@ -58,6 +58,9 @@ pub fn run(args: &[String]) -> i32 {
         print!("{USAGE}");
         return exit::OK;
     };
+    if let Some(code) = refused_without_home(command) {
+        return code;
+    }
     match command_result(command, &rest[1..]) {
         Ok(code) => code,
         Err((message, code)) => {
@@ -66,6 +69,32 @@ pub fn run(args: &[String]) -> i32 {
         }
     }
 }
+
+/// `home_refusal` for this process (outside a bundle, without BELLWETHER_HOME): says why
+/// on stderr and gives the exit code (3). `run` asks it first, and main.rs asks it before
+/// `serve`, which starts the brain without going through `run`.
+pub fn refused_without_home(command: &str) -> Option<i32> {
+    let message = home_refusal(command, crate::identity::in_app_bundle(), std::env::var_os("BELLWETHER_HOME"))?;
+    eprintln!("bellwether: {message}");
+    Some(exit::BAD_CONFIG)
+}
+
+/// Milestone 11 (M11-a): a binary outside an app bundle (a development build in
+/// `target-dev/`) runs no command but `help` and `version` without BELLWETHER_HOME, which
+/// would otherwise make it act on the installed app's own folder in Application Support.
+/// Inside a bundle (the Homebrew symlink resolves into it) nothing changes. An unknown
+/// command is left to say so. The strip's modes (`--demo`, no arguments, …) never get here.
+fn home_refusal(command: &str, in_bundle: bool, home: Option<std::ffi::OsString>) -> Option<String> {
+    let exempt = matches!(command, "help" | "--help" | "-h" | "version" | "--version");
+    let known = command.starts_with("__") || KNOWN_COMMANDS.contains(&command);
+    if in_bundle || exempt || !known || home.is_some_and(|h| !h.is_empty()) {
+        return None;
+    }
+    Some(format!("this is a development binary outside Bellwether.app, and BELLWETHER_HOME isn't set, so `{command}` would use the installed app's files. In a checkout, `export BELLWETHER_HOME=\"$PWD/data\"` first (see docs/DEVELOPMENT.md); the app's own command is Bellwether.app's `Contents/MacOS/Bellwether`"))
+}
+
+/// Every command `command_result` knows (the hidden `__` ones aside).
+const KNOWN_COMMANDS: [&str; 15] = ["migrate", "serve", "record", "status", "mute", "unmute", "show", "hide", "replay", "token", "hooks", "pets", "doctor", "shell", "autostart"];
 
 /// One command's outcome: its exit code, or a message for stderr and the exit code.
 fn command_result(command: &str, tail: &[String]) -> CliResult {
@@ -261,7 +290,7 @@ fn autostart(args: &[String]) -> CliResult {
 }
 
 /// What `autostart install|uninstall` says outside Bellwether.app.
-pub const NOT_THE_APP: &str = "not running from Bellwether.app: login items belong to the app bundle (SMAppService), so a development binary has none to change, and nothing was registered or written. Build the app with `node scripts/build-app.mjs` and run its `Contents/MacOS/Bellwether autostart …`. The repository's own LaunchAgents are `./bellwether autostart` in the checkout";
+pub const NOT_THE_APP: &str = "not running from Bellwether.app: login items belong to the app bundle (SMAppService), so a development binary has none to change, and nothing was registered or written. Build the app with `node scripts/build-app.mjs` and run its `Contents/MacOS/Bellwether autostart …` (docs/DEVELOPMENT.md)";
 
 /// After a `requiresApproval`: offer to open the Login Items pane. Asked only when a
 /// person is at the terminal (stdin and stdout both a terminal); otherwise the command
@@ -412,7 +441,7 @@ fn shell(args: &[String]) -> CliResult {
 /// - restart: stop, then start.
 fn shell_control(sub: &str) -> CliResult {
     let Some(bundle) = crate::identity::bundle_path() else {
-        return Err(("`bellwether shell start|stop|restart` controls Bellwether.app's strip, and this is a development binary outside the app. In a checkout, the repository's strip is `./bellwether shell start|stop|restart`".into(), exit::NOT_RUNNING));
+        return Err(("`bellwether shell start|stop|restart` controls Bellwether.app's strip, and this is a development binary outside the app. A development strip is started by hand: `cargo run --manifest-path shell/src-tauri/Cargo.toml` (docs/DEVELOPMENT.md)".into(), exit::NOT_RUNNING));
     };
     if sub != "start" {
         let (said, running) = quit_strips().map_err(|e| (e, exit::UNEXPECTED))?;
@@ -632,7 +661,23 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
         let (status, detail) = agent_down_hint(agent_port(), checked_port);
         add(&mut checks, status, "login: brain", detail);
     }
-    doctor::finish(&input, checks)
+    let mut report = doctor::finish(&input, checks);
+    if !crate::identity::in_app_bundle() {
+        for c in &mut report.checks {
+            c.detail = dev_binary_wording(&c.detail);
+        }
+    }
+    report
+}
+
+/// A development binary has no login items (it refuses `autostart install`), so where
+/// doctor's shared lines suggest starting the brain at login, it says `bellwether serve`
+/// only. Bellwether.app's lines are untouched.
+fn dev_binary_wording(detail: &str) -> String {
+    detail
+        .replace("start the brain: at login with `bellwether autostart install --write`, or now with `bellwether serve`", "start the brain: `bellwether serve` (a development binary has no start at login; docs/DEVELOPMENT.md)")
+        .replace("(`bellwether autostart install --write` starts one at login; `bellwether serve` runs one now)", "(`bellwether serve` runs one; a development binary has no start at login)")
+        .replace(". With start at login on, launchd starts it: `bellwether autostart status`", "")
 }
 
 /// Doctor's one Accessibility line, from the strips running now (None: a development
@@ -976,13 +1021,61 @@ mod tests {
         }
     }
 
+    /// A development binary's doctor never suggests `autostart install` (which it refuses):
+    /// the shared lines are reworded; every phrase replaced is still in crates/brain doctor.rs.
+    #[test]
+    fn a_development_binarys_doctor_suggests_serve_not_autostart() {
+        let next = "start the brain: at login with `bellwether autostart install --write`, or now with `bellwether serve`";
+        assert_eq!(dev_binary_wording(next), "start the brain: `bellwether serve` (a development binary has no start at login; docs/DEVELOPMENT.md)");
+        let errors = "… until a brain runs (`bellwether autostart install --write` starts one at login; `bellwether serve` runs one now)";
+        assert!(!dev_binary_wording(errors).contains("autostart") && dev_binary_wording(errors).contains("`bellwether serve` runs one"));
+        let brain = "brain not running — run `bellwether serve` (nothing listening on 127.0.0.1:47420). With start at login on, launchd starts it: `bellwether autostart status`";
+        assert_eq!(dev_binary_wording(brain), "brain not running — run `bellwether serve` (nothing listening on 127.0.0.1:47420)");
+        let shared = include_str!("../../../crates/brain/src/doctor.rs");
+        for phrase in ["at login with `bellwether autostart install --write`, or now with `bellwether serve`", "(`bellwether autostart install --write` starts one at login; `bellwether serve` runs one now)", ". With start at login on, launchd starts it: `bellwether autostart status`"] {
+            assert!(shared.contains(phrase), "doctor.rs no longer says {phrase:?}: update dev_binary_wording");
+        }
+    }
+
+    /// M11-a: outside a bundle, every command but help and version needs BELLWETHER_HOME;
+    /// inside one, or with it set, nothing is refused; an unknown command says so.
+    #[test]
+    fn a_development_binary_needs_bellwether_home() {
+        let home = || Some(std::ffi::OsString::from("/x/data"));
+        for c in ["doctor", "serve", "token", "hooks", "migrate", "shell", "autostart", "pets", "status", "__session"] {
+            let m = home_refusal(c, false, None).unwrap_or_else(|| panic!("{c} wasn't refused"));
+            assert!(m.contains("BELLWETHER_HOME") && m.contains("export BELLWETHER_HOME=\"$PWD/data\"") && m.contains("docs/DEVELOPMENT.md"), "{m}");
+            assert_eq!(home_refusal(c, false, Some(std::ffi::OsString::new())).is_some(), true, "{c}: an empty BELLWETHER_HOME counts as unset");
+            assert_eq!(home_refusal(c, false, home()), None, "{c} with BELLWETHER_HOME");
+            assert_eq!(home_refusal(c, true, None), None, "{c} inside a bundle");
+        }
+        for c in ["help", "--help", "-h", "version", "--version", "bogus"] {
+            assert_eq!(home_refusal(c, false, None), None, "{c}");
+        }
+        // Every command command_result knows is in the list (so none slips past the rule).
+        let src = include_str!("cli.rs");
+        let arms = src.split("fn command_result(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        for c in KNOWN_COMMANDS {
+            assert!(arms.contains(&format!("\"{c}\"")), "{c} isn't a command");
+        }
+        // And `run` asks it before anything else.
+        let run = src.split("pub fn run(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(run.find("refused_without_home(").unwrap() < run.find("command_result(").unwrap());
+        // So does main.rs, before `serve`.
+        let main = include_str!("main.rs");
+        assert!(main.contains("Mode::Serve => std::process::exit(bellwether_shell_lib::cli::refused_without_home(\"serve\").unwrap_or_else(|| bellwether_brain::cli::run(\"serve\", &args[2..]))),"), "main.rs serves without the check");
+    }
+
     #[test]
     fn unknown_commands_exit_1_and_bad_flags_exit_3() {
         // A hidden word that isn't a command: "unknown command" without the conformance
         // feature, "unknown hidden command" with it; exit 1 either way.
-        assert_eq!(run(&s(&["bellwether", "__nope"])), exit::UNEXPECTED);
-        assert_eq!(run(&s(&["bellwether", "autostart", "install", "--nope"])), exit::BAD_CONFIG);
-        assert_eq!(run(&s(&["bellwether", "autostart", "sideways"])), exit::BAD_CONFIG);
+        // (Through command_result: this test binary is outside a bundle and has no
+        // BELLWETHER_HOME, so `run` would refuse them first; that refusal is pinned in
+        // `a_development_binary_needs_bellwether_home`.)
+        assert!(matches!(command_result("__nope", &[]), Ok(exit::UNEXPECTED) | Err((_, exit::UNEXPECTED))));
+        assert_eq!(command_result("autostart", &s(&["install", "--nope"])).unwrap_err().1, exit::BAD_CONFIG);
+        assert_eq!(command_result("autostart", &s(&["sideways"])).unwrap_err().1, exit::BAD_CONFIG);
         assert_eq!(run(&s(&["bellwether", "version"])), exit::OK);
         // Outside Bellwether.app (this test binary), the strip commands refuse: exit 2,
         // nothing started or stopped.

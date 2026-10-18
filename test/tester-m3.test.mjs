@@ -1,20 +1,15 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { autostart, plistText, shellBinary } from '../brain/autostart.mjs';
-import { fetchPets } from '../brain/pets.mjs';
 import { compile, evaluate, KEYWORDS } from '../shell/src/player/expr.mjs';
-import { AGENT_DIR, notUnderRust, spawnBrainSync, tempDir } from './helpers.mjs';
+import { AGENT_DIR } from './helpers.mjs';
 
 /**
  * Tester probes for Milestone 3. No window is opened here and nothing touches
- * ~/Library/LaunchAgents or launchctl: autostart runs under a temp HOME with a `run`
- * that fails the test if it is ever called.
+ * ~/Library/LaunchAgents or launchctl. (The repository's LaunchAgent autostart went with the
+ * Node brain in milestone 11; the eSheep fetch probes now test scripts/fetch-pets.mjs, in
+ * pets.test.mjs.)
  */
 
 const TAURI = path.join(AGENT_DIR, 'shell', 'src-tauri');
@@ -221,144 +216,5 @@ describe('the pet expression evaluator cannot run code', () => {
     const t = process.hrtime.bigint();
     for (const s of ['('.repeat(99) + '1' + ')'.repeat(99), '-'.repeat(199) + '1', '1' + '+1'.repeat(99)]) compile(s);
     assert.ok(Number(process.hrtime.bigint() - t) / 1e6 < 100);
-  });
-});
-
-describe('autostart (temp HOME only; launchctl is never run)', notUnderRust("the repository's LaunchAgent autostart, which writes plists; the app's `autostart` drives SMAppService and never writes ~/Library/LaunchAgents (test/DIVERGENCES.md 23, shell/src-tauri/tests/no_launchagents.rs)"), () => {
-  const never = () => {
-    throw new Error('launchctl was called');
-  };
-  const mk = () => {
-    const home = tempDir('as-home-');
-    fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
-    return home;
-  };
-  test('preview writes nothing; --write writes a valid plist with no token, and never calls launchctl for a temp HOME', () => {
-    const home = mk();
-    const file = path.join(home, 'Library', 'LaunchAgents', 'local.bellwether.brain.plist');
-    process.env.BELLWETHER_HOOK_TOKEN = 'plistTokenCanary_0123456789abcdef';
-    try {
-      const prev = autostart('install', { home, run: never, uid: 501 });
-      assert.equal(prev.wrote, false);
-      assert.equal(fs.existsSync(file), false);
-      assert.match(prev.lines.join('\n'), /Preview only/);
-      const w = autostart('install', { home, write: true, run: never, uid: 501 });
-      assert.equal(w.wrote, true);
-      const text = fs.readFileSync(file, 'utf8');
-      assert.doesNotMatch(text, /plistTokenCanary|BELLWETHER_HOOK_TOKEN/);
-      assert.match(w.lines.join('\n'), /launchctl not called/);
-      const lint = spawnSync('plutil', ['-lint', file], { encoding: 'utf8' });
-      assert.equal(lint.status, 0, lint.stdout + lint.stderr);
-      assert.match(text, /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>/);
-      const st = autostart('status', { home, run: never, uid: 501 });
-      assert.match(st.lines.join('\n'), /not checked/);
-      const un = autostart('uninstall', { home, write: true, run: never, uid: 501 });
-      assert.equal(fs.existsSync(file), false);
-      assert.match(un.lines.join('\n'), /launchctl not called/);
-    } finally {
-      delete process.env.BELLWETHER_HOOK_TOKEN;
-    }
-  });
-  test('paths with XML metacharacters and spaces are escaped and the plist stays valid', () => {
-    const text = plistText({ nodePath: '/opt/no de/bin/node', agentDir: '/h/a&b <c>/bellwether', dataDir: '/h/a&b <c>/data' });
-    const f = path.join(tempDir('plist-'), 'x.plist');
-    fs.writeFileSync(f, text);
-    assert.equal(spawnSync('plutil', ['-lint', f], { encoding: 'utf8' }).status, 0);
-    assert.doesNotMatch(text, /a&b <c>/);
-  });
-  test('a symlinked or odd HOME that is not the real home never reaches launchctl; HOME that IS real would, so the guard is checked by injection', () => {
-    const home = mk();
-    const link = path.join(tempDir('as-link-'), 'home-link');
-    fs.symlinkSync(home, link);
-    autostart('install', { home: link, write: true, run: never, uid: 501 });
-    autostart('uninstall', { home: link, write: true, run: never, uid: 501 });
-    const calls = [];
-    autostart('install', { home, write: true, uid: 501, realHome: () => true, run: (c, a) => (calls.push([c, ...a]), { ok: true, out: '' }) });
-    assert.deepEqual(calls.map((c) => c[1]), ['bootout', 'bootstrap']);
-    assert.ok(calls.every((c) => c[0] === 'launchctl'));
-  });
-  test('the CLI under a temp HOME: install preview, --write, status and a refused unknown flag', () => {
-    const home = mk();
-    const env = { PATH: process.env.PATH, HOME: home, BELLWETHER_DATA_DIR: path.join(home, 'data'), BELLWETHER_HOOK_TOKEN: 'cliTokenCanary_0123456789abcdef' };
-    // On a fresh clone the strip isn't built: install refuses (exit 2) and says how to
-    // go on; the rest then runs with --brain-only, which needs no build.
-    const built = fs.existsSync(shellBinary());
-    const cli = (...a) => spawnBrainSync(['autostart', ...a], { encoding: 'utf8', env });
-    if (!built) {
-      const refused = cli('install', '--write');
-      assert.equal(refused.status, 2, refused.stderr);
-      assert.match(refused.stderr, /isn't built yet[\s\S]*--brain-only/);
-      assert.ok(!fs.existsSync(path.join(home, 'Library', 'LaunchAgents', 'local.bellwether.brain.plist')), 'nothing written when refused');
-    }
-    const run = (...a) => cli(...a, ...(built || a[0] !== 'install' && a[0] !== 'uninstall' ? [] : ['--brain-only']));
-    const p = run('install');
-    assert.equal(p.status, 0, p.stderr);
-    assert.doesNotMatch(p.stdout, /cliTokenCanary/);
-    const w = run('install', '--write');
-    assert.equal(w.status, 0, w.stderr);
-    assert.match(w.stdout, /launchctl not called/);
-    assert.ok(fs.existsSync(path.join(home, 'Library', 'LaunchAgents', 'local.bellwether.brain.plist')));
-    assert.equal(run('install', '--writ').status, 3);
-    assert.equal(run('bogus').status, 3);
-    assert.equal(run('status', '--write').status, 3);
-    assert.equal(run('uninstall', '--write').status, 0);
-  });
-});
-
-describe('pets fetch', notUnderRust("`pets fetch` downloads the eSheep art into the repository's data/pets; the app imports a pet file instead (`pets import`, plan D8), tested in pets.test.mjs and crates/brain pets.rs"), () => {
-  const GOOD = Buffer.from('<animations>good</animations>');
-  const hash = (b) => createHash('sha256').update(b).digest('hex');
-  const pinned = { esheep64: { path: 'Pets/esheep64/animations.xml', sha256: hash(GOOD) } };
-  const resp = (body, init = {}) => async () => new Response(body, { status: 200, ...init });
-  const dirs = () => tempDir('pets-');
-
-  test('a good file is written and verified; a second run downloads nothing', async () => {
-    const d = dirs();
-    let n = 0;
-    const f = async () => (n++, new Response(GOOD));
-    await fetchPets(d, { fetchImpl: f, pinned });
-    assert.equal(fs.readFileSync(path.join(d, 'pets', 'esheep64', 'animations.xml')).equals(GOOD), true);
-    await fetchPets(d, { fetchImpl: f, pinned });
-    assert.equal(n, 1);
-  });
-  test('a hash mismatch writes nothing, leaves an existing good file alone, and replaces a corrupted one only with a verified one', async () => {
-    const d = dirs();
-    await assert.rejects(fetchPets(d, { fetchImpl: resp('<animations>evil</animations>'), pinned }), /sha256 mismatch/);
-    assert.equal(fs.existsSync(path.join(d, 'pets')), false, 'a rejected download left files behind');
-    await fetchPets(d, { fetchImpl: resp(GOOD), pinned });
-    const file = path.join(d, 'pets', 'esheep64', 'animations.xml');
-    fs.writeFileSync(file, 'tampered');
-    await fetchPets(d, { fetchImpl: resp(GOOD), pinned });
-    assert.equal(fs.readFileSync(file).equals(GOOD), true);
-    fs.writeFileSync(file, 'tampered');
-    await assert.rejects(fetchPets(d, { fetchImpl: resp('nope'), pinned }));
-    assert.equal(fs.readFileSync(file, 'utf8'), 'tampered', 'a failed download must not touch the file');
-  });
-  test('folder names that are not pinned pets are refused, including prototype keys and traversal', async () => {
-    const d = dirs();
-    for (const name of ['../evil', '..', '/etc', 'esheep64/../../x', '__proto__', 'constructor', 'toString', 'hasOwnProperty', '']) {
-      let called = false;
-      await assert.rejects(fetchPets(d, { only: [name], fetchImpl: async () => ((called = true), new Response(GOOD)), pinned }), /unknown pet|HTTP|mismatch/, JSON.stringify(name));
-      assert.equal(called && name !== '__proto__' && name !== 'constructor' && name !== 'toString' && name !== 'hasOwnProperty', false, `${name} reached the network`);
-    }
-    assert.deepEqual(fs.readdirSync(d), [], 'something was written');
-  });
-  test('HTTP errors, a redirect to another host, and a connection that dies mid-body each give a cause, not a stack', async () => {
-    const d = dirs();
-    await assert.rejects(fetchPets(d, { fetchImpl: async () => new Response('x', { status: 404 }), pinned }), /HTTP 404/);
-    await assert.rejects(fetchPets(d, { fetchImpl: async () => new Response('x', { status: 500 }), pinned }), /HTTP 500/);
-    await assert.rejects(fetchPets(d, { fetchImpl: async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }); }, pinned }), /download failed \(ENOTFOUND\)/);
-    const dying = async () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('<anim')); setTimeout(() => c.error(new TypeError('terminated')), 10); } }));
-    const err = await fetchPets(d, { fetchImpl: dying, pinned }).catch((e) => e);
-    assert.ok(err instanceof Error);
-    assert.equal(err.constructor.name, 'CliError', `a partial download surfaced as ${err.constructor.name}: ${err.message}`);
-    assert.equal(fs.existsSync(path.join(d, 'pets', 'esheep64', 'animations.xml')), false);
-  });
-  test('a response that never ends is bounded (size cap enforced while reading, not after)', async () => {
-    const d = dirs();
-    let sent = 0;
-    const endless = async () => new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(1024 * 1024)); sent += 1024 * 1024; if (sent > 400 * 1024 * 1024) c.close(); } }));
-    await assert.rejects(fetchPets(d, { fetchImpl: endless, pinned }));
-    assert.ok(sent <= 64 * 1024 * 1024, `${sent >> 20} MB were read before refusing (cap is 16 MB)`);
   });
 });

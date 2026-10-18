@@ -5,11 +5,13 @@
  *
  *   node scripts/release.mjs version 0.2.0-rc.1
  *        sets the version everywhere it lives (package.json, shell/package.json,
- *        tauri.conf.json, the three Cargo.toml files and their Cargo.lock entries,
- *        brain/util.mjs). Commit it, then tag `v0.2.0-rc.1`.
+ *        tauri.conf.json, the three Cargo.toml files and their Cargo.lock entries).
+ *        Commit it, then tag `v0.2.0-rc.1`.
  *   node scripts/release.mjs check v0.2.0-rc.1
  *        refuses a release whose tag, versions, bundle id, update feed or updater key
- *        don't agree. Exit 1 with every problem listed.
+ *        don't agree, and a full release (a tag with no pre-release part, like v1.0.0)
+ *        without its `## <version>` section in CHANGELOG.md. Exit 1 with every problem
+ *        listed.
  *   node scripts/release.mjs assets --app <Bellwether.app> --tag v0.2.0-rc.1 --out <dir>
  *        [--sign <identity SHA-1 or name> | --adhoc-dmg] [--notarize]
  *        [--base-url <url>] [--notes-file <file>]
@@ -58,7 +60,7 @@ const JSON_FILES = ['package.json', 'shell/package.json', 'shell/src-tauri/tauri
 const CARGO_FILES = ['shell/src-tauri/Cargo.toml', 'crates/brain/Cargo.toml', 'crates/core/Cargo.toml'];
 const LOCK = 'shell/src-tauri/Cargo.lock';
 const LOCK_PACKAGES = ['bellwether-shell', 'bellwether-brain', 'bellwether-core'];
-const NODE_VERSION = 'brain/util.mjs';
+export const CHANGELOG = 'CHANGELOG.md';
 
 function cargoPackageVersion(text) {
   const pkg = /^\[package\]\n([\s\S]*?)(?=^\[)/m.exec(`${text}\n[`)?.[1] ?? '';
@@ -73,7 +75,6 @@ export function versions(root = ROOT) {
   for (const f of CARGO_FILES) out[f] = cargoPackageVersion(read(f));
   const lock = read(LOCK);
   for (const name of LOCK_PACKAGES) out[`${LOCK}:${name}`] = new RegExp(`\\[\\[package\\]\\]\\nname = "${name}"\\nversion = "([^"]*)"`).exec(lock)?.[1] ?? null;
-  out[NODE_VERSION] = /^export const VERSION = '([^']*)';$/m.exec(read(NODE_VERSION))?.[1] ?? null;
   return out;
 }
 
@@ -90,7 +91,6 @@ export function setVersion(v, root = ROOT) {
   for (const f of JSON_FILES) edit(f, (t) => t.replace(/^(\s*"version": )"[^"]*"/m, `$1"${v}"`));
   for (const f of CARGO_FILES) edit(f, (t) => t.replace(/^(\[package\]\n(?:(?!\[)[\s\S])*?^version = )"[^"]*"/m, `$1"${v}"`));
   edit(LOCK, (t) => LOCK_PACKAGES.reduce((acc, name) => acc.replace(new RegExp(`(\\[\\[package\\]\\]\\nname = "${name}"\\nversion = )"[^"]*"`), `$1"${v}"`), t));
-  edit(NODE_VERSION, (t) => t.replace(/^export const VERSION = '[^']*';$/m, `export const VERSION = '${v}';`));
   const now = versions(root);
   const off = Object.entries(now).filter(([, x]) => x !== v);
   if (off.length) throw new Error(`not updated: ${off.map(([f]) => f).join(', ')}`);
@@ -108,6 +108,9 @@ export function releaseProblems(tag, root = ROOT, repo = REPO) {
   const v = m[1];
   const off = Object.entries(versions(root)).filter(([, got]) => got !== v);
   if (off.length) problems.push(`the tag says ${v}, but ${off.map(([f, got]) => `${f} has ${got}`).join(', ')}. Run \`node scripts/release.mjs version ${v}\`, commit, and tag that commit`);
+  // A full release (no pre-release part) has its notes in CHANGELOG.md, which the
+  // maintainer pastes into the draft release (docs/RELEASING.md).
+  if (!v.includes('-') && !changelogHas(root, v)) problems.push(`${v} is a full release, but ${CHANGELOG} has no "## ${v}" section: write its release notes there first (docs/RELEASING.md)`);
   const dist = JSON.parse(fs.readFileSync(path.join(root, 'shell', 'src-tauri', 'tauri.dist.conf.json'), 'utf8'));
   if (dist.identifier !== PERMANENT_ID) problems.push(`tauri.dist.conf.json's identifier is ${dist.identifier}, not ${PERMANENT_ID}`);
   const up = dist.plugins?.updater ?? {};
@@ -122,6 +125,17 @@ export function releaseProblems(tag, root = ROOT, repo = REPO) {
   if (up.requireSignedVersion !== true) problems.push('the updater must have requireSignedVersion: true');
   for (const f of secretKeyFiles(root)) problems.push(`${f} holds a minisign SECRET key: remove it from the repository (and from git history if it was ever committed), then make a new updater key, since this one must be treated as public`);
   return problems;
+}
+
+/** Whether CHANGELOG.md (at `root`) has a `## <version>` heading. */
+export function changelogHas(root, v) {
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, CHANGELOG), 'utf8');
+  } catch {
+    return false;
+  }
+  return text.split('\n').some((l) => l.trimEnd() === `## ${v}`);
 }
 
 /**

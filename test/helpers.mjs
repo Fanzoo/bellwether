@@ -15,19 +15,14 @@ export function tempDir(prefix = 'bellwether-test-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-// ------------------------------------------------- which brain a test runs (plan D2)
+// ------------------------------------------------- the brain a test runs (plan D2)
 //
 // Every test that starts the brain or its CLI goes through spawnBrain / spawnBrainSync,
-// so one switch picks the implementation:
-//
-//   BELLWETHER_IMPL=node (default)  node <root>/brain/cli.mjs …, or the /bin/sh shim
-//   BELLWETHER_IMPL=rust            $BELLWETHER_BIN …, by default the dev build
-//                                   shell/src-tauri/target-dev/debug/bellwether-shell
-//
-// `npm test` runs node; `npm run test:rust` (test/conformance.mjs) runs the files that
-// spawn the brain against both and prints the parity table.
+// which run the Rust binary: $BELLWETHER_BIN, by default the development build
+// shell/src-tauri/target-dev/debug/bellwether-shell with the `conformance` feature, which
+// `npm test` builds first (`npm run build:dev`). The Node brain it was once compared with
+// was deleted in milestone 11 (its last version is tag v0.2.0-rc.3).
 
-export const IMPL = process.env.BELLWETHER_IMPL === 'rust' ? 'rust' : 'node';
 const DEFAULT_RUST_BIN = path.join(AGENT_DIR, 'shell', 'src-tauri', 'target-dev', 'debug', 'bellwether-shell');
 export const RUST_BIN = process.env.BELLWETHER_BIN ? path.resolve(process.env.BELLWETHER_BIN) : DEFAULT_RUST_BIN;
 const LIVE_PORT = 47417;
@@ -47,17 +42,38 @@ export function newestRustSource() {
   return newest;
 }
 
-export const RUST_BUILD_HINT = '`cargo build --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance` (a debug build, into target-dev/)';
+export const RUST_BUILD_HINT = '`npm run build:dev` (`cargo build --manifest-path shell/src-tauri/Cargo.toml --features bellwether-shell/conformance`, a debug build into target-dev/)';
+
+let checkedBin = null;
 
 /**
- * The Rust binary, checked: it must exist, and the default dev build must not be older
- * than its sources (a stale binary would test yesterday's brain). A BELLWETHER_BIN given
- * by hand is taken as it is.
+ * The Rust binary, checked once per process: it must exist, the default dev build must not
+ * be older than its sources (a stale binary would test yesterday's brain), and it must have
+ * the `conformance` feature (test/impl.mjs drives its hidden `__session`; `npm run
+ * test:cargo` rebuilds the same binary without it). A BELLWETHER_BIN given by hand is not
+ * checked for age. Fails fast, with the build command, instead of every test waiting for
+ * an answer that never comes.
  */
 export function rustBin() {
-  if (!fs.existsSync(RUST_BIN)) throw new Error(`BELLWETHER_IMPL=rust needs the binary: build it with ${RUST_BUILD_HINT} or set BELLWETHER_BIN (looked for ${RUST_BIN})`);
-  if (!process.env.BELLWETHER_BIN && fs.statSync(RUST_BIN).mtimeMs < newestRustSource()) throw new Error(`${RUST_BIN} is older than the Rust sources: rebuild it with ${RUST_BUILD_HINT}, then run \`npm run test:rust\` again`);
-  return RUST_BIN;
+  if (checkedBin) return checkedBin;
+  if (!fs.existsSync(RUST_BIN)) throw new Error(`the tests need the binary: build it with ${RUST_BUILD_HINT} or set BELLWETHER_BIN (looked for ${RUST_BIN})`);
+  if (!process.env.BELLWETHER_BIN && fs.statSync(RUST_BIN).mtimeMs < newestRustSource()) throw new Error(`${RUST_BIN} is older than the Rust sources: rebuild it with ${RUST_BUILD_HINT}, then run \`npm test\` again`);
+  probeConformance(RUST_BIN);
+  checkedBin = RUST_BIN;
+  return checkedBin;
+}
+
+/**
+ * One `__json` call: a binary built without the `conformance` feature answers "unknown
+ * command" (a release build never has it).
+ */
+function probeConformance(bin) {
+  const home = tempDir('bw-conformance-probe-');
+  const r = spawnSync(bin, ['__json'], { argv0: 'bellwether', input: '', encoding: 'utf8', timeout: 20_000, env: { PATH: process.env.PATH, HOME: home, BELLWETHER_HOME: home } });
+  fs.rmSync(home, { recursive: true, force: true });
+  if (r.status === 0) return;
+  if (/unknown command/.test(r.stderr ?? '')) throw new Error(`${bin} has no conformance commands ("unknown command"): it was built without the \`conformance\` feature (\`npm run test:cargo\` builds it that way). Build it with ${RUST_BUILD_HINT}`);
+  throw new Error(`${bin} __json failed (${r.error ? r.error.message : `exit ${r.status}`}): ${(r.stderr ?? '').trim()}`);
 }
 
 /** The real home directory of this user (from the password database, not HOME). */
@@ -135,7 +151,8 @@ function isJsonObject(file) {
 }
 
 /**
- * The environment for the Rust binary, from the one a test gives the Node CLI:
+ * The environment for the Rust binary, from the one a test gives (the names the Node CLI
+ * once read included):
  *
  * - its home (state.json, shell-state.json, recordings, logs) is BELLWETHER_HOME if the
  *   test sets one, else the Node CLI's BELLWETHER_DATA_DIR, so files land where the test
@@ -159,7 +176,7 @@ export function rustEnv(args, given, root = AGENT_DIR) {
   // Every `--port` (the last one wins in the CLIs), read as a number whatever its spelling.
   const ports = args.flatMap((a, i) => (a === '--port' ? [args[i + 1]] : a.startsWith('--port=') ? [a.slice(7)] : [])).map(portValue);
   const argPort = ports.length ? ports.at(-1) : null;
-  if (ports.includes(LIVE_PORT)) throw new Error(`refused under BELLWETHER_IMPL=rust: --port ${LIVE_PORT} (in any spelling) is the live brain's port`);
+  if (ports.includes(LIVE_PORT)) throw new Error(`refused: --port ${LIVE_PORT} (in any spelling) is the live brain's port`);
   let config = env.BELLWETHER_CONFIG;
   if (!config && root !== AGENT_DIR) config = ['config.json', 'config.example.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
   config = path.resolve(config ?? ISOLATED.BELLWETHER_CONFIG);
@@ -172,6 +189,8 @@ export function rustEnv(args, given, root = AGENT_DIR) {
     }
   }
   env.BELLWETHER_CONFIG = config;
+  // A data dir the test chose wins over the suite's home it inherited from process.env.
+  if (env.BELLWETHER_DATA_DIR && env.BELLWETHER_HOME === ISOLATED.BELLWETHER_HOME && path.resolve(env.BELLWETHER_DATA_DIR) !== ISOLATED.BELLWETHER_HOME) delete env.BELLWETHER_HOME;
   if (!env.BELLWETHER_HOME) {
     if (env.BELLWETHER_DATA_DIR) env.BELLWETHER_HOME = path.resolve(env.BELLWETHER_DATA_DIR);
     else {
@@ -181,7 +200,7 @@ export function rustEnv(args, given, root = AGENT_DIR) {
   }
   const effective = portIn(config);
   if (argPort === null && isJsonObject(config) && (effective === null || effective === LIVE_PORT)) {
-    throw new Error(`refused under BELLWETHER_IMPL=rust: ${config} would make the Rust binary use the live port ${LIVE_PORT}; pass --port or give the config a test port`);
+    throw new Error(`refused: ${config} would make the Rust binary use the live port ${LIVE_PORT}; pass --port or give the config a test port`);
   }
   return env;
 }
@@ -220,22 +239,18 @@ export function rustRefusal(args, bin = rustBin()) {
 /** Throws when the Rust binary `bin` must not run `args` here (what brainCommand checks). */
 export function refuseRust(args, bin = rustBin()) {
   const why = rustRefusal(args, bin);
-  if (why) throw new Error(`not run under BELLWETHER_IMPL=rust: ${why}`);
+  if (why) throw new Error(`not run: ${why}`);
 }
 
 /**
  * The command a test runs for `bellwether <args>`:
- * - `root`: the checkout whose brain/cli.mjs runs (a test's temp copy; default this one);
- * - `shim`: run through this /bin/sh shim (a copy's `bellwether`) instead of cli.mjs;
+ * - `root`: the directory whose `config.json`, else `config.example.json`, is the config
+ *   (a test's temp directory; by default the suite's isolated config, see rustEnv);
  * - anything else is passed to child_process as options.
  * Returns { file, args, options }.
  */
-export function brainCommand(args, { root = AGENT_DIR, shim = null, ...options } = {}) {
+export function brainCommand(args, { root = AGENT_DIR, ...options } = {}) {
   refuseRealSettings(args, options.cwd);
-  if (IMPL === 'node') {
-    if (shim) return { file: '/bin/sh', args: [shim, ...args], options };
-    return { file: process.execPath, args: [path.join(root, 'brain', 'cli.mjs'), ...args], options };
-  }
   refuseRust(args);
   // argv[0] `bellwether` makes the binary its CLI whatever the arguments, never the
   // strip (no arguments, or a first argument starting with "-", would start the app).
@@ -246,12 +261,12 @@ export function brainCommand(args, { root = AGENT_DIR, shim = null, ...options }
 // failing test can skip its own cleanup, and the Rust brain has no parent watchdog yet.
 const rustChildren = new Set();
 function track(child) {
-  if (IMPL !== 'rust' || !child?.pid) return child;
+  if (!child?.pid) return child;
   rustChildren.add(child);
   child.once('exit', () => rustChildren.delete(child));
   return child;
 }
-if (IMPL === 'rust') {
+{
   const stopAll = () => {
     for (const c of rustChildren) if (c.exitCode === null && c.signalCode === null) c.kill('SIGTERM');
   };
@@ -264,26 +279,16 @@ if (IMPL === 'rust') {
   }
 }
 
-/**
- * Test options for a test that has nothing to check in the Rust brain yet, with the reason
- * (`test(name, notUnderRust('…'), fn)`). Under node it runs as always; under rust the
- * parity table counts it as skipped, never as passed. Each use names the milestone or the
- * test/DIVERGENCES.md entry that explains it.
- */
-export function notUnderRust(why) {
-  return IMPL === 'rust' ? { skip: `not under rust: ${why}` } : {};
-}
-
 /** `spawn` for the brain or its CLI (see brainCommand). */
 export function spawnBrain(args, opts = {}) {
   const { file, args: a, options } = brainCommand(args, opts);
   return track(spawn(file, a, options));
 }
 
-/** `spawnSync` for the brain or its CLI (see brainCommand). Under rust, at most 60 s. */
+/** `spawnSync` for the brain or its CLI (see brainCommand). At most 60 s. */
 export function spawnBrainSync(args, opts = {}) {
   const { file, args: a, options } = brainCommand(args, opts);
-  if (IMPL === 'rust') options.timeout ??= 60_000;
+  options.timeout ??= 60_000;
   return spawnSync(file, a, options);
 }
 
@@ -315,8 +320,8 @@ export function hookHeaders(port, extra = {}) {
 
 /**
  * A shared vector file from test/fixtures (redact, normalise, config, diff): its
- * `vectors`, optionally only one group. The Rust port reads the same files; see
- * test/fixtures/build-vectors.mjs.
+ * `vectors`, optionally only one group. The cargo tests read the same files; they are
+ * golden, written by hand (docs/DEVELOPMENT.md, "Tests").
  */
 export function readVectors(name, group = null) {
   const { vectors } = JSON.parse(fs.readFileSync(path.join(FIXTURES, `${name}-vectors.json`), 'utf8'));

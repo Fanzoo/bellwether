@@ -1,7 +1,6 @@
 # Local state and secrets: never committed.
 .env
 .env.*
-!.env.example
 data/
 data-test/
 config.json

@@ -184,4 +184,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_file(&env);
     }
+
+    /// An exported BELLWETHER_HOOK_TOKEN beats the home's `hook-token`, and an empty one
+    /// counts as unset (the Node CLI's "an exported token wins over the .env", milestone 11).
+    #[test]
+    fn an_exported_token_beats_the_file() {
+        let home = std::env::temp_dir().join(format!("bw-token-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        write(&home, "fileTokenValue_0123456789").unwrap();
+        let (t, src) = read(&home, Some("envTokenValue_0123456789".into())).unwrap();
+        assert_eq!((t.as_str(), src), ("envTokenValue_0123456789", Source::Env));
+        let (t, src) = read(&home, Some(String::new())).unwrap();
+        assert_eq!((t.as_str(), src), ("fileTokenValue_0123456789", Source::File(file(&home))));
+        assert!(read(&home, Some("short".into())).is_err(), "an unusable export is refused, not passed over");
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }

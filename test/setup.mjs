@@ -3,10 +3,11 @@
  * NODE_OPTIONS=--import=<this file>; it passes itself on). This checkout may be a live
  * install, so the suite is isolated from it:
  *
- * - BELLWETHER_ENV, BELLWETHER_DATA_DIR and BELLWETHER_CONFIG point at a temp .env (no
- *   token), a temp data dir and a temp config on a port that isn't 47417, unless a test
- *   sets them itself. A test that starts a process with its own small `env` gets them
- *   too, when that process runs this checkout's code.
+ * - BELLWETHER_HOME (and BELLWETHER_DATA_DIR, its older name in the tests) and
+ *   BELLWETHER_CONFIG point at a temp home and a temp config on a port that isn't 47417,
+ *   unless a test sets them itself. A test that starts a process with its own small `env`
+ *   gets them too, when that process runs this checkout's code (the development binary in
+ *   target-dev/ included).
  * - A guard fails the process (an error where it happens, and exit code 1 at the end,
  *   even if the error was caught) on any connection to 127.0.0.1:47417, any access to
  *   this checkout's .env, any write under this checkout's data/, any read there other
@@ -97,20 +98,19 @@ if (!process.env.BELLWETHER_TEST_ROOT) {
   const port = 47990 + Math.floor(Math.random() * 900);
   const example = JSON.parse(real.readFileSync.call(fs, path.join(REPO, 'config.example.json'), 'utf8'));
   real.writeFileSync.call(fs, path.join(root, 'config.json'), JSON.stringify({ ...example, port }, null, 2));
-  real.writeFileSync.call(fs, path.join(root, 'test.env'), '');
   real.mkdirSync.call(fs, path.join(root, 'data'));
   process.env.BELLWETHER_TEST_ROOT = root;
 }
 const ROOT = process.env.BELLWETHER_TEST_ROOT;
 export const ISOLATED = {
-  BELLWETHER_ENV: path.join(ROOT, 'test.env'),
+  BELLWETHER_HOME: path.join(ROOT, 'data'),
   BELLWETHER_DATA_DIR: path.join(ROOT, 'data'),
   BELLWETHER_CONFIG: path.join(ROOT, 'config.json'),
 };
 // The runner, the test files and this checkout's own CLI get the isolated paths; a copy
 // of the code that a test runs from a temp directory keeps the paths that test gave it.
 const main = process.argv[1] ? path.resolve(process.argv[1]) : null;
-if (!main || main.startsWith(REPO + path.sep)) for (const [k, v] of Object.entries(ISOLATED)) if (process.env[`PASTURE_${k.slice(11)}`] === undefined) process.env[k] ??= v;
+if (!main || main.startsWith(REPO + path.sep)) for (const [k, v] of Object.entries(ISOLATED)) process.env[k] ??= v;
 process.env.NODE_OPTIONS = withPreload(process.env.NODE_OPTIONS);
 
 function withPreload(opts = '') {
@@ -128,7 +128,7 @@ const runsRepo = (cmd, args) => inRepo(cmd) || inRepo((Array.isArray(args) ? arg
 function childEnv(cmd, args, opts) {
   const base = opts?.env ?? process.env;
   const env = { ...base, NODE_OPTIONS: withPreload(base.NODE_OPTIONS), BELLWETHER_TEST_ROOT: ROOT };
-  if (opts?.env && runsRepo(cmd, args)) for (const [k, v] of Object.entries(ISOLATED)) if (!(k in opts.env) && !(`PASTURE_${k.slice(11)}` in opts.env)) env[k] = v;
+  if (opts?.env && runsRepo(cmd, args)) for (const [k, v] of Object.entries(ISOLATED)) if (!(k in opts.env)) env[k] = v;
   return env;
 }
 /**
