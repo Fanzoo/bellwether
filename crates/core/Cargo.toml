@@ -1,6 +1,6 @@
 [package]
 name = "bellwether-core"
-version = "0.2.0-rc.2"
+version = "0.2.0-rc.3"
 edition = "2021"
 description = "bellwether's brain logic without I/O runtimes: config, the token file, redaction, the normaliser, the flock, the publisher's throttle, persistence"
 license = "MIT"

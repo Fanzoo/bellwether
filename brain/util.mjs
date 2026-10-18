@@ -11,7 +11,7 @@ export const DATA_DIR = process.env.BELLWETHER_DATA_DIR
   ? path.resolve(process.env.BELLWETHER_DATA_DIR)
   : path.join(AGENT_DIR, 'data');
 
-export const VERSION = '0.2.0-rc.2';
+export const VERSION = '0.2.0-rc.3';
 
 /** The bind address is a constant, not configuration (see the README). */
 export const BIND_HOST = '127.0.0.1';
