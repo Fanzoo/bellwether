@@ -180,13 +180,17 @@ fanzootechnology` should print nothing.
 5. **Update through the menu.** In a terminal: `node scripts/health-gap.mjs --port 47417
    --seconds 300`. Then in the menu-bar sheep: *Check for Updates…* > *Install and
    Relaunch*. Done when:
-   - the app comes back as 0.2.0-rc.2 (`bellwether version`; `~/Library/Logs/Bellwether/shell.log`
-     has `updates: … installed; relaunching` and then `the login agent's brain is now
-     version 0.2.0-rc.2 … ms after the restart`);
+   - the app comes back as the new version (`bellwether version`;
+     `~/Library/Logs/Bellwether/shell.log` has `updates: … installed; relaunching` and then
+     `… was this app's login agent at version <old> (pid N); restarted it (launchctl
+     kickstart -k): now version <new> …`);
+   - without any manual `launchctl kickstart`, `bellwether doctor`'s brain line is a PASS
+     showing the new version and a new pid (a WARN saying "still running <old>" is this
+     check failing);
    - `health-gap.mjs` shows the new version within 2 s of the relaunch and its gap line
      under 1000 ms;
-   - Accessibility and Automation still hold: `bellwether doctor` shows Accessibility
-     granted, sheep sit on the Dock, and clicking a sheep still focuses its tab with no new
+   - Accessibility and Automation still hold: `bellwether doctor`'s accessibility line says
+     granted to the strip, sheep sit on the Dock, and clicking a sheep still focuses its tab with no new
      prompt.
 6. **Homebrew.** After the tap PR for rc.2 is merged, on a Mac or user account without
    /Applications/Bellwether.app (or after moving it to the Trash):

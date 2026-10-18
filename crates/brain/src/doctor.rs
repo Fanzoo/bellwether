@@ -259,11 +259,15 @@ pub fn next_step(checks: &[Check], installed: bool) -> String {
     if let Some(t) = checks.iter().find(|c| c.name == "token" && c.status == "FAIL") {
         return token_next(&t.detail);
     }
-    if status("brain") != Some("PASS") {
+    // A WARN brain answers (the app's doctor: another version than the app's, deviation 135).
+    if !matches!(status("brain"), Some("PASS") | Some("WARN")) {
         return "start the brain: at login with `bellwether autostart install --write`, or now with `bellwether serve`".into();
     }
     if let Some(f) = checks.iter().find(|c| c.status == "FAIL" && !["config", "token", "brain", "e2e"].contains(&c.name.as_str())) {
         return format!("fix \"{}\": {}", f.name, f.detail);
+    }
+    if status("brain") == Some("WARN") {
+        return "bring the brain up to this app's version (the brain line above says how)".into();
     }
     if !installed {
         return "install the hooks: `bellwether hooks install` (preview), then the same with --write; then open a new Claude Code session".into();
@@ -695,5 +699,22 @@ mod tests {
         assert!(next(&short).contains("`bellwether token init --force`"), "{short}");
         assert!(next("/h/hook-token is mode 644: other users can read it. Run `chmod 600 '/h/hook-token'`").contains("chmod"));
         assert!(next("BELLWETHER_HOOK_TOKEN in the environment: too short").contains("unset it"));
+    }
+
+    /// Deviation 135: the app's doctor makes the brain line a WARN for a brain of another
+    /// version; a brain still answers, so `next` doesn't say to start one, and points at the
+    /// brain line once nothing fails.
+    #[test]
+    fn a_warn_brain_answers_and_is_the_next_step_once_nothing_fails() {
+        let ok = |n: &str| Check::new(n, "PASS", "", OK);
+        let with = |brain: &'static str, extra: Option<Check>| {
+            let mut c = vec![ok("config"), ok("token"), Check::new("brain", brain, "pid 1, v0.0.1", NOT_RUNNING)];
+            c.extend(extra);
+            next_step(&c, true)
+        };
+        assert_eq!(with("WARN", None), "bring the brain up to this app's version (the brain line above says how)");
+        assert!(with("WARN", Some(Check::new("hooks installed", "FAIL", "x", UNEXPECTED))).starts_with("fix \"hooks installed\""));
+        assert!(with("FAIL", None).starts_with("start the brain"));
+        assert!(with("PASS", None).starts_with("all set"));
     }
 }

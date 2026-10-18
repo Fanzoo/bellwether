@@ -2,7 +2,7 @@
 //! target-dev/ has no bundle (or Tauri's embedded dev Info.plist); the signed app has
 //! the permanent id from tauri.dist.conf.json.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The signed app's permanent bundle id (maintainer decision 1). Only a Developer ID
 /// build may carry it into SMAppService or TCC: an ad-hoc build registered under it
@@ -107,19 +107,70 @@ pub fn bundle_executable() -> Option<PathBuf> {
     exe.canonicalize().ok()
 }
 
-/// Processes running this exact bundle executable (never a different copy, and never
-/// the repository's bellwether-shell): (pid, ppid, arguments).
-pub fn bundle_processes() -> Vec<(i32, i32, String)> {
-    let Some(exe) = bundle_executable() else { return Vec::new() };
+/// What a process runs, by pid, as `proc_pidpath` sees it (read only).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Exe {
+    At(PathBuf),
+    /// Its executable file no longer exists: an update swapped the bundle and deleted the
+    /// old one while the process kept running (ENOENT; deviation 135).
+    Deleted,
+    /// Anything else (no such process, no permission).
+    Unknown(String),
+}
+
+#[cfg(target_os = "macos")]
+pub fn pid_exe(pid: i32) -> Exe {
+    let mut buf = vec![0u8; 4096];
+    let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut libc::c_void, buf.len() as u32) };
+    if n <= 0 {
+        let e = std::io::Error::last_os_error();
+        return if e.raw_os_error() == Some(libc::ENOENT) { Exe::Deleted } else { Exe::Unknown(e.to_string()) };
+    }
+    buf.truncate(n as usize);
+    Exe::At(PathBuf::from(String::from_utf8_lossy(&buf).into_owned()))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn pid_exe(_pid: i32) -> Exe {
+    Exe::Unknown("not macOS".into())
+}
+
+/// Whether a process runs `exe` (resolved): its executable is that file, or (after an
+/// update deleted it) its argv[0] is that very path. LaunchServices starts the strip by its
+/// full path, so a strip that outlived a bundle swap is still found; a process whose file
+/// exists elsewhere (another copy) never is.
+pub fn runs(found: &Exe, args: &str, exe: &Path) -> bool {
+    match found {
+        Exe::At(p) => p.canonicalize().ok().as_deref() == Some(exe),
+        Exe::Deleted => {
+            let e = exe.to_string_lossy();
+            args == e || args.strip_prefix(e.as_ref()).is_some_and(|rest| rest.starts_with(' '))
+        }
+        Exe::Unknown(_) => false,
+    }
+}
+
+/// Processes running `exe` (see [`runs`]): (pid, ppid, arguments).
+pub fn processes_of(exe: &Path) -> Vec<(i32, i32, String)> {
     let Ok(out) = std::process::Command::new("/bin/ps").args(["-axo", "pid=,ppid=,args="]).output() else { return Vec::new() };
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| {
-            let mut it = l.split_whitespace();
-            let pid: i32 = it.next()?.parse().ok()?;
-            let ppid: i32 = it.next()?.parse().ok()?;
-            let args = it.collect::<Vec<_>>().join(" ");
-            (pid_path(pid)?.canonicalize().ok()? == exe).then_some((pid, ppid, args))
+            let l = l.trim_start();
+            let (pid, rest) = l.split_once(char::is_whitespace)?;
+            let rest = rest.trim_start();
+            let (ppid, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            let (pid, ppid): (i32, i32) = (pid.parse().ok()?, ppid.parse().ok()?);
+            let args = args.trim().to_string();
+            runs(&pid_exe(pid), &args, exe).then_some((pid, ppid, args))
         })
         .collect()
+}
+
+/// Processes running this exact bundle executable (never a different copy, and never
+/// the repository's bellwether-shell), including one whose file an update has since
+/// replaced: (pid, ppid, arguments).
+pub fn bundle_processes() -> Vec<(i32, i32, String)> {
+    let Some(exe) = bundle_executable() else { return Vec::new() };
+    processes_of(&exe)
 }

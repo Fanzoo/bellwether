@@ -598,13 +598,30 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
         }
     }
 
-    // Accessibility, for this exact identity (unknown from an old session).
-    if session == crate::identity::Session::Stale {
-        add(&mut checks, "INFO", "accessibility", "can't check from this terminal session (it predates your last login); open a new terminal window".into());
-    } else if crate::ax::trusted() {
-        add(&mut checks, "PASS", "accessibility", "granted to this app: sheep can stand on the Dock".into());
-    } else {
-        add(&mut checks, "INFO", "accessibility", "not granted to this app: the strip uses its full width. If you granted it before and it now says not granted, System Settings > Privacy & Security > Accessibility still lists the old entry: remove it with −, then grant again".into());
+    // Accessibility: the strip's, which is what puts sheep on the Dock. Never this process's:
+    // macOS answers AXIsProcessTrusted for the app responsible for the caller, and a CLI run
+    // from a terminal is the terminal's (deviation 135). The strip logs its own answer at
+    // start and on every change; that line (`dock`, from the brain's log checks) becomes
+    // this one, with whether a strip runs now.
+    let dock = checks.iter().position(|c| c.name == "dock").map(|i| checks.remove(i));
+    let strips = crate::identity::in_app_bundle().then(own_strips);
+    let (status, detail) = accessibility_verdict(strips.as_deref(), dock.as_ref().map(|c| (c.status, c.detail.as_str())));
+    add(&mut checks, status, "accessibility", detail);
+
+    // A brain of another version than this app's (deviation 135): WARN, with the fix.
+    if let doctor::Health::Bellwether(h) = doctor::probe_health(checked_port, input.probe_timeout) {
+        let theirs = h["version"].as_str().unwrap_or("?").to_string();
+        if theirs != bellwether_brain::VERSION {
+            let pid = h["pid"].as_i64().unwrap_or(0);
+            let check = crate::agent::Check::here();
+            let label = check.host.label();
+            let owner = crate::agent::owner(&check, label.as_deref(), pid);
+            let suffix = crate::agent::doctor_suffix(&theirs, bellwether_brain::VERSION, pid, label.as_deref(), &owner);
+            if let Some(c) = checks.iter_mut().find(|c| c.name == "brain" && c.status == "PASS") {
+                c.status = "WARN";
+                c.detail.push_str(&suffix);
+            }
+        }
     }
 
     // An enabled brain agent with no brain answering: launchd is refusing or failing it,
@@ -616,6 +633,37 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
         add(&mut checks, status, "login: brain", detail);
     }
     doctor::finish(&input, checks)
+}
+
+/// Doctor's one Accessibility line, from the strips running now (None: a development
+/// binary, which can't find them) and the strip's own last word in its log (`dock`).
+pub fn accessibility_verdict(strips: Option<&[i32]>, dock: Option<(&'static str, &str)>) -> (&'static str, String) {
+    let said = |d: &str, s: &str| match s {
+        "PASS" => "it had Accessibility".to_string(),
+        "WARN" => format!("it didn't have Accessibility ({d})"),
+        _ => "it didn't have Accessibility".to_string(),
+    };
+    match (strips, dock) {
+        (Some([]), last) => (
+            "INFO",
+            format!(
+                "the strip isn't running, so doctor can't tell whether it has Accessibility (macOS answers that for each app, and doctor runs as your terminal). Start it with `bellwether shell start`{}",
+                last.map(|(s, d)| format!("; the last time it ran, {}", said(d, s))).unwrap_or_default()
+            ),
+        ),
+        (Some(pids), Some((status, detail))) => {
+            let who = format!("the strip (pid {})", pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "));
+            let detail = match status {
+                "PASS" => format!("granted to {who}: sheep stand on the Dock's top edge"),
+                "WARN" => format!("not granted to {who}: {detail}"),
+                _ => format!("not granted to {who}: {detail}"),
+            };
+            (status, detail)
+        }
+        (Some(pids), None) => ("INFO", format!("the strip (pid {}) is running, but its log (shell.log) doesn't say whether it has Accessibility; `bellwether shell restart` writes it again", pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "))),
+        (None, Some((status, detail))) => (status, format!("from the strip's log (a development binary can't see whether a strip runs now): {detail}")),
+        (None, None) => ("INFO", "a development binary: the strip's log has no Accessibility line, and doctor itself can't tell (macOS answers for each app, and doctor runs as your terminal)".into()),
+    }
 }
 
 /// The port the bundled brain agent listens on: its plist's `--port`, else `port` in
@@ -800,6 +848,30 @@ mod tests {
         assert!(!is_app_mode("Bellwether serve --port 47418"));
         assert!(!is_app_mode("/x/Bellwether.app/Contents/MacOS/Bellwether doctor"));
         assert!(!is_app_mode("/x/Bellwether.app/Contents/MacOS/Bellwether --action login-items-status"));
+    }
+
+    /// Deviation 135: one Accessibility line, the strip's, never this process's (a CLI run
+    /// from a terminal is the terminal's to macOS), and plain about a strip that isn't running.
+    #[test]
+    fn accessibility_is_the_strips_in_one_line() {
+        let granted = Some(("PASS", "Accessibility granted: sheep stand on the Dock's top edge"));
+        let not = Some(("INFO", "the strip uses its full width; to have the sheep stand on the Dock itself, turn Bellwether on in System Settings > Privacy & Security > Accessibility"));
+        let earlier = Some(("WARN", "Accessibility was granted to an earlier build of the strip and is not granted to this one"));
+        assert_eq!(accessibility_verdict(Some(&[46880]), granted), ("PASS", "granted to the strip (pid 46880): sheep stand on the Dock's top edge".to_string()));
+        let (st, d) = accessibility_verdict(Some(&[46880]), not);
+        assert!(st == "INFO" && d.starts_with("not granted to the strip (pid 46880): the strip uses its full width"), "{d}");
+        assert_eq!(accessibility_verdict(Some(&[46880]), earlier).0, "WARN");
+        let (st, d) = accessibility_verdict(Some(&[]), granted);
+        assert_eq!(st, "INFO");
+        assert!(d.starts_with("the strip isn't running, so doctor can't tell whether it has Accessibility") && d.contains("`bellwether shell start`") && d.ends_with("the last time it ran, it had Accessibility"), "{d}");
+        assert!(!accessibility_verdict(Some(&[]), None).1.contains("last time"));
+        assert_eq!(accessibility_verdict(Some(&[7]), None).0, "INFO");
+        assert!(accessibility_verdict(None, granted).1.starts_with("from the strip's log"));
+        // doctor never asks macOS about itself, and the strip's `dock` line is folded in.
+        let src = include_str!("cli.rs");
+        let body = src.split("pub fn doctor_report(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(!body.contains("ax::trusted"), "the CLI's own trust is the terminal's, not the strip's");
+        assert!(body.contains(r#"checks.iter().position(|c| c.name == "dock").map(|i| checks.remove(i))"#));
     }
 
     #[test]

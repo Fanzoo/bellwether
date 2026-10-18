@@ -192,6 +192,10 @@ menu-bar menu checks right away. Updates are signed; the app refuses anything el
 the automatic checks off, set `"updates": {"check": "off"}` in `config.json`; *Check for
 Updates…* still works.
 
+After an update, Bellwether restarts its brain on the new version as it relaunches; your
+sessions may show one brief "hook error" line meanwhile. `bellwether doctor` warns if the
+brain still runs another version than the app, and says how to restart it.
+
 ## Uninstall
 
 Homebrew can't edit Claude Code's settings, so first remove Bellwether's hooks and its

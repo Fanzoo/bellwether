@@ -3,6 +3,7 @@
 //! about hooks.
 
 pub mod actions;
+mod agent;
 mod brain;
 pub mod cli;
 mod clickthrough;
@@ -437,6 +438,8 @@ pub fn run() {
         child_gets_token: settings.brain_gets_token,
         check_version: app_layout && !flags.selftest,
         home: settings.data_dir.clone(),
+        notify: None,
+        agent_check: None,
     };
     let shared = Shared {
         pets: if app_layout { PetPlace::App { resources: settings.resources.clone(), home: settings.data_dir.clone() } } else { PetPlace::Repository { data_dir: settings.data_dir.clone(), repo: settings.agent_dir.clone() } },
@@ -581,7 +584,10 @@ pub fn run() {
             // no brain answers (`--demo` has no brain).
             if !flags.demo {
                 let b = brain_for_setup.clone();
-                std::thread::spawn(move || brain::run(b, brain_cfg));
+                let mut cfg = brain_cfg;
+                let h = handle.clone();
+                cfg.notify = Some(Box::new(move |text| tray::late_notice(&h, text)));
+                std::thread::spawn(move || brain::run(b, cfg));
             }
             // Milestone 7: the tray, and the thread that hides the strip while sharing
             // or when the tray says so. The tray switches start as they were left, so a

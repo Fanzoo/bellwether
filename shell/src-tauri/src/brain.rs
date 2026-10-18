@@ -190,10 +190,15 @@ pub struct BrainConfig {
     /// The strip's home: while a migration swaps the brains there (`legacy/swapping`), no
     /// brain is started here, so the new login agent gets the port (plan D9).
     pub home: std::path::PathBuf,
+    /// A line for the tray menu (the version check's warning), once the tray exists.
+    pub notify: Option<Box<dyn Fn(String) + Send>>,
+    /// The version check's launchd and bounds; None: the real ones (`agent::Check::here`).
+    /// Tests give a stand-in.
+    pub agent_check: Option<crate::agent::Check>,
 }
 
 /// Runs forever on its own thread.
-pub fn run(brain: Arc<Brain>, cfg: BrainConfig) {
+pub fn run(brain: Arc<Brain>, mut cfg: BrainConfig) {
     let base = format!("http://127.0.0.1:{}", cfg.port);
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(40)))
@@ -201,7 +206,8 @@ pub fn run(brain: Arc<Brain>, cfg: BrainConfig) {
         .build()
         .new_agent();
     if cfg.check_version {
-        check_version(&agent, cfg.port);
+        let check = cfg.agent_check.take().unwrap_or_else(crate::agent::Check::here);
+        check_version(&agent, cfg.port, check, cfg.notify.as_deref());
     }
     let mut token = match cfg.token.clone() {
         Some(t) => t,
@@ -292,115 +298,20 @@ fn health(agent: &ureq::Agent, base: &str) -> Option<Value> {
     (r.status() == 200).then(|| r.body_mut().read_json::<Value>().ok()).flatten()
 }
 
-/// What to do about the brain answering on the port, by its version (plan D5).
-#[derive(Debug, PartialEq, Eq)]
-pub enum VersionAction {
-    /// The same version as this app, or not a bellwether brain at all.
-    Keep,
-    /// This app's own login agent, still running an older executable: restart it.
-    RestartAgent,
-    /// Another version that isn't this app's agent: left alone, and said so.
-    Foreign,
-}
-
-pub fn version_action(health: &Value, ours: &str, is_our_agent: bool) -> VersionAction {
-    if health.get("name").and_then(Value::as_str) != Some("bellwether") {
-        return VersionAction::Keep;
-    }
-    match health.get("version").and_then(Value::as_str) {
-        Some(v) if v == ours => VersionAction::Keep,
-        _ if is_our_agent => VersionAction::RestartAgent,
-        _ => VersionAction::Foreign,
-    }
-}
-
-/// At start, the app compares its version with the brain's. A brain of another version
-/// that is this bundle's login agent (launchd's child, running this bundle's executable)
-/// is restarted with `launchctl kickstart -k`, and the app waits for `/health` to report
-/// the new version. Anything else is left alone (it may be a repository install's brain,
-/// or another copy of the app), with a line in the log.
-fn check_version(agent: &ureq::Agent, port: u16) {
+/// At start, the app compares its version with the brain's (plan D5, deviation 135). A brain
+/// of another version that is this app's own login agent is restarted (agent.rs, bounded);
+/// anything else is left alone, with a line in the log. A restart that doesn't take is said
+/// in the tray menu through `notify`.
+fn check_version(agent: &ureq::Agent, port: u16, mut check: crate::agent::Check, notify: Option<&(dyn Fn(String) + Send)>) {
     let base = format!("http://127.0.0.1:{port}");
-    let Some(h) = health(agent, &base) else { return };
     let ours = bellwether_brain::VERSION;
-    let theirs = h.get("version").and_then(Value::as_str).unwrap_or("?").to_string();
-    let pid = h.get("pid").and_then(Value::as_i64).unwrap_or(0) as i32;
-    let label = crate::login_items::brain_plist_name().and_then(|n| n.strip_suffix(".plist").map(str::to_string));
-    // This app's login agent: a process running this bundle's executable under launchd
-    // (ppid 1) AND the pid launchd itself gives for this bundle's agent label. A `serve`
-    // started by hand and orphaned also has ppid 1, but launchd doesn't know it.
-    let looks_ours = crate::identity::bundle_processes().iter().any(|(p, ppid, _)| *p == pid && *ppid == 1);
-    let is_our_agent = looks_ours && label.as_deref().and_then(agent_pid) == Some(pid);
-    match version_action(&h, ours, is_our_agent) {
-        VersionAction::Keep => log(&format!("brain on port {port}: version {theirs}, pid {pid}{}", if is_our_agent { " (this app's login agent)" } else { "" })),
-        VersionAction::Foreign => log(&format!(
-            "warning: the brain on port {port} is version {theirs} (pid {pid}), not this app's {ours}, and it isn't this app's login agent{}, so it is left alone. `bellwether doctor` shows what it is",
-            if looks_ours { " (it runs this app's executable under launchd, but launchd doesn't list it as the agent: started by hand?)" } else { "" }
-        )),
-        VersionAction::RestartAgent => {
-            let Some(label) = label else { return };
-            let target = format!("gui/{}/{label}", unsafe { libc::getuid() });
-            log(&format!("the brain on port {port} is this app's login agent at version {theirs} (pid {pid}); this app is {ours}: restarting it (launchctl kickstart -k {target})"));
-            let started = Instant::now();
-            match run_limited("/bin/launchctl", &["kickstart", "-k", &target], Duration::from_secs(10)) {
-                Ok(()) => {}
-                Err(e) => {
-                    log(&format!("warning: launchctl kickstart -k {target} failed: {e}"));
-                    return;
-                }
-            }
-            let deadline = started + Duration::from_secs(10);
-            while Instant::now() < deadline {
-                if let Some(h) = health(agent, &base) {
-                    if h.get("version").and_then(Value::as_str) == Some(ours) {
-                        let new_pid = h.get("pid").and_then(Value::as_i64).unwrap_or(0);
-                        log(&format!("the login agent's brain is now version {ours} (pid {new_pid}), {} ms after the restart", started.elapsed().as_millis()));
-                        return;
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            log(&format!("warning: after the restart the brain on port {port} still doesn't report version {ours} within 10 s"));
-        }
+    if let Some(why) = check.host.off() {
+        log(&format!("brain version check: {why}"));
     }
-}
-
-/// The pid launchd gives for this user's agent `label` (`launchctl print gui/<uid>/<label>`,
-/// read only), if it is running.
-fn agent_pid(label: &str) -> Option<i32> {
-    let out = Command::new("/bin/launchctl").args(["print", &format!("gui/{}/{label}", unsafe { libc::getuid() })]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-    out.status.success().then(|| launchd_pid(&String::from_utf8_lossy(&out.stdout))).flatten()
-}
-
-/// The service's own `pid = N` line in `launchctl print` output: one tab deep (nested
-/// dictionaries are deeper).
-pub fn launchd_pid(text: &str) -> Option<i32> {
-    text.lines().find_map(|l| l.strip_prefix("\tpid = ")).and_then(|v| v.trim().parse().ok())
-}
-
-/// Runs a command with a time limit; only the child it started is ever killed.
-fn run_limited(program: &str, args: &[&str], limit: Duration) -> Result<(), String> {
-    let mut child = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + limit;
-    loop {
-        match child.try_wait() {
-            Ok(Some(st)) if st.success() => return Ok(()),
-            Ok(Some(st)) => {
-                let mut err = String::new();
-                if let Some(mut e) = child.stderr.take() {
-                    use std::io::Read;
-                    let _ = e.read_to_string(&mut err);
-                }
-                return Err(format!("{st}: {}", err.trim()));
-            }
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("no answer within {} s", limit.as_secs()));
-            }
-            Err(e) => return Err(e.to_string()),
-        }
+    let outcome = crate::agent::reconcile(&mut check, &mut || health(agent, &base), ours);
+    log(&outcome.log_line(port, ours));
+    if let (Some(text), Some(notify)) = (outcome.notice(ours), notify) {
+        notify(text);
     }
 }
 
@@ -458,32 +369,88 @@ fn respawn_if_dead(brain: &Brain, cfg: &BrainConfig, token: &str) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_version_check_restarts_only_this_apps_own_agent() {
-        let h = |v: &str| serde_json::json!({"ok": true, "name": "bellwether", "version": v, "pid": 42});
-        assert_eq!(version_action(&h("0.1.0"), "0.1.0", true), VersionAction::Keep);
-        assert_eq!(version_action(&h("0.1.0"), "0.1.0", false), VersionAction::Keep);
-        assert_eq!(version_action(&h("0.0.9"), "0.1.0", true), VersionAction::RestartAgent);
-        assert_eq!(version_action(&h("0.0.9"), "0.1.0", false), VersionAction::Foreign, "a repository brain or another copy is never restarted");
-        assert_eq!(version_action(&serde_json::json!({"name": "other", "version": "9"}), "0.1.0", true), VersionAction::Keep, "not a bellwether brain: not ours to judge");
-        assert_eq!(version_action(&serde_json::json!({"name": "bellwether"}), "0.1.0", false), VersionAction::Foreign);
+    /// A brain on a free port whose /health is the agent test world's files (version, pid),
+    /// so the stand-in launchctl's "restart" changes what it answers. Anything else: 503.
+    fn world_brain(dir: std::path::PathBuf) -> u16 {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert_ne!(port, 47417);
+        std::thread::spawn(move || {
+            for s in listener.incoming() {
+                let Ok(mut s) = s else { continue };
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let resp = if String::from_utf8_lossy(&buf[..n]).starts_with("GET /health") {
+                    let v = std::fs::read_to_string(dir.join("version")).unwrap_or_default();
+                    let pid = std::fs::read_to_string(dir.join("pid")).unwrap_or_default();
+                    let body = format!("{{\"ok\":true,\"name\":\"bellwether\",\"version\":\"{}\",\"pid\":{}}}", v.trim(), pid.trim());
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+                } else {
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                };
+                let _ = s.write_all(resp.as_bytes());
+            }
+        });
+        port
     }
 
+    fn wired(w: &crate::agent::tests::World) -> (BrainConfig, std::sync::mpsc::Receiver<String>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        let cfg = BrainConfig {
+            port: world_brain(w.dir.clone()),
+            token: Some("testTokenNotReal_abcdefghijklmnop".into()),
+            spawn: false,
+            child_env: vec![],
+            child_gets_token: false,
+            check_version: true,
+            home: w.dir.clone(),
+            notify: Some(Box::new(move |t| tx.lock().unwrap().send(t).unwrap())),
+            agent_check: Some(w.check()),
+        };
+        (cfg, rx)
+    }
+
+    /// Deviation 135, the path that failed for the maintainer: the strip's brain thread
+    /// (`run`) checks the version before anything else, restarts this app's agent, and
+    /// hands a restart that doesn't take to the tray (`notify`). A no-op check fails this.
     #[test]
-    fn the_agents_pid_is_launchds_own() {
-        let print = "gui/501/com.x.brain = {\n\tactive count = 1\n\tpath = /x\n\tstate = running\n\tprogram identifier = Contents/MacOS/Bellwether (mode: 2)\n\tpid = 6328\n\tendpoints = {\n\t\tpid = 1\n\t}\n}\n";
-        assert_eq!(launchd_pid(print), Some(6328));
-        assert_eq!(launchd_pid("gui/501/com.x.brain = {\n\tstate = not running\n\tlast exit code = 0\n}\n"), None, "not running: no pid");
-        assert_eq!(launchd_pid("\t\tpid = 7\n"), None, "a nested pid is not the service's");
-        // The restart needs both: launchd's pid for the label equals /health's pid.
-        let src = include_str!("brain.rs");
-        let code = src.split("#[cfg(test)]").next().unwrap();
-        assert!(code.contains("looks_ours && label.as_deref().and_then(agent_pid) == Some(pid)"));
+    fn the_brain_thread_restarts_an_old_agent_and_tells_the_tray_when_it_cant() {
+        use crate::agent::tests::World;
+        let ours = bellwether_brain::VERSION;
+        // The update case: the agent's executable was deleted; one restart brings `ours`.
+        let w = World::new("run-ok", "0.0.1-old", 4001, Some(4001));
+        std::fs::write(w.dir.join("new-version"), ours).unwrap();
+        std::fs::write(w.dir.join("exe-4001"), "deleted").unwrap();
+        let (cfg, rx) = wired(&w);
+        std::thread::spawn(move || run(Brain::new(), cfg));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while std::fs::read_to_string(w.dir.join("version")).unwrap_or_default().trim() != ours {
+            assert!(Instant::now() < deadline, "the brain thread never restarted the agent: {:?}", w.calls());
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(w.calls().iter().any(|c| c.starts_with("kickstart -k")), "{:?}", w.calls());
+        assert!(rx.recv_timeout(Duration::from_millis(500)).is_err(), "a restart that took is no notice");
+        // A restart that doesn't take: two tries, then the menu line, through `notify`.
+        let w = World::new("run-stuck", "0.0.1-old", 4001, Some(4001));
+        std::fs::write(w.dir.join("stuck"), "").unwrap();
+        let (cfg, rx) = wired(&w);
+        std::thread::spawn(move || run(Brain::new(), cfg));
+        let notice = rx.recv_timeout(Duration::from_secs(15)).expect("no tray notice from the brain thread");
+        assert_eq!(notice, format!("Brain is still 0.0.1-old, not {ours} (see bellwether doctor)"));
+        assert_eq!(w.calls().iter().filter(|c| c.starts_with("kickstart -k")).count(), 2);
+        // The app wires that notice to the tray, and the real check is the default.
+        let lib = include_str!("lib.rs");
+        let at = lib.find("cfg.notify = Some(Box::new(move |text| tray::late_notice(&h, text)));").expect("notify wired to the tray");
+        assert!(at < lib.find("std::thread::spawn(move || brain::run(b, cfg));").unwrap());
+        let code = include_str!("brain.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(code.contains("let check = cfg.agent_check.take().unwrap_or_else(crate::agent::Check::here);"));
     }
 
     #[test]
     fn the_child_is_this_executable_as_serve_marked_with_the_parent() {
-        let cfg = BrainConfig { port: 47999, token: None, spawn: true, child_env: vec![("BELLWETHER_HOME".into(), "/tmp/bw-home".into())], child_gets_token: false, check_version: true, home: "/tmp/bw-home".into() };
+        let cfg = BrainConfig { port: 47999, token: None, spawn: true, child_env: vec![("BELLWETHER_HOME".into(), "/tmp/bw-home".into())], child_gets_token: false, check_version: true, home: "/tmp/bw-home".into(), notify: None, agent_check: None };
         let cmd = child_command(std::path::Path::new("/x/Bellwether.app/Contents/MacOS/Bellwether"), &cfg, "tokenNotPassed_0123456789", 4242);
         assert_eq!(cmd.get_program(), "/x/Bellwether.app/Contents/MacOS/Bellwether");
         assert_eq!(cmd.get_args().collect::<Vec<_>>(), ["serve", "--port", "47999"]);

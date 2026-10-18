@@ -15,7 +15,9 @@
 //!   nothing here writes LaunchAgents (plan D5).
 //! - Notices (plan D5, milestone 6), above the switches, found once at start: legacy
 //!   LaunchAgents still installed (one line naming them; information only), and a login
-//!   item waiting for approval (a line that opens System Settings' Login Items pane).
+//!   item waiting for approval (a line that opens System Settings' Login Items pane); and,
+//!   added later by the brain thread, a brain agent the app couldn't restart onto its own
+//!   version (`late_notice`, deviation 135; information only).
 
 use std::sync::{Arc, Mutex};
 use tauri::image::Image;
@@ -36,6 +38,9 @@ pub struct Switches {
 }
 
 pub struct TrayItems {
+    pub menu: Menu<Wry>,
+    /// Whether the menu has notices (and so the separator under them).
+    pub has_notices: Mutex<bool>,
     pub mute: CheckMenuItem<Wry>,
     pub hide: CheckMenuItem<Wry>,
     pub labels: CheckMenuItem<Wry>,
@@ -85,6 +90,35 @@ pub fn startup_notices() -> Vec<Notice> {
     notices(&legacy, &waiting)
 }
 
+/// Notices found after the tray was built, or before it exists (the brain thread's version
+/// check, deviation 135). Held while the tray is built, so none is lost in between.
+static LATE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static LATE_IDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Adds an information-only line at the top of the menu, now or when the tray is built.
+pub fn late_notice(app: &AppHandle<Wry>, text: String) {
+    let mut late = LATE.lock().unwrap();
+    let Some(items) = app.try_state::<TrayItems>() else {
+        late.push(text);
+        return;
+    };
+    let mut has = items.has_notices.lock().unwrap();
+    let added = (|| -> tauri::Result<()> {
+        if !*has {
+            items.menu.prepend(&PredefinedMenuItem::separator(app)?)?;
+        }
+        items.menu.prepend(&MenuItem::with_id(app, format!("late-{}", LATE_IDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)), &text, false, None::<&str>)?)?;
+        Ok(())
+    })();
+    match added {
+        Ok(()) => {
+            *has = true;
+            log(&format!("tray: notice: {text}"));
+        }
+        Err(e) => log(&format!("warning: tray notice not shown ({e}): {text}")),
+    }
+}
+
 /// The menu's switch labels, in order (ids `mute`, `hide`, `labels`). "Quiet" keeps a
 /// waiting sheep's "!"; "Hide everything" hides the whole strip, "!" included.
 pub const QUIET: &str = "Quiet (alerts only)";
@@ -105,6 +139,10 @@ pub fn menu_words(notices: usize, setup: bool, updates: bool) -> String {
 /// `setup`: the "Set up Bellwether…" item, which opens the onboarding window (the app
 /// layout only; plan D6). `updates`: "Check for Updates…" (a build that updates itself).
 pub fn build(app: &AppHandle<Wry>, kept: Kept, muted: bool, notices: &[Notice], setup: bool, updates: bool) -> tauri::Result<()> {
+    let mut late = LATE.lock().unwrap();
+    let mut notices = notices.to_vec();
+    notices.extend(late.drain(..).map(|text| Notice { text, opens_login_items: false }));
+    let notices = &notices[..];
     let mute = CheckMenuItem::with_id(app, "mute", QUIET, true, muted, None::<&str>)?;
     let hide = CheckMenuItem::with_id(app, "hide", HIDE, true, kept.hidden, None::<&str>)?;
     let labels = CheckMenuItem::with_id(app, "labels", "Show labels", true, kept.show_labels, None::<&str>)?;
@@ -133,7 +171,8 @@ pub fn build(app: &AppHandle<Wry>, kept: Kept, muted: bool, notices: &[Notice], 
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .build(app)?;
-    app.manage(TrayItems { mute, hide, labels });
+    app.manage(TrayItems { menu: menu.clone(), has_notices: Mutex::new(!notices.is_empty()), mute, hide, labels });
+    drop(late);
     log(&format!("tray: {}", menu_words(notices.len(), setup, updates)));
     Ok(())
 }
@@ -265,6 +304,21 @@ mod tests {
         assert!(code.contains(r#""mute" => {"#) && code.contains(r#"let action = if brain.muted() { "unmute" } else { "mute" };"#), "Quiet is still the brain's mute");
         assert!(code.contains(r#"if id == "hide" {"#) && code.contains("k.hidden = !k.hidden;"), "Hide everything is still shell-state's hidden");
         assert!(!code.contains("Mute (do not disturb)") && !code.contains("\"Hide the strip\""));
+    }
+
+    /// Deviation 135: a line from the brain thread is never lost. Before the tray exists it
+    /// waits in LATE, which `build` drains into the notices while holding it; afterwards it
+    /// goes straight into the menu, information only (disabled).
+    #[test]
+    fn a_late_notice_waits_for_the_tray_or_joins_the_menu() {
+        let src = include_str!("tray.rs");
+        let code = src.split("#[cfg(test)]").next().unwrap();
+        let late = code.split("pub fn late_notice(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(late.contains("let Some(items) = app.try_state::<TrayItems>() else {\n        late.push(text);"));
+        assert!(late.contains("&text, false, None::<&str>)"), "information only");
+        let build = code.split("pub fn build(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(build.find("let mut late = LATE.lock().unwrap();").unwrap() < build.find("late.drain(..)").unwrap());
+        assert!(build.find("app.manage(TrayItems").unwrap() < build.find("drop(late);").unwrap(), "held until the tray is managed");
     }
 
     /// Milestone 9: the item only asks updater.rs to check (on its own thread); the tray

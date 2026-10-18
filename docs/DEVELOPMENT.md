@@ -562,10 +562,15 @@ build does with `--onboarding`, for testing).
   second when the strip is killed outright (`kill -9`). A brain started by the login agent
   or by hand is never stopped by the strip;
 - at start, compares its version with the brain's `/health`. If the brain is this app's
-  own login agent (launchd lists that pid for the app's agent) running another version
-  (after an update), it restarts the agent (`launchctl kickstart -k`) and waits for the
-  new version. Any other brain is left alone,
-  with a line in `shell.log`;
+  own login agent (launchd's pid for `<bundle id>.brain` is the pid `/health` reports, and
+  that pid runs this bundle's executable, or one an update has deleted; a second copy of
+  the app with the same id leaves the installed copy's agent alone) running another version (after an update), it restarts the agent (`launchctl kickstart
+  -k`) and waits up to 10 s for the new version; twice at most, then a line in the menu
+  ("Brain is still …") and in `shell.log`, and doctor's brain line says what to do. Any
+  other brain (one started by hand, a repository install's, another copy of the app's) is
+  left alone, with a line in `shell.log`. Tests drive this with a stand-in launchctl
+  (`BELLWETHER_LAUNCHCTL`, under a temp HOME only); the real one is never called from a
+  unit test;
 - loads a pet bundled with the app (Bellwether's own sheep, the default), else one you
   imported with `bellwether pets import` (or the setup window's Import…), each only while
   it matches its pin. `pets.default` in `config.json` names it. An imported pet also needs
@@ -597,7 +602,9 @@ accepts the old token for one more minute), then rewrites bellwether's hook entr
 The installer and doctor work as the Node CLI's do (`hooks install` previews are the same
 bytes), with the app's files in place of `data/`: the install record is `installs.json`
 and backups go to `backups/` in the app's folder. Doctor also checks the token file's mode,
-the app's identity and signature, its login items and Accessibility, LaunchAgents left by a
+the app's identity and signature, its login items, the strip's Accessibility (from its
+log, and whether a strip runs: doctor can't ask macOS itself, which would answer for the
+terminal), a brain of another version than the app (WARN), LaunchAgents left by a
 repository install, whether the strip could switch WebKit's occlusion detection off, and
 fails a bellwether hook entry that sets `"onFailure": "block"`.
 
@@ -743,7 +750,8 @@ see is in the README):
   from the newest published GitHub release (`latest.json`), are signed with the project's
   updater key (the app refuses anything else, or a signature made for another version),
   and replace the app where it is. After the relaunch the app restarts its own brain
-  agent, so hooks see a gap of well under a second.
+  agent (the strip does it at start, not the updater before the relaunch), so hooks see
+  a gap of well under a second.
 - `"updates": {"check": "off"}` in `config.json` turns the automatic checks off; *Check
   for Updates…* still works.
 - Only the Developer ID app updates itself. A repository build, an ad-hoc or test build

@@ -3707,7 +3707,10 @@ The full commands are in docs/RELEASING.md; in order:
 7. Release rc.2 the same way (steps 2–5).
 8. `node scripts/health-gap.mjs --port 47417`, then Check for Updates… > Install and
    Relaunch: the new version within 2 s, the gap under 1000 ms, the grants kept (doctor,
-   Dock, a sheep click).
+   Dock, a sheep click). Without any manual `launchctl kickstart`, `bellwether doctor`'s
+   brain line is a PASS with the new version and a new pid (deviation 135; first provable
+   on an update *to* 0.2.0-rc.3 or later, since the relaunched version's strip does the
+   restart).
 9. `brew install --cask fanzoo/tap/bellwether` where the app isn't installed; `bellwether
    doctor` from PATH.
 10. A pull request from a fork: `ci` runs, `release` has no deployment for it.
@@ -5855,3 +5858,141 @@ Recorded by the developer while fixing the flaky Rust throughput test (2026-10-1
          A grep of the tracked and new files for `/private/tmp`, the home path and the
          session id finds nothing else of that kind (RELEASING.md's `/private/tmp/bw-run`
          is a generic example path, and stays).
+135. **After an update the brain agent is restarted on the new version, and doctor's
+     Accessibility is the strip's (0.2.0-rc.3, from the maintainer's rc.1 → rc.2 update).**
+     - **Brain left on the old version.** Plan (D5, deviation 49): the relaunched app
+       restarts its own brain agent when the versions differ. True: after "Install and
+       Relaunch", doctor showed the app 0.2.0-rc.2 and the agent's brain (pid 46879,
+       `Bellwether serve`) still v0.2.0-rc.1 until a manual `launchctl kickstart -k`.
+       Root cause: deviation 49's check called a brain "this app's agent" only if its pid
+       ran this bundle's executable (`identity::bundle_processes`: `proc_pidpath` equal to
+       `Contents/MacOS/Bellwether`) AND launchd gave that pid for the label. The updater
+       swaps the bundle with `renamex_np(RENAME_SWAP)` and deletes the old one, so the old
+       brain's executable no longer exists: `proc_pidpath` fails (reproduced here with a
+       scratch bundle: before the swap it returns the bundle path, after the swap the
+       temp path, after the delete `No such file or directory`; `ps` still shows the old
+       argv). The brain counted as foreign and was left alone with a `shell.log`
+       warning. The M9 local test never hit this: a test build has no login agent, so it
+       exercised the brain-child path (M9 status).
+     - Done (shell/src-tauri/src/agent.rs, new; brain.rs, tray.rs, cli.rs, lib.rs):
+       - A brain is this app's agent when launchd's pid for `<bundle id>.brain` equals
+         `/health`'s pid. The executable path is no longer consulted (amended below: it
+         is, with a deleted executable counting as this install's). A dev brain, a
+         `local.bellwether.*` agent's or another copy's never matches, and is left alone
+         as before (the legacy-agents logic still covers those).
+       - At the strip's start (as before, before it polls `/state`): a different version
+         from this app's agent gets `launchctl kickstart -k gui/<uid>/<label>`, then
+         `/health` every 50 ms for up to 10 s for the app's version. At most 2 attempts
+         (a kickstart that fails counts as one), then a `warning:` in `shell.log` and an
+         information-only line at the top of the menu ("Brain is still X, not Y (see
+         bellwether doctor)", `tray::late_notice`, which also holds a line that arrives
+         before the tray exists). Never a loop: it isn't tried again until the next start.
+       - Decided: the updater path does nothing before the relaunch. The relaunched
+         (new) version's strip restarts the agent, with the new version's code. That also
+         covers any bundle replacement (a DMG drag, `brew upgrade`) at the next app start.
+         A fix in the old app's updater would only help later updates.
+       - Hooks during the restart: a brief "hook error" is possible, as in the migration's
+         swap. The swap marker isn't written: the restart runs on the strip's brain thread
+         before its `/state` loop, the only place the strip starts a brain of its own, so
+         nothing can take the port meanwhile. If both attempts fail and nothing answers,
+         that loop then starts a brain child as at any start (unchanged).
+       - Testing: `agent::host()` uses the real `/bin/launchctl` (read-only `print`, and
+         `kickstart -k`) only for this bundle's own label; outside a bundle there is no
+         label and nothing is asked. `BELLWETHER_LAUNCHCTL` names a stand-in, honoured only
+         under a temp HOME and never launchctl itself (same rules as the migration's).
+         Both real calls panic first in a test build (source check
+         `the_real_launchd_never_runs_in_a_unit_test`).
+     - **Doctor flags a brain of another version.** The brain line becomes a WARN with
+       the fix: for this app's agent, "still running X … Quit Bellwether … and open it
+       again, or run `launchctl kickstart -k gui/$(id -u)/<label>`"; for any other brain,
+       "isn't this app's login agent (…), so Bellwether leaves it alone … Stop it (pid N)".
+       Doctor only asks launchd (`print`), never restarts. `next_step` treats a WARN brain
+       as running (not "start the brain") and, once nothing FAILs, says "bring the brain
+       up to this app's version".
+     - **Doctor's two Accessibility lines disagreed.** `dock` came from the strip's log
+       (the strip's own `AXIsProcessTrusted`), `accessibility` from `AXIsProcessTrusted`
+       in the doctor process. macOS answers that for the process's responsible app: a CLI
+       run from Terminal is Terminal's (here a binary run from this sandboxed shell had
+       itself as its responsible process and answered false), never Bellwether.app's. Done:
+       doctor no longer asks macOS. One `accessibility` line from the strip's log line,
+       with whether a strip runs now (`own_strips`): "granted to the strip (pid N)", "not
+       granted to the strip (pid N): …" (the earlier-build WARN kept), or "the strip isn't
+       running, so doctor can't tell … `bellwether shell start`; the last time it ran, …".
+       A development binary, which can't see strips, says the line is from the log. The
+       `dock` line folds into it (the brain-side `check_locator_log` is unchanged, so the
+       Node parity tests that read it are too).
+     - Tests: agent.rs (an older agent brain restarted and answering the new version, a
+       newer one too; the same version untouched with launchd not even asked; a brain
+       launchd doesn't list as the agent, a not-running agent, no label, a refused
+       stand-in and a non-bellwether answer untouched; a restart that doesn't take and a
+       launchctl that refuses: exactly 2 kickstarts, then the warning and the menu line;
+       the stand-in rules; the doctor wording; the source check). cli.rs
+       `accessibility_is_the_strips_in_one_line`; doctor.rs
+       `a_warn_brain_answers_and_is_the_next_step_once_nothing_fails`; new
+       tests/brain_version.rs, through the binary under a temp HOME with a stand-in
+       launchctl and fake or real brains on free ports: the agent's old brain is a WARN
+       with the kickstart fix and only `print` was called; another brain is a WARN "left
+       alone" with no kickstart; the same version is a PASS and launchd isn't asked; one
+       `accessibility` line and no `dock` line, with and without a strip log.
+     - M9's by-hand step 8 and docs/RELEASING.md's step 5 now require doctor's brain line
+       to show the new version without a manual kickstart; README's Updates and
+       docs/DEVELOPMENT.md say what happens.
+     - Not verified: the real restart under launchd after a real update (the constraints
+       rule out the installed app, its label and `launchctl`), the menu line on screen
+       (no GUI strip was started), and doctor's strip detection against a running app.
+       The first real proof is an update to 0.2.0-rc.3 (M9 step 8).
+     - **After BR-3K's verification of 135** (ship with fixes):
+       - **Another copy of the app restarted the installed agent.** A second
+         Bellwether.app with the same id (a build in Downloads, the app run from an opened
+         DMG) has the same label, so launchd's pid matching `/health`'s was not enough: that
+         copy would kickstart the installed agent twice and show "Brain is still X". The
+         suggested check, the bundle path launchd has registered for the label, doesn't
+         exist: read-only `launchctl print` of another vendor's SMAppService agent on this
+         Mac (Microsoft Teams' `com.microsoft.teams2.agent`) shows `path = (submitted by
+         smd.528)`, `type = Submitted`, `managed_by = com.apple.xpc.ServiceManagement`, a
+         bundle-relative `program identifier = Contents/Library/LaunchAgents/… (mode: 2)`,
+         `parent bundle identifier` and `parent bundle version`, and no absolute bundle
+         path. Bellwether's own label was not printed (constraints); its fields are assumed
+         to be the same kind. The stand-ins now print that shape. Done (`agent::owner`):
+         beyond launchd's pid, the pid must run this bundle's executable (resolved), or an
+         executable that no longer exists (`proc_pidpath` ENOENT: the update case, which
+         only happens to the file the running agent was started from). A pid running any
+         other existing file is another copy's agent: left alone, `shell.log` says
+         `… isn't this app's login agent (<label> runs <path>, another copy of the app, not
+         this one (<this exe>)) …`, no menu line. And if a restart of a "deleted" agent
+         comes back running another copy's executable, it isn't restarted again ("after
+         one restart, …; not restarting it again"). Doctor uses the same verdict: for
+         another copy's agent it says to use one copy, never the kickstart. A development
+         binary (no bundle executable) never claims the agent.
+       - **The strip-start wiring had no test** (a no-op `check_version` left all green).
+         `BrainConfig` takes the check (`agent::Check`: launchd, this executable, how to
+         read a pid's executable, wait and attempts; `Check::here()` is the real one, used
+         when none is given). New brain.rs test
+         `the_brain_thread_restarts_an_old_agent_and_tells_the_tray_when_it_cant` runs
+         `brain::run` on its own thread against a /health server on a free port and the
+         stand-in launchctl: the old agent (executable deleted) is kickstarted and answers
+         the app's version with no notice; a stuck one gets exactly 2 kickstarts and the
+         "Brain is still …" line arrives through `notify`. It also pins lib.rs wiring
+         `notify` to `tray::late_notice` before the thread starts. tray.rs
+         `a_late_notice_waits_for_the_tray_or_joins_the_menu` pins the queue (source
+         check: the tray needs a running app). Mutations: `check_version` returning at
+         once fails the brain.rs test (it times out waiting for the restart); treating
+         another copy's executable as ours fails `another_copy_of_the_app_…` and the
+         source check.
+       - **Doctor's "is the strip running" had the same root cause.**
+         `identity::bundle_processes` (used by `own_strips`, `shell stop`, the undo's
+         stragglers) now also counts a process whose executable was deleted when its argv
+         starts with this bundle's executable path (LaunchServices starts the strip by its
+         full path; the brain agent's argv[0] is the bare `Bellwether`, so the agent is
+         never matched this way, and is judged by `agent::owner`). A process whose file
+         exists elsewhere still never matches. Test (tests/brain_version.rs): a copy of the
+         binary in a scratch `Bellwether.app`, started by its full path as `serve`, is
+         found; its bundle is deleted; `proc_pidpath` reports it deleted and it is still
+         found; another path never finds it.
+       - The doctor integration test for the agent's old brain now runs from a
+         development binary, which says the brain isn't its agent ("this binary isn't
+         inside an app bundle") and calls only `print`; the wording for this app's own
+         agent (the kickstart fix) is unit-tested (`doctor_names_the_fix_…`), because a
+         bundle can't be faked through the binary without SMAppService.
+       - Still not verified: the real restart, Bellwether's own `launchctl print` fields,
+         and a second copy against a real installed agent.

@@ -13,8 +13,9 @@
 //! - **Asking.** A native alert (NSAlert, on the main thread). Install downloads the
 //!   signed `.app.tar.gz`, checks its minisign signature against the bundled public key
 //!   (the plugin refuses anything else), swaps the bundle and relaunches. The relaunched
-//!   app then restarts this app's own brain agent when its version differs (brain.rs,
-//!   plan D5).
+//!   app then restarts this app's own brain agent when its version differs (agent.rs,
+//!   plan D5, deviation 135). Nothing here restarts it before the relaunch: the new
+//!   version's strip does it, with the new version's code.
 //! - **Tests.** A debug build only (never a release build) reads
 //!   `BELLWETHER_UPDATE_ENDPOINT` (a `latest.json` on a local server; plan's test plan,
 //!   M9), `BELLWETHER_UPDATE_ANSWER` (`install` or `later`, so a scripted test needs no
