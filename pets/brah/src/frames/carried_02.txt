@@ -1,0 +1,11 @@
+# carried 2 of 3: dangling, the feet paddling one way, swung a pixel to the right.
+part leg_far_back 22 25
+part leg_fwd 11 25
+part body 9 15
+part neck_short 4 14
+part head 1 0
+grid 6 8
+WWW
+WoW
+end
+shift 2 0

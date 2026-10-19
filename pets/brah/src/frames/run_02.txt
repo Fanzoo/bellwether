@@ -1,0 +1,6 @@
+# run 2 of 4: airborne, both feet tucked, the goose three pixels off the ground.
+part leg_far_tuck 19 29
+part leg_tuck 15 29
+part body 9 18
+part neck_short 4 17
+part head 1 3

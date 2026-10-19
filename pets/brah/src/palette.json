@@ -1,0 +1,23 @@
+{
+  "comment": "Every colour the aviator goose uses (pets/SPEC.md): a Canada goose. '.' is transparent. The helmet is drawn only in the three mask tones, which the strip recolours to the session colour. The black head, neck, bill, tail and feet are dark edge colours under D8 (d) rule 1: the helmet's light rim keeps them apart from a black session's helmet.",
+  "colours": [
+    { "char": "1", "hex": "#730073", "role": "mask-dark" },
+    { "char": "2", "hex": "#b300b3", "role": "mask-mid" },
+    { "char": "3", "hex": "#ff7aff", "role": "mask-light" },
+    { "char": "o", "hex": "#1c1c22", "role": "outline" },
+    { "char": "K", "hex": "#34343c", "role": "neck" },
+    { "char": "H", "hex": "#55555f", "role": "neck-light" },
+    { "char": "b", "hex": "#45454f", "role": "bill" },
+    { "char": "W", "hex": "#ffffff", "role": "chinstrap" },
+    { "char": "w", "hex": "#dfe3e8", "role": "chinstrap-shade" },
+    { "char": "D", "hex": "#7a6a5c", "role": "wing" },
+    { "char": "d", "hex": "#5e5046", "role": "wing-dark" },
+    { "char": "e", "hex": "#c4b39e", "role": "wing-edge" },
+    { "char": "c", "hex": "#d9cfc0", "role": "breast" },
+    { "char": "C", "hex": "#b9ad9c", "role": "breast-shade" },
+    { "char": "g", "hex": "#8e9096", "role": "goggle-frame" },
+    { "char": "l", "hex": "#dde8f0", "role": "goggle-lens" },
+    { "char": "t", "hex": "#4a3b33", "role": "strap" },
+    { "char": "y", "hex": "#ffd75e", "role": "star" }
+  ]
+}

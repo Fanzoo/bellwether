@@ -1,0 +1,5 @@
+# sit 2 of 3: sitting on the grass, chest out and neck up, a foot peeking out in front.
+part body 9 26
+part foot_peek 8 37
+part neck 4 20
+part head 1 6

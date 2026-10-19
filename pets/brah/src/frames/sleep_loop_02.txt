@@ -1,0 +1,8 @@
+# sleep loop 2 of 3: breathing in (the head lifts a pixel); the z rises (an overlay).
+part body 9 25
+part neck_short 4 24
+part head 1 15
+grid 6 23
+KKK
+HHH
+end

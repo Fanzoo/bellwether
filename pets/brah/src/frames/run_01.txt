@@ -1,0 +1,6 @@
+# run 1 of 4: stretched out, the neck pulled in and leaning forward, the near foot far forward, the far one far back.
+part leg_far_back 24 32
+part leg_fwd 9 32
+part body 9 21
+part neck_short 4 20
+part head 1 6

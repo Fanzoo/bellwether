@@ -1,0 +1,8 @@
+# sleep 2 of 4: sitting on the grass, the head lowering.
+part body 9 26
+part neck_short 4 25
+part head 1 13
+grid 6 21
+ooo
+ooW
+end

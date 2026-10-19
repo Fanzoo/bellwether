@@ -1,0 +1,9 @@
+# A bigger sleeping "z": a white letter with a thin dark outline.
+.ooooooo.
+oWWWWWWWo
+.ooooWWo.
+...oWWo..
+..oWWo...
+.oWWoooo.
+oWWWWWWWo
+.ooooooo.

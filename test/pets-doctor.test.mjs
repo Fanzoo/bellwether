@@ -9,7 +9,8 @@ import { runDoctor } from './impl.mjs';
  * M10a review D1: doctor judges `pets.default` by the strip's own rules, in the same words
  * from the Node and the Rust brain (test/conformance.json runs this file against both). A
  * bundled pet passes only under its exact pinned name with its file matching the pin;
- * `brah` before M10b, a wrong case and a trailing dot are named, never passed.
+ * the goose `brah` passes the same way (M10b); a wrong case and a trailing dot are named,
+ * never passed.
  */
 
 const pets = async (petsConfig) => {
@@ -32,10 +33,10 @@ describe('doctor\'s pets line, by the strip\'s rules', () => {
     assert.equal(c.status, 'PASS', c.detail);
     assert.match(c.detail, /sha256 matches its pin/);
   });
-  test('"brah" before M10b: not bundled in this version, and says what to do', async () => {
+  test('"brah": the goose, bundled since M10b, matching its pin', async () => {
     const c = await pets({ default: 'brah' });
-    assert.equal(c.status, 'WARN');
-    assert.equal(c.detail, 'brah is reserved for one of Bellwether\'s own pets, which isn\'t bundled in this version, so the strip draws nothing. Set pets.default to "bellwether" (or remove it) in config.json');
+    assert.equal(c.status, 'PASS', c.detail);
+    assert.equal(c.detail, "brah, Bellwether's own pet, bundled; sha256 matches its pin");
   });
   for (const name of ['BELLWETHER', 'Bellwether', 'bellwether.', 'Brah']) {
     test(`${JSON.stringify(name)}: names are exact, never a PASS`, async () => {

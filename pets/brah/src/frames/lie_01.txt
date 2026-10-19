@@ -1,0 +1,4 @@
+# lie 1 of 3: lying down, the neck low along the breast, awake.
+part body 9 26
+part neck_short 4 25
+part head 1 14

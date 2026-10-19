@@ -40,7 +40,7 @@ pub fn reserved(name: &str) -> bool {
 pub const LOCK: &str = include_str!("../../../pets.lock.json");
 
 /// A bundled pet's pinned sha256, by its exact name; None when this version doesn't
-/// bundle it (`brah` before M10b) or the name isn't exact.
+/// bundle it or the name isn't exact.
 pub fn bundled_sha(name: &str) -> Option<String> {
     if !BUNDLED.contains(&name) {
         return None;
@@ -694,7 +694,7 @@ mod tests {
         assert!(ok, "{why}");
         assert!(why.contains("sha256 matches its pin"));
         let (ok, why) = bundled_check("brah").unwrap();
-        assert!(!ok && why.contains("isn't bundled in this version"), "{why}");
+        assert!(ok && why.contains("sha256 matches its pin"), "the goose is bundled since M10b: {why}");
         for name in ["BELLWETHER", "Bellwether", "bellwether.", "BRAH"] {
             let (ok, why) = bundled_check(name).unwrap();
             assert!(!ok && why.contains("pet names are exact") && why.contains("Did you mean"), "{name}: {why}");

@@ -1,0 +1,10 @@
+# land 1 of 3: dropping the last few pixels, the feet reaching for the ground (then the crouch, hop 1, and standing, turn 1).
+part leg_far_dangle 20 30
+part leg_dangle 14 30
+part body 9 19
+part neck_short 4 18
+part head 1 4
+grid 6 12
+WWW
+WoW
+end

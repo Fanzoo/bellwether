@@ -1,0 +1,9 @@
+# The far leg (lift), a shade darker than the near one.
+..ooo..
+..ooo..
+..ooo..
+..oooo.
+.ooooo.
+ooooo..
+oooo...
+.......

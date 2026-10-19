@@ -1,0 +1,46 @@
+{
+  "title": "Aviator goose",
+  "animations": {
+    "walk": { "frames": ["walk_01", "walk_02", "walk_03", "walk_04"], "interval": 140, "x": -2, "repeat": "10", "next": { "walk": 100 } },
+    "run": { "frames": ["run_01", "run_02", "run_03", "run_04"], "interval": 90, "x": -5, "repeat": "12", "next": { "run": 100 } },
+    "graze": { "frames": ["graze_01", "graze_02", "graze_03", "graze_02", "graze_03", "graze_02", "graze_04"], "interval": 260, "repeat": "8", "repeatfrom": 1, "next": { "graze": 100 } },
+    "chew": { "frames": ["chew_01", "chew_02", "chew_03", "chew_02", "chew_03", "chew_01"], "interval": 220, "repeat": "10", "next": { "chew": 100 } },
+    "sleep": { "frames": ["sleep_01", "sleep_02", "sleep_03", "sleep_04"], "interval": [220, 420], "repeat": "0", "next": { "sleep loop": 100 } },
+    "sleep loop": { "frames": ["sleep_loop_01", "sleep_loop_02", "sleep_loop_03"], "interval": 700, "repeat": "1000", "next": { "sleep loop": 100 } },
+    "alert": { "frames": ["alert_01", "alert_02", "alert_03", "alert_04", "alert_05", "turn_03", "turn_02", "turn_01"], "interval": 110, "repeat": "0" },
+    "turn": { "frames": ["turn_01", "turn_02", "turn_03"], "interval": 130, "repeat": "0" },
+    "trip": { "frames": ["trip_01", "trip_02", "trip_03", "trip_03", "trip_03", "trip_04", "trip_05"], "interval": 160, "repeat": "0" },
+    "sit": { "frames": ["sit_01", "sit_02", "sit_02", "sit_02", "sit_03", "sit_02"], "interval": 420, "repeat": "30", "repeatfrom": 1, "next": { "sit": 100 } },
+    "dizzy": { "frames": ["dizzy_01", "dizzy_02", "dizzy_03", "dizzy_04"], "interval": 180, "repeat": "20", "next": { "dizzy": 100 } },
+    "arrive": { "frames": ["walk_01", "walk_02", "walk_03", "walk_04"], "interval": 120, "x": -2, "repeat": "10", "next": { "arrive": 100 } },
+    "leave": { "frames": ["run_01", "run_02", "run_03", "run_04"], "interval": 90, "x": -5, "repeat": "40", "next": { "leave": 100 } },
+    "hop": { "frames": ["hop_01", "hop_02", "hop_03", "hop_04", "hop_01"], "interval": 90, "x": -3, "repeat": "0" },
+    "carried": { "frames": ["carried_01", "carried_02", "carried_01", "carried_03"], "interval": 200, "repeat": "1000", "next": { "carried": 100 } },
+    "land": { "frames": ["land_01", "hop_01", "turn_01"], "interval": 110, "repeat": "0" },
+    "lie": { "frames": ["lie_01", "lie_01", "lie_02", "lie_01", "lie_01", "lie_03", "lie_03", "lie_01"], "interval": 450, "repeat": "30", "next": { "lie": 100 } }
+  },
+  "overlays": {
+    "sleep_04": [{ "part": "z_small", "x": 5, "y": 7 }],
+    "sleep_loop_01": [{ "part": "z_small", "x": 6, "y": 6 }],
+    "sleep_loop_02": [{ "part": "z_small", "x": 8, "y": 2 }],
+    "sleep_loop_03": [{ "part": "z_big", "x": 10, "y": 0 }]
+  },
+  "behaviours": {
+    "walk": "walk",
+    "run": "run",
+    "graze": "graze",
+    "sleep": ["sleep", "sleep loop"],
+    "alert": "alert",
+    "turn": "turn",
+    "trip": "trip",
+    "sit": "sit",
+    "dizzy": "dizzy",
+    "chew": "chew",
+    "arrive": "arrive",
+    "leave": "leave",
+    "hop": "hop",
+    "lie": "lie",
+    "carried": "carried",
+    "land": "land"
+  }
+}

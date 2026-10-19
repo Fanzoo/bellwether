@@ -1,0 +1,6 @@
+# The neck pulled in (crouching, jumping, carried, sitting): only its lower curve shows.
+.oKKKKKo....
+oHKKKKKKo...
+.oHHKKKKKo..
+..oHKKKKKKo.
+...oHKKKKKo.

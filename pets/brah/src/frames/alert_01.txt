@@ -1,0 +1,5 @@
+# alert 1: facing you, crouching to jump, the neck drawn in.
+part leg_far_short 13 36
+part leg_short 20 36
+part body_front 11 25
+part head_front 10 9

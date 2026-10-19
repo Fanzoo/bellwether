@@ -1,0 +1,10 @@
+# sleep 1 of 4: the legs fold, the neck draws in, the eye droops.
+part leg_far_short 20 36
+part leg_short 14 36
+part body 9 24
+part neck_short 4 23
+part head 1 9
+grid 6 17
+ooo
+ooW
+end

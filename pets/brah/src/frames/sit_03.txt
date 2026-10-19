@@ -1,0 +1,9 @@
+# sit 3 of 3: sitting, a happy blink.
+part body 9 26
+part foot_peek 8 37
+part neck 4 20
+part head 1 6
+grid 6 14
+KWK
+WKW
+end

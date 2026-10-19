@@ -9,6 +9,9 @@
 - A click on a sheep now counts when you let go, so a press can become a drag.
 - With two monitors at different display scaling, hover labels, fading and clicks now
   line up with the sheep on the second monitor.
+- **A second pet: the aviator goose.** A Canada goose in a flight helmet with goggles, the
+  helmet in the session's colour like the sheep's. Choose it in the setup window's Pet step,
+  or set `"pets": { "default": "brah" }` in config.json. CC0, like the sheep.
 
 ## 1.0.0
 

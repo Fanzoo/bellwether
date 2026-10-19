@@ -1,0 +1,10 @@
+# chew 1 of 3: head up, eyes shut happily, the bill closed.
+part leg_far 20 32
+part leg 14 32
+part body 9 21
+part neck 4 15
+part head 1 1
+grid 6 9
+KWK
+WKW
+end

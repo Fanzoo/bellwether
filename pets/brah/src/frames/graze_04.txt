@@ -1,0 +1,10 @@
+# graze 4 of 4: the bill in the grass, a contented blink.
+part leg_far 22 32
+part leg 16 32
+part body 11 21
+part neck_graze 8 19
+part head 0 25
+grid 5 33
+KWK
+WKW
+end

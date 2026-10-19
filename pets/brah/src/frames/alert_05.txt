@@ -1,0 +1,13 @@
+# alert 5: landing, squashed down, eyes squeezed shut; then it turns back to the side (turn 3, 2, 1).
+part leg_far_short 13 36
+part leg_short 20 36
+part body_front 11 26
+part head_front 10 10
+grid 13 19
+KKK
+HHH
+end
+grid 20 19
+KKK
+HHH
+end

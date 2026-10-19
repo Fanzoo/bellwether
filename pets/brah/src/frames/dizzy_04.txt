@@ -1,0 +1,13 @@
+# dizzy 4 of 4: swaying, eyes crossed out, two stars circling the helmet.
+part leg_far 20 32
+part leg 14 32
+part body 9 21
+part neck_short 4 20
+part head 1 6
+grid 6 13
+WKW
+KWK
+WKW
+end
+part star 18 3
+part star 6 1

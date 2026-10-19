@@ -1,0 +1,8 @@
+# lie 2 of 3: lying down, a slow blink.
+part body 9 26
+part neck_short 4 25
+part head 1 14
+grid 6 22
+KKK
+HHH
+end

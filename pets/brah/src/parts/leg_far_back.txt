@@ -1,0 +1,9 @@
+# The far leg (back), a shade darker than the near one.
+.ooo...
+.ooo...
+..ooo..
+..ooo..
+..ooo..
+...ooo.
+..ooooo
+..ooooo

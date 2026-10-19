@@ -1,0 +1,6 @@
+# walk 1 of 4 (contact): the near foot reaches forward, the far one pushes back.
+part leg_far_back 22 32
+part leg_fwd 11 32
+part body 9 21
+part neck 4 15
+part head 1 1

@@ -1,0 +1,10 @@
+# hop 2 of 5: springing up and forward, the near foot reaching, the far one pushing.
+part leg_far_back 22 28
+part leg_fwd 11 28
+part body 9 17
+part neck_short 4 16
+part head 1 2
+grid 6 10
+KWK
+WKW
+end

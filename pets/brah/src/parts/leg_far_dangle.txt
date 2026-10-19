@@ -1,0 +1,10 @@
+# The far leg (dangle), a shade darker than the near one.
+..ooo..
+..ooo..
+..ooo..
+..ooo..
+..ooo..
+..ooo..
+.oooo..
+.oooo..
+..oo...

@@ -1,0 +1,6 @@
+# walk 4 of 4 (passing): the far foot lifts past the planted near one; the goose a pixel higher.
+part leg_far_lift 16 31
+part leg 18 31
+part body 9 20
+part neck 4 14
+part head 1 0

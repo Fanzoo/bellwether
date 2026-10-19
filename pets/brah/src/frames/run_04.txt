@@ -1,0 +1,6 @@
+# run 4 of 4: gathered, both feet lifting, the goose a pixel up.
+part leg_far_lift 18 31
+part leg_lift 14 31
+part body 9 20
+part neck_short 4 19
+part head 1 5

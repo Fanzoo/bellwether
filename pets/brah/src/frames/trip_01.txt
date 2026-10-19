@@ -1,0 +1,10 @@
+# trip 1 of 5: a foot catches; pitching forward, eyes wide.
+part leg_far_back 22 32
+part leg_lift 10 32
+part body 9 22
+part neck_short 4 21
+part head 1 7
+grid 6 15
+WWW
+WoW
+end

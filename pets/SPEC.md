@@ -11,7 +11,7 @@ carries the session colour, so the strip looks the same whichever pet is chosen:
 | Id | What it is | Status |
 |---|---|---|
 | `bellwether` | an original sheep in a flight helmet; the default (`pets.default` absent means `bellwether`) | M10a, required for 1.0 |
-| `brah` | an aviator goose: a white goose in a flight helmet with goggles, a little cheeky | M10b, after 1.0 |
+| `brah` | an aviator goose: a Canada goose in a flight helmet with goggles, a little cheeky | M10b, after 1.0 (approved 2026-10-19) |
 
 `bellwether` and `brah` are reserved names: `bellwether pets import` and the setup
 window's Import… refuse them. The product stays Bellwether, and "sheep" and "lamb" stay
@@ -221,17 +221,68 @@ darker. A pale-yellow `star` colour is used only for the dizzy stars.
 
 ## The goose (`brah`)
 
-- A **white goose** with a **yellow-orange beak and feet**, a little cheeky.
-- It wears the **flight helmet with goggles in every frame**.
-- **The helmet never touches the beak**: at least one pixel of feather, outline or goggle
-  lies between them in every frame, because no orange can be far from the orange session
-  colour. The beak is a yellow-orange or ochre at least 10 (CIEDE2000) from `#FF8C00`
-  (for example `#F0B060`). A goggle lens that touches the helmet needs a colour such as
-  `#DDE8F0`.
+Rewritten 2026-10-19 for the maintainer's decision after review round 1 (distribution
+plan, deviation 141): round 1's white goose read as a duck, so the goose is a Canada
+goose.
+
+- A **Canada goose**, a little cheeky. It wears the **flight helmet with goggles in
+  every frame**.
+- **Head and neck:** a **long black neck** and a black head. The goose stands tall, the
+  neck rising from the breast in a gentle S: that is what makes it a goose and not a duck.
+  The neck is never stretched forward in a honk, and the wings never spread.
+- **The white chinstrap:** a bold white patch from the cheek, under the chin, to the
+  other cheek. It is the species' signature mark and stays visible below the helmet in
+  the side and front views; the helmet's ear flap and chin strap are shrunk or dropped
+  where they would hide it. The goggles stay on the dome.
+- **Body:** a brown-grey back and wings, with pale edges on the feathers (at pixel scale,
+  a lighter edge row on the wing), a paler buff or light-grey breast and belly, and a
+  clean line at the base of the neck where the black meets the pale breast.
+- **Tail:** black, with **white feathers under the tail** and a white band across the
+  rump.
+- **Bill, legs and feet are black** (dark grey for shading). The black bill and head are
+  dark edge colours under (d) rule 1, as the sheep's dark face is: the helmet's light rim
+  keeps them apart from a black session's helmet. The bill doesn't touch the helmet: at
+  least a pixel of black head, chinstrap or feather lies between them.
 - **Visibly distinct from Untitled Goose Game's goose** (a flat-shaded, unoutlined white
   goose with an orange beak and feet, a honk pose with the neck stretched and wings out,
-  and a stolen bell). Ours wears the helmet and goggles in every frame, has a dark pixel
-  outline, has its own proportions (a rounder, chunkier body and a shorter neck), carries
-  no bell or other prop, and never uses the outstretched-neck honk as a pose.
+  and a stolen bell). Ours is a brown-and-black Canada goose with a white chinstrap, not a
+  white goose; it wears the helmet and goggles in every frame, has a dark pixel outline,
+  carries no bell or other prop, and never uses the outstretched-neck honk as a pose.
 - Its mood came from images the maintainer looked at. They are not in this repository and
-  were not given to the developer: the only brief is this text.
+  were not given to the developer: the only brief is this text, and the Canada goose's
+  field marks above were written from general knowledge of the species, not from an
+  image.
+
+As drawn (review round 2, every animation; 53 unique frames; approved by the maintainer
+2026-10-19): the goose stands about 39 pixels tall. A small black head under the helmet (a
+round dome with a light rim, goggles pushed up on its front, and a short ear flap that
+stops above the chinstrap); no chin strap, so the white chinstrap shows whole, from the
+cheek down under the throat. A long black neck, lit along its front edge, rising from
+the breast in a gentle S. A body about 29 × 14: a pale buff breast and belly, the
+brown-grey wing with short, staggered pale feather edges, a white band across the rump,
+the black tail and white under-tail feathers. Black bill, legs and feet (the far leg a
+shade darker). The cheeky tell is the eye: in profile a heavy dark lid over a white eye,
+a sidelong, smug look; from the front both eyes glance down to the same side, over the
+white chinstrap. A pale-yellow `star` is used only for the dizzy stars; the sleeping "z"
+is an overlay, as on the sheep.
+
+- **walk** (4) and **arrive**: contact and passing frames, the goose a pixel higher when
+  passing. **run** (4) and **leave**: the neck drawn in and leaning, stretched, airborne,
+  landing, gathering.
+- **graze** (4): the neck reaching forward and down from the breast, the bill in the
+  grass; nibbling and a blink. **chew** (3): head up, eyes shut happily, the bill working.
+- **sleep** (4) and **sleep loop** (3): the legs fold, the neck draws in, sitting on the
+  grass with the head sunk onto the breast, eyes shut; breathing; a "z" overlay.
+- **turn** (3): side, the head turned to you, then facing you; **alert** (8; 5 of its
+  own): a crouch with the neck drawn in, a jump with wide eyes and a "!", a squashed
+  landing, then turn backwards.
+- **trip** (5): a foot catches, the bill in the grass with the tail up, flat on its belly
+  with crossed-out eyes and a foot stuck out behind, pushing up, a happy blink.
+- **sit** (3): settling, sitting tall with the neck up and a foot peeking in front, a
+  blink. **lie** (3): lying with the head low on the breast, awake, blinking, turning to
+  look at you.
+- **dizzy** (4): swaying, crossed-out eyes, two stars round the helmet. **hop** (4):
+  crouch, spring, tuck at the top with eyes shut in glee, reach down, land.
+- **carried** (3): lifted by the helmet, the neck drawn in, eyes wide, the feet dangling
+  and paddling, swinging a pixel either way. **land** (3; 1 of its own): feet reaching
+  down, the crouch, standing side on.

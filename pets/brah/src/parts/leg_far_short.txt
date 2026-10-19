@@ -1,0 +1,5 @@
+# The far leg (short), a shade darker than the near one.
+..ooo..
+.oooo..
+oooooo.
+oooooo.

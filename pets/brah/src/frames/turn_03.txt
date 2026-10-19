@@ -1,0 +1,6 @@
+# turn 3 of 3: facing you (the pose the alert holds and bounces), both eyes half-lidded and glancing the same way.
+part leg_far 13 32
+part leg 20 32
+part body_front 11 22
+part neck_front 17 17
+part head_front 10 1

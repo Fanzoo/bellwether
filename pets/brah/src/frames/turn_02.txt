@@ -1,0 +1,6 @@
+# turn 2 of 3: the head turned to look at you, the body still side on.
+part leg_far 20 32
+part leg 14 32
+part body 9 21
+part neck 4 15
+part head_front 1 1

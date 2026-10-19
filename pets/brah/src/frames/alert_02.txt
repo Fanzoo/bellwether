@@ -1,0 +1,13 @@
+# alert 2: springing straight up, the feet dangling, eyes wide.
+part leg_far_dangle 13 29
+part leg_dangle 20 29
+part body_front 11 19
+part head_front 10 3
+grid 13 12
+WWW
+WoW
+end
+grid 20 12
+WWW
+WoW
+end

@@ -1,0 +1,10 @@
+# trip 2 of 5: bill in the grass, the tail end up, eyes wide.
+part leg_far_back 26 30
+part leg_back 21 31
+part body 11 18
+part neck_graze 8 17
+part head 0 25
+grid 5 33
+WWW
+WoW
+end

@@ -695,16 +695,18 @@ see is in the README):
 
 ### Bellwether's own pets
 
-The app has its own sheep, `bellwether`, in a flight helmet that takes the session
-colour (an aviator goose, `brah`, comes later). Its art is committed under CC0-1.0 in
-`pets/`, as text sources that `scripts/build-pet.mjs` builds into
-`pets/bellwether/animations.xml`; `pets/SPEC.md` describes the source form and the
-design. With no `pets.default` in config.json, the strip draws it, from the checkout
+The app has two pets of its own, each in a flight helmet that takes the session
+colour: the sheep `bellwether`, the default, and the aviator goose `brah` (milestone
+M10b). Their art is committed under CC0-1.0 in `pets/`, as text sources that
+`scripts/build-pet.mjs` builds into `pets/<name>/animations.xml`; `pets/SPEC.md`
+describes the source form and the design. Set `"pets": { "default": "brah" }` in
+config.json (or choose it in the setup window's Pet step) for geese. With no
+`pets.default` in config.json, the strip draws the sheep, from the checkout
 (a development build) or from the app's Resources, only while it matches its pin in
 `pets.lock.json`. The names `bellwether` and `brah` can't be used by `pets import`.
 
 ```
-node scripts/build-pet.mjs build bellwether        # after editing pets/bellwether/src or pet.json
+node scripts/build-pet.mjs build bellwether        # after editing pets/bellwether/src or pet.json (or: build brah, build --all)
 node scripts/build-pet.mjs --check                 # npm test and CI run this too
 node scripts/build-pet.mjs review bellwether --out /tmp/review   # the review sheets
 ```

@@ -1,0 +1,11 @@
+# carried 1 of 3: lifted by the helmet, dangling, the neck drawn in, the feet hanging straight, eyes wide.
+part leg_far_dangle 20 26
+part leg_dangle 14 26
+part body 9 15
+part neck_short 4 14
+part head 1 0
+grid 6 8
+WWW
+WoW
+end
+shift 1 0

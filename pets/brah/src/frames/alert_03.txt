@@ -1,0 +1,14 @@
+# alert 3: the top of the jump, the feet tucked, a "!" beside the helmet.
+part leg_far_tuck 13 27
+part leg_tuck 20 27
+part body_front 11 17
+part head_front 10 1
+grid 13 10
+WWW
+WoW
+end
+grid 20 10
+WWW
+WoW
+end
+part bang 31 2

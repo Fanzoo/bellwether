@@ -1,0 +1,15 @@
+# chew 2 of 3: the bill opens, the head bobs down a pixel.
+part leg_far 20 32
+part leg 14 32
+part body 9 21
+part neck 4 15
+part head 1 2
+grid 6 10
+KWK
+WKW
+end
+grid 1 13
+oooooo
+obbboK
+.ooo..
+end

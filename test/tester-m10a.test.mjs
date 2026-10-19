@@ -200,7 +200,8 @@ describe('reserved names, through the real CLI (BELLWETHER_BIN)', { skip: !BIN &
     assert.deepEqual(fs.readdirSync(bw), []);
   });
   // Was a defect (M10a review D1): doctor said PASS for a name the strip refuses.
-  for (const name of ['brah', 'BELLWETHER']) {
+  // Since M10b brah is bundled, so doctor passes it; a wrong case still never passes.
+  for (const name of ['Brah', 'BELLWETHER']) {
     test(`doctor does not PASS pets.default ${name}, which the strip refuses to load`, () => {
       const { bw, env } = mk();
       fs.writeFileSync(path.join(bw, 'config.json'), JSON.stringify({ port: 47812, pets: { default: name } }));

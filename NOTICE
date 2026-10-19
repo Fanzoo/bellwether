@@ -13,8 +13,8 @@ desktopPet (Adrianotiger/desktopPet), MIT licence
   attribution, as the project's README asks ("Please retain attribution ... in any
   redistributed version"). No desktopPet code is copied into bellwether.
 
-Bellwether's own pet (pets/), CC0-1.0
-  Bundled pets (the sheep "bellwether"), CC0-1.0.
+Bellwether's own pets (pets/), CC0-1.0
+  Bundled pets (the sheep "bellwether" and the aviator goose "brah"), CC0-1.0.
   The art in pets/ was made by an AI coding agent under the direction of the project's
   maintainer, from a written specification (pets/SPEC.md). It was drawn as text pixel
   sources (pets/*/src/) and built by scripts/build-pet.mjs. No third-party art was

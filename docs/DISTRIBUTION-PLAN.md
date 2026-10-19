@@ -650,8 +650,8 @@ colour, so the strip looks the same whichever pet is chosen.
 
 - **`bellwether`**: an original sheep in a flight helmet. It is the default
   (`pets.default` absent means `bellwether`) and is required for 1.0 (M10a).
-- **`brah`**: an aviator goose, a white goose in a flight helmet with goggles (aviator,
-  a little cheeky). It is a bundled alternative, chosen in the setup window or in
+- **`brah`**: an aviator goose, a Canada goose in a flight helmet with goggles (aviator,
+  a little cheeky; a Canada goose since 2026-10-19, deviation 141). It is a bundled alternative, chosen in the setup window or in
   config.json, and comes after 1.0 (M10b).
   - `brah` is its id, folder name, reserved name and config value.
   - The docs describe it as "an aviator goose", and may call its subagents "goslings"
@@ -691,15 +691,20 @@ drew it.
     compete with it.
   - "Similar" means the same genre and feel. It does not mean eSheep's frames, poses or
     pixels: every frame is drawn fresh from this description (see the clean-room rule).
-- **The goose (`brah`)** is a white goose with a yellow-orange beak and feet. It wears a
-  flight helmet with goggles in every frame. It is a little cheeky.
+- **The goose (`brah`)** is a Canada goose (deviation 141): a long black neck rising
+  from the breast in a gentle S, a black head with the white chinstrap from cheek to
+  cheek under the chin (kept visible below the helmet), a brown-grey back and wings with
+  pale feather edges, a pale buff breast, a black tail with white under-tail feathers and
+  a white rump band, and a black bill, legs and feet. It wears a flight helmet with
+  goggles in every frame. It is a little cheeky.
 
 **Clean-room rule (references are mood only).**
 
 - **The goose's mood references.** The maintainer shared four mood images for the goose.
   Two of them are plainly other people's work: one has a Dreamstime stock watermark and
   one has a Craiyon logo. One resembles the goose from *Untitled Goose Game*.
-  - The art takes only the general idea: a white goose, a flight helmet, goggles.
+  - The art takes only the general idea: a Canada goose, a flight helmet, goggles (the
+    species' field marks are written in words from general knowledge, deviation 141).
     Nothing is traced, sampled, colour-picked or closely copied from any reference.
   - The reference images are not committed and are not given to the developer agent.
     Its only brief is `pets/SPEC.md`, written in words.
@@ -713,9 +718,9 @@ drew it.
 - **The goose must be visibly distinct from Untitled Goose Game's goose.** That goose is
   a flat-shaded, unoutlined white goose with an orange beak and feet, a honk pose with
   the neck stretched and the wings out, and a stolen bell. Ours:
+  - is a brown-and-black Canada goose with a white chinstrap, not a white goose;
   - wears the helmet and goggles in **every** frame;
   - has a dark pixel outline;
-  - has its own proportions (a rounder, chunkier body and a shorter neck);
   - has no bell or other carried props;
   - doesn't use the outstretched-neck honk as a pose.
 
@@ -794,8 +799,10 @@ shared rules):
   - The tinter (`horns.mjs`, `HORN_HUE`, `tintHorns`) is **unchanged**. Its "horn" is
     our helmet; the name stays as it is in the code.
 - **The goose's helmet never touches its beak** in any frame: at least one pixel of
-  feather, outline or goggle lies between them. This is needed because no orange can be
-  far from the orange session colour; see (d).
+  feather, outline or goggle lies between them. This was needed because no orange can be
+  far from the orange session colour; see (d). The Canada goose's bill is black
+  (deviation 141), and the rule stays: a pixel of black head, chinstrap or feather lies
+  between bill and helmet.
 - **Lambs (goslings)** use the same sheet at `lambScale` 0.6.
   - On a 1× display that is 0.9 screen pixels per art pixel, and nearest-neighbour
     scaling drops about one row and column in ten.
@@ -909,6 +916,11 @@ shared rules):
   - A typical goose orange such as `#FF9A1F` is 3.9 from `#FF8C00`. So the goose's beak
     must not touch the helmet, and must be a yellow-orange or ochre at least 10 away (for
     example `#F0B060`, 11.5).
+    (Superseded by deviation 141: the Canada goose's bill is black, `#45454F`, so the
+    case to watch is the black session colour, as for the sheep's face. The bill is
+    13.5 from `#202020`'s tinted mid tone and 28.3 from `#8B4513`'s, and never touches
+    the helmet; the black head and neck, `#34343C`, touch it and pass rule 1 through the
+    light rim, 31.9 against `#202020`.)
   - A pale-blue goggle lens (`#8FD3F4`) is 12.8 from cyan, so a lens that touches the
     helmet needs a colour such as `#DDE8F0` (23.8). This holds on both pets.
 - (e) the sha256 pin matches, and `build-pet --check` passes.
@@ -4146,6 +4158,144 @@ ships in a release after 1.0, through M9's pipeline.
   `BELLWETHER_CONFIG`).
 - The pet switch is tested on a test build's home, never the maintainer's real config.
 
+#### M10b status (developer, 2026-10-18, updated 2026-10-19): round 2 (a Canada goose) drawn, every animation; the goose approved by the maintainer (2026-10-19, round 2)
+
+Built in round 1 (uncommitted; round 2 below replaced the art, the palette and the pin):
+- **`pets/brah/`**: `src/palette.json` (16 colours: the 3 mask tones, an outline
+  `#2a2833`, four feather tones `#ffffff` `#eceff4` `#ccd3de` `#a3acbb`, eye `#1a1a22`, beak
+  `#f0b060` and beak shade `#b07a38` (also the feet), cheek, goggle frame and lens `#dde8f0`,
+  strap, and the dizzy star), 23 parts, 53 frame compositions, and `pet.json` (title
+  "Aviator goose"; the same 17 animations, timings, behaviour map and sleep-"z" overlays as
+  the sheep). `pets/SPEC.md` has an "As drawn" paragraph for the goose and marks it "in
+  review".
+- **The pin**: `bundled.brah` in `pets.lock.json` (sha256 `80c07273…`, 68870 bytes, round 2, the
+  name-for-name map). `tauri.dist.conf.json` bundles `pets/brah/animations.xml`.
+- **Drafted; (f) now done**: NOTICE's first line now names the goose ("Bundled pets (the
+  sheep "bellwether" and the aviator goose "brah"), CC0-1.0.", D8's words) under the
+  heading "Bellwether's own pets"; docs/DEVELOPMENT.md's pets section names both pets and
+  how to choose the goose. The setup window needs no change: it lists every pinned
+  bundled pet in `BUNDLED` order, so it now lists the sheep, then the goose (cargo test
+  `bundled_pets_are_listed_first_with_the_tint_and_can_be_chosen`, which now also selects
+  `brah` and checks `pets.default: "brah"` is written). Not yet clicked through by hand.
+
+How round 1 read the brief (then a white goose; superseded by round 2 below): a round, chunky body (about 31 ×
+19) and a head (about 18 × 17) that sits low on the breast, so the neck is a few pixels
+at most; a dark outline round the whole silhouette; the sheep's kind of helmet (dome,
+ear flap, chin strap, light rim) and goggles pushed up on the dome; the cheekiness is in
+the face (the brim comes down over the back of the eye, a sidelong, smug look; the
+front-facing pose that the alert holds winks). Distinct from Untitled Goose Game's goose
+by D8's list: helmet and goggles in all 53 frames, the outline, its own proportions, no
+bell or prop, and no outstretched-neck honk (the neck never stretches; the wings stay
+folded in every frame, including the alert, which is a jump with a "!").
+
+Gates for round 1, automated, all green then:
+- (a) the dev strip (`target-dev/debug/bellwether-shell --selftest`, scratch
+  `BELLWETHER_HOME` and `BELLWETHER_CONFIG` with `port` 47511 and `pets.default: "brah"`):
+  `pet brah loaded: 17 animations, 40x40 tiles, behaviours walk run graze sleep alert turn
+  trip sit dizzy chew arrive leave hop lie carried land`, no missing animation,
+  `selftest: done PASS`.
+- (b)–(e) in `test/pets-bundled.test.mjs`, which runs for `brah` with no new test code.
+  The helmet shows in every mapped frame (the fewest is 94 mask pixels, 43 mid, in
+  carried). (d) worst margins: outline 35.6, eye 39.5, strap 29.9 (rule 1); white feather
+  29.6, goggle frame 25.7 (rule 2); feather 27.2, shade 23.4, deep shade 21.4, lens 23.8,
+  cheek 23.5, star 23.6, beak shade 16.2, beak 11.5 against `#FF8C00` (rule 3, needs 10).
+  The beak and feet fall under rule 3 because they never touch the helmet; measured
+  separately, no beak or foot pixel is within one pixel of a helmet pixel, diagonals
+  included, in any frame.
+- (h) the tripwire: the goose's highest silhouette IoU against the local esheep64 is
+  0.671 (needs < 0.95).
+
+Tests: `npm test` 1013 tests, 1012 pass, 0 fail, 1 skipped; `npm run test:cargo` 275
+passed, 0 failed; `tester-m10a.test.mjs` with `BELLWETHER_BIN` set to the dev build 37 of
+37; `build-pet --check`: 2 bundled pets up to date (bellwether, brah).
+
+Review round 1 ((f) round 1 of 3): every animation at once rather than a first look,
+since the pipeline is M10a's and the task asked for every animation in round 1. In
+`data/pet-review/brah/` (gitignored): `brah-overview.png`, the eight
+`brah-{sheep,lamb}-{1x,2x}-{light,dark}.png` sheets, `review.html` (the animated preview),
+and `brah-live-strip-light-dark.png` (a live `--demo --snapshot` strip from the dev build,
+with the scratch config above, composited onto `#F5F5F5` and `#1E1E1E`; the raw snapshot
+is `brah-demo.png`, with `brah-demo-checker.png`). Those round-1 files were replaced by
+round 2's; round 1's sources are kept only in the developer's scratch directory.
+
+The maintainer's verdict on round 1 (2026-10-19, through the coordinator), in substance:
+"It reads more like a duck than a goose." His direction: a **Canada goose**, which also
+keeps it clearly apart from Untitled Goose Game's white goose. The coordinator wrote the
+species' field marks in words from general knowledge (a long black neck in a gentle S, a
+black head, the white chinstrap kept visible below the helmet, a brown-grey back and
+wings with pale feather edges, a pale buff breast, a black tail with white under-tail
+feathers and a white rump band, a black bill, legs and feet), and asked for the graze and
+trip head-down frames to be fixed and the cheeky tell to read at gosling scale. The brief
+in `pets/SPEC.md` and D8 was rewritten to match (deviation 141).
+
+Review round 2 ((f) round 2 of 3, 2026-10-19): every animation, redrawn as a Canada
+goose. In `data/pet-review/brah/`: `brah-overview.png`, the eight
+`brah-{sheep,lamb}-{1x,2x}-{light,dark}.png` sheets, `review.html`, and
+`brah-live-strip-light-dark.png` (a fresh live `--demo --snapshot` strip from the dev
+build, with the same scratch config; raw `brah-demo.png` and `brah-demo-checker.png`).
+What changed for each request:
+1. **A Canada goose**: a new palette (18 colours: the 3 mask tones; outline `#1c1c22`;
+   black head and neck `#34343c` with a front-edge light `#55555f`; bill `#45454f`;
+   chinstrap white `#ffffff` and shade `#dfe3e8`; wing `#7a6a5c`, dark `#5e5046`, pale
+   edge `#c4b39e`; breast `#d9cfc0` and shade `#b9ad9c`; goggle frame and lens, strap,
+   star). The goose stands about 39 pixels tall on a long S neck; the body is about
+   29 × 14 with the staggered pale edges on the wing, the white rump band, the black tail
+   and white under-tail. Bill, legs and feet are black, the far leg a shade darker.
+2. **The chinstrap and the helmet**: the helmet keeps its dome, light rim and goggles but
+   loses the chin strap, and its ear flap is a short tab that stops above the cheek, so
+   the white chinstrap shows whole from the cheek down under the throat in profile, and
+   from cheek to cheek under the bill from the front. The bill is at least two pixels from
+   the helmet in every frame (Chebyshev distance 3 at the closest).
+3. **The head-down frames**: graze and trip 2 now use a neck part that reaches forward and
+   down from the top of the breast into the back of the lowered head (the body moves two
+   pixels back to make room), instead of round 1's head pasted under the breast.
+4. **The cheeky tell**: in profile a heavy dark lid over a 2-pixel white eye, a sidelong,
+   smug look; from the front, two 2 × 2 white eyes both glancing down to the same side, set
+   a row clear of the goggles and the chinstrap. Round 1's one-pixel wink is gone.
+5. Poses that jump or lift (hop, alert, run, carried, land, dizzy, crouches) draw the neck
+   in (a shorter neck part), so the tall goose still has room to rise inside 40 rows.
+
+Gates for round 2, all green here:
+- (a) `--selftest` on the dev build with the scratch config: `pet brah loaded: 17
+  animations, 40x40 tiles, behaviours walk run graze sleep alert turn trip sit dizzy chew
+  arrive leave hop lie carried land`, `selftest: done PASS`.
+- (b)–(e): the helmet shows in every mapped frame (the fewest is 40 mask pixels, 21 mid,
+  in the front-facing alert frames). (d) worst margins: outline 38.8, neck 31.9, strap
+  29.9 (rule 1); chinstrap white 29.6, goggle frame 25.7 (rule 2); chinstrap shade 25.4,
+  lens 23.8, breast 27.2, breast shade 24.5, wing edge 23.2, star 23.6, neck light 18.5,
+  wing 18.4 and wing dark 17.7 (both against `#8B4513`), bill 13.5 against `#202020`
+  (rule 3, needs 10).
+  - The black bill `#45454f` against the tinted tones (dark / mid / light): for
+    `#202020` 16.6 / 13.5 / 26.9, for `#8B4513` 24.1 / 28.3 / 42.3. It never touches the
+    helmet, so rule 3 (≥ 10 from the mid tone) applies.
+  - The black head and neck `#34343c` touch the helmet (rule 1, ≥ 20 from any one tone):
+    for `#202020` 11.2 / 8.3 / 31.9, for `#8B4513` 23.1 / 29.5 / 46.9. So a black session's
+    helmet reads against the black head only through its light rim, as the sheep's does
+    against its dark face.
+- (h) the tripwire: the goose's highest silhouette IoU against the local esheep64 is
+  0.606.
+
+Tests: `npm test` and `npm run test:cargo` as recorded under deviation 141; `build-pet
+--check` up to date (bellwether, brah); `tester-m10a.test.mjs` with `BELLWETHER_BIN` 37 of
+37. The maintainer's verdict on round 2 (2026-10-19): **"approved"**, with no changes requested. Round 3 was not needed. The weak spots the developer named (a black session's neck on a dark wallpaper, the neck-in poses, trip 3, a brown helmet near the wing's hue) were shown to him with the round-2 sheets and accepted as drawn. (h): the maintainer judged the goose visibly distinct from Untitled Goose Game's goose and from each of the four mood references (2026-10-19, "yes").
+
+By hand (the maintainer, 2026-10-19), on an ad-hoc test build (port 47541, scratch home
+and HOME): the Pet step shows both pets' tinted stills; "Use this pet" on the goose, then
+the sheep, then the goose again each wrote `pets.default` and reloaded the strip (geese in
+session-coloured helmets). Every other config.json value was kept, but one-line arrays
+were spread over several lines (the M7 writer; logged under "Later"). A development
+build greys the buttons out by design (a repository build's pet is set in its config.json).
+BR-3K's verdict: ship. The hand-set `"brah"` loading at start was verified by BR-3K
+(`--selftest` on a scratch home).
+
+Provenance (g, so far): the developer agent drew from `pets/SPEC.md` and D8's words only.
+It opened no reference image, fetched or looked up no goose art (Untitled Goose Game,
+eSheep or stock), and opened no fetched or imported pet; esheep64 was read only
+programmatically by the tripwire test, which prints a single IoU number. The only pet
+pixels it looked at were its own goose and Bellwether's own sheep (for consistency of
+the helmet style). Round 2 the same: the Canada goose was drawn from the rewritten brief
+and the coordinator's written field marks only, with no image of any goose.
+
 ### M11. Remove the Node brain, ship 1.0
 
 Expanded 2026-10-18 by the planner (PL-4N), from rc.3 (`986ae55`). It replaces the
@@ -4734,6 +4884,10 @@ Short, user-facing, in this order:
 - Moving `shell/src-tauri` to `app/` with a root workspace (deviation 1's wait is over now
   that the live install migrated).
 - Pruning the hidden `__` commands nothing uses.
+- The setup window's pet choice keeps config.json's values but not all of its lines: the
+  lossless writer spreads one-line arrays (`palette`, `strategies`, …) over several lines.
+  Found in M10b's by-hand check (2026-10-19); the writer is M7's, so 1.0 does it too.
+  Keep inline arrays inline, as M10b's Done-when ("keep their values and lines") expects.
 - A development binary that refuses port 47417 outright, in addition to M11-a's home
   rule.
 
@@ -6942,4 +7096,62 @@ Recorded by the developer while fixing the flaky Rust throughput test (2026-10-1
          (`serve_on_any_port`): no gap, and a brain that dies first fails with its own
          message. The swap test also asserts the brain was still running. 20 runs of the
          file in a row: all pass.
-
+140. **Deviations in building milestone 10b, round 1** (developer, 2026-10-18).
+     - **Some test code changed, though M10b expected none.** Four tests encoded "brah isn't
+       bundled yet" and had to change once it is: `pets-doctor.test.mjs` (`brah` is now a
+       PASS with the bundled wording), the doctor case in `tester-m10a.test.mjs` (`Brah`, a
+       wrong case, in place of `brah`), `doctor_checks_a_bundled_name_as_the_strip_loads_it`
+       in `crates/brain/src/pets.rs` and the setup window's listing test in
+       `onboarding.rs` (now `bellwether`, `brah`, `tiny`, the goose's title, and selecting
+       it). The NOTICE test's pattern required a comma before "and the aviator goose"; D8's
+       text has none, so the pattern now allows either. No product code changed; the
+       doctor's "isn't bundled in this version" branch is now unreachable for an exact name
+       and was kept.
+     - **Round 1 has every animation**, not a first look on walk, turn and sleep as M10a's
+       round 1 did, because this round was asked for with every animation.
+     - **The head-down frames reshape the neck in the frame**, with `~` overlay grids that
+       erase the body part's neck stub and draw the back sloping down to the lowered head
+       (graze 2–4, trip 2), instead of a separate body part.
+     - **The live view came from the dev binary, not a test bundle:**
+       `target-dev/debug/bellwether-shell --demo --no-spawn-brain --snapshot …` with a
+       scratch `BELLWETHER_HOME`/`BELLWETHER_CONFIG` (port 47511). The strip's snapshot is
+       transparent, so the light and dark wallpapers were composited by a scratch script.
+       The snapshot's "+2" badge composites faintly on dark: that is the badge's own alpha,
+       not the goose.
+     - **The review sheets still say "sheep" and "lamb"** (`brah-sheep-1x-light.png`, the
+       labels in review.html), because `build-pet review` names the scales that way for
+       every pet. Left as is; "sheep" and "lamb" stay the general terms (D8).
+     - **NOTICE and docs/DEVELOPMENT.md already name the goose,** drafted ahead of (f). If
+       the goose isn't approved, those lines, the pin and the bundle resource come out
+       before a release.
+141. **The goose is a Canada goose** (the maintainer's decision, 2026-10-19, after M10b
+     review round 1; recorded by the developer).
+     - **What the plan said:** D8 and `pets/SPEC.md` described `brah` as a white goose
+       with a yellow-orange beak and feet, distinct from Untitled Goose Game's goose partly
+       by "a rounder, chunkier body and a shorter neck".
+     - **What changed:** round 1's white goose read as a duck. The maintainer chose a
+       Canada goose, which also keeps it clearly apart from Untitled Goose Game's white
+       goose. The brief now asks for a long black neck in a gentle S and a black head; the
+       white chinstrap from cheek to cheek, kept visible below the helmet (its ear flap
+       and chin strap shrunk or dropped where they would hide it); a brown-grey back and
+       wings with pale feather edges; a pale buff breast with a clean line at the neck's
+       base; a black tail with white under-tail feathers and a white rump band; and a
+       black bill, legs and feet. Still a little cheeky, still the helmet and goggles in
+       every frame, never an outstretched-neck honk, never spread wings. The coordinator
+       wrote the field marks in words from general knowledge; no image was used.
+     - **Where:** `pets/SPEC.md` "The goose (`brah`)" (rewritten, with round 2's "As
+       drawn"); D8's `brah` bullet, "What the pets look like", the clean-room bullet ("a
+       Canada goose, a flight helmet, goggles"), the distinctness list (now "a
+       brown-and-black Canada goose with a white chinstrap, not a white goose"; "a shorter
+       neck" dropped), the bill-and-helmet rule and a note under (d)'s measurements (the
+       black bill and head are dark edge colours, as the sheep's face is).
+     - **The (d) case to watch moved** from the orange session colour (an orange beak) to
+       the black one: the black head and neck `#34343c` are only 8.3 from `#202020`'s mid
+       tone and pass rule 1 through the helmet's light rim (31.9); the bill `#45454f`
+       doesn't touch the helmet and is 13.5 from it (rule 3).
+     - **One more test changed:** the overlay test in `pets-bundled.test.mjs` asked for a
+       palette role named `eye` (the sheep's name for the z's white). It now checks that
+       every colour an overlay draws is measured by (d), whatever its role.
+     - **Tests after round 2:** `npm run test:cargo` 275 passed, 0 failed; then `npm run
+       build:dev` and `npm test`: 1013 tests, 1012 pass, 0 fail, 1 skipped; `build-pet
+       --check` up to date; the tripwire's highest IoU for the goose 0.606.

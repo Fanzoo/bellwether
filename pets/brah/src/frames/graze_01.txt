@@ -1,0 +1,6 @@
+# graze 1 of 4: the neck going down towards the grass.
+part leg_far 21 32
+part leg 15 32
+part body 10 21
+part neck_graze 7 17
+part head 0 15

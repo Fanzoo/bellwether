@@ -1,0 +1,6 @@
+# turn 1 of 3: standing, side on.
+part leg_far 20 32
+part leg 14 32
+part body 9 21
+part neck 4 15
+part head 1 1

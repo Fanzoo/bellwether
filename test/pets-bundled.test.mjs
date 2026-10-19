@@ -403,9 +403,9 @@ describe('overlays: the sleeping "z", drawn separately and never mirrored (devia
         assert.notEqual(frame, shown, `${stem}: the overlay isn't in the frame itself`);
         for (const o of list) for (const row of b.src.overlayGrids.get(o.part)) for (const ch of row) assert.ok(ch === '.' || !b.src.palette.byChar.get(ch).mask, 'no mask tone in an overlay');
       }
-      // (d) is measured on the frames as shown (with their overlays): the z's white and outline are in it.
-      const roles = new Set(contrastReport(b.src).map((r) => r.role));
-      if (b.src.overlays.size) assert.ok(roles.has('eye') && roles.has('outline'));
+      // (d) is measured on the frames as shown (with their overlays): every colour an overlay draws (the z's white and outline) is in it.
+      const reported = new Set(contrastReport(b.src).map((r) => r.char));
+      for (const part of b.src.overlayParts) for (const row of b.src.overlayGrids.get(part)) for (const ch of row) if (ch !== '.') assert.ok(reported.has(ch), `${part}: ${ch} is measured by (d)`);
       // The overlay tiles are part of the sheet, which (c) checks pixel by pixel.
       assert.ok(b.sheet.tilesx * b.sheet.tilesy >= b.src.order.length + b.src.overlayParts.length);
     });
@@ -496,7 +496,7 @@ describe('(g) provenance', () => {
   });
   test('NOTICE says how the bundled pets were made and dedicates them under CC0, naming each bundled pet', () => {
     const n = fs.readFileSync(path.join(AGENT_DIR, 'NOTICE'), 'utf8').replace(/\s+/g, ' ');
-    assert.match(n, /Bundled pets \(the sheep "bellwether"(, and the aviator goose "brah")?\), CC0-1\.0\./);
+    assert.match(n, /Bundled pets \(the sheep "bellwether"(,? and the aviator goose "brah")?\), CC0-1\.0\./);
     assert.match(n, /made by an AI coding agent under the direction of the project's maintainer, from a written specification \(pets\/SPEC\.md\)/);
     assert.match(n, /No third-party art was used/);
     assert.match(n, /dedicated to the public domain under CC0 1\.0 Universal \(pets\/LICENSE\)/);

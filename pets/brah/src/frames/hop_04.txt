@@ -1,0 +1,6 @@
+# hop 4 of 5: coming down, the feet reaching for the ground.
+part leg_far_dangle 20 28
+part leg_dangle 14 28
+part body 9 18
+part neck_short 4 17
+part head 1 3

@@ -1325,7 +1325,8 @@ mod tests {
         ob.pet_import_file(&f).unwrap();
         let pets = ob.pets(&Value::Null);
         let names: Vec<&str> = pets["list"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["bellwether", "tiny"], "bundled first (brah joins after bellwether in M10b)");
+        assert_eq!(names, ["bellwether", "brah", "tiny"], "bundled first, in their fixed order");
+        assert_eq!(pets["list"][1]["title"], "Aviator goose");
         assert_eq!(pets["list"][0]["kind"], "bundled");
         assert_eq!(pets["list"][0]["title"], "Bellwether sheep");
         assert_eq!(pets["list"][0]["still"]["frame"], 0, "the first frame of walk");
@@ -1334,6 +1335,8 @@ mod tests {
         assert_eq!(pets["current"], "bellwether");
         let merged = ob.pet_select("tiny", &Value::Null).unwrap();
         assert_eq!(merged.pointer("/pets/default").and_then(Value::as_str), Some("tiny"));
+        let merged = ob.pet_select("brah", &merged).unwrap();
+        assert_eq!(merged.pointer("/pets/default").and_then(Value::as_str), Some("brah"), "the goose (M10b)");
         let merged = ob.pet_select("bellwether", &merged).unwrap();
         assert_eq!(merged.pointer("/pets/default").and_then(Value::as_str), Some("bellwether"));
         assert!(merged.pointer("/pets/animationMap/bellwether").is_none(), "a bundled pet brings its own map");
