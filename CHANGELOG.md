@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
+
+You can now drag a sheep somewhere else on the strip, and there's a second pet to choose:
+an aviator goose.
 
 - **Move a sheep by dragging it.** Press and move, and it dangles from the cursor; let go
   and it lands there, on the strip of whichever monitor you dropped it on. It never lands
