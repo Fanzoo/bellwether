@@ -393,3 +393,96 @@ fn health_keys_are_written_sorted() {
     let at: Vec<usize> = counters.iter().map(|k| text.find(k).unwrap_or_else(|| panic!("{k} missing: {text}"))).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "counter keys not in sorted order: {text}");
 }
+
+/// A brain whose state.json writes are held by the test (M13): `started` counts writes
+/// begun; each write waits for `go` (or 20 s) and then saves for real.
+fn held_writer() -> (bellwether_brain::saver::Writer, std::sync::mpsc::Sender<()>, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let go_rx = std::sync::Mutex::new(go_rx);
+    let started = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let s = started.clone();
+    let writer: bellwether_brain::saver::Writer = std::sync::Arc::new(move |file: &std::path::Path, v: &bellwether_core::json::Js| {
+        s.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _ = go_rx.lock().unwrap().recv_timeout(Duration::from_secs(20));
+        bellwether_core::persist::save_state(file, v)
+    });
+    (writer, go_tx, started)
+}
+
+fn mute(port: u16, action: &str) {
+    let body = format!(r#"{{"action":"{action}"}}"#);
+    let r = request(port, "POST", "/control", &with(state_headers(port, TOKEN), "Content-Type", Some("application/json")), body.as_bytes()).unwrap();
+    assert_eq!(r.status, 200);
+}
+
+/// Deviation 130's follow-up (M13): state.json is written off the serving thread, so with
+/// the disk stalled mid-write, hooks and /state are still answered at once; the stalled
+/// write's newer state waits (only the latest), and a clean stop writes it.
+#[test]
+fn a_stalled_state_json_write_never_holds_up_a_hook() {
+    let home = std::env::temp_dir().join(format!("bw-stalled-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let (writer, go, started) = held_writer();
+    let mut opts = bellwether_brain::Options::new(TOKEN.into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+    opts.home = Some(home.clone());
+    opts.timings.persist = Duration::from_millis(50);
+    opts.state_writer = writer;
+    let mut b = start_with(opts);
+    let p = b.port;
+    mute(p, "mute");
+    let t0 = std::time::Instant::now();
+    while started.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        assert!(t0.elapsed() < Duration::from_secs(5), "the brain never started a save");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The write is now stuck on the "disk". Every hook still gets its 204 straight away.
+    let mut slowest = Duration::ZERO;
+    for i in 0..60 {
+        let body = format!(r#"{{"hook_event_name":"SessionStart","session_id":"stall-{i}","cwd":"/tmp/p{i}"}}"#);
+        let t = std::time::Instant::now();
+        assert_empty(&request(p, "POST", "/hook", &hook_headers(p), body.as_bytes()).expect("an answer"), 204);
+        slowest = slowest.max(t.elapsed());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let t = std::time::Instant::now();
+    assert_eq!(request(p, "GET", "/state?after=-1&wait=0", &state_headers(p, TOKEN), b"").unwrap().status, 200);
+    slowest = slowest.max(t.elapsed());
+    assert!(slowest < Duration::from_millis(500), "a hook waited {slowest:?} for a stalled write");
+    assert_eq!(started.load(std::sync::atomic::Ordering::SeqCst), 1, "the newer states wait behind the stalled write, not alongside it");
+    mute(p, "unmute");
+    std::thread::sleep(Duration::from_millis(150));
+    // The disk comes back; the stop writes the latest state (unmuted) before serve returns.
+    drop(go);
+    b.stop.take().unwrap().send(()).unwrap();
+    b.thread.take().unwrap().join().unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join("state.json")).unwrap()).unwrap();
+    assert_eq!(saved["muted"], false, "the latest state, not the stalled one");
+    assert!(started.load(std::sync::atomic::Ordering::SeqCst) <= 3, "coalesced: {} writes", started.load(std::sync::atomic::Ordering::SeqCst));
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A clean stop saves the last state and waits for the write (M13): with the save timer
+/// never due, the mute sent just before the stop is in state.json once serve returns, even
+/// though the write takes 300 ms.
+#[test]
+fn a_clean_stop_writes_the_last_state_before_serve_returns() {
+    let home = std::env::temp_dir().join(format!("bw-flush-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let mut opts = bellwether_brain::Options::new(TOKEN.into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+    opts.home = Some(home.clone());
+    opts.timings.persist = Duration::from_secs(3600);
+    opts.state_writer = std::sync::Arc::new(|file: &std::path::Path, v: &bellwether_core::json::Js| {
+        std::thread::sleep(Duration::from_millis(300));
+        bellwether_core::persist::save_state(file, v)
+    });
+    let mut b = start_with(opts);
+    mute(b.port, "mute");
+    assert!(!home.join("state.json").exists(), "nothing saved before the stop");
+    let t0 = std::time::Instant::now();
+    b.stop.take().unwrap().send(()).unwrap();
+    b.thread.take().unwrap().join().unwrap();
+    assert!(t0.elapsed() >= Duration::from_millis(250), "serve returned before the write ({:?})", t0.elapsed());
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join("state.json")).unwrap()).unwrap();
+    assert_eq!(saved["muted"], true);
+    let _ = std::fs::remove_dir_all(&home);
+}

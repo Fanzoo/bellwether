@@ -500,7 +500,7 @@ pub(crate) fn clean_state(file: &Path) -> (Option<Js>, Vec<String>) {
 }
 
 /// The config without the keys the app no longer reads (`brain.nodePath`, `autostart`),
-/// in its own layout; and which were dropped.
+/// every other line as it was (`lossless::edit`, M13); and which were dropped.
 pub(crate) fn drop_obsolete(text: &str) -> (String, Vec<&'static str>) {
     let Ok(mut v) = lossless::parse(text) else { return (text.to_string(), Vec::new()) };
     let mut dropped = Vec::new();
@@ -517,7 +517,7 @@ pub(crate) fn drop_obsolete(text: &str) -> (String, Vec<&'static str>) {
     if dropped.is_empty() {
         return (text.to_string(), dropped);
     }
-    (lossless::serialise(&v, text), dropped)
+    (lossless::edit(text, &v), dropped)
 }
 
 /// `fs.accessSync(f, W_OK)`, by asking the file system.

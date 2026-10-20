@@ -22,6 +22,7 @@ pub mod home;
 pub mod legacy;
 pub mod migrate;
 pub mod pets;
+pub mod saver;
 pub mod toapp;
 mod state;
 
@@ -174,6 +175,8 @@ pub struct Options {
     /// Lines to log once state.json is read and the brain is about to serve (the
     /// "listening on" line comes after any warning about state.json, as in Node).
     pub announce: Vec<String>,
+    /// What writes state.json on its own thread (tests put in a slow one).
+    pub state_writer: saver::Writer,
 }
 
 impl Options {
@@ -192,6 +195,7 @@ impl Options {
             idle_timeout: conns::IDLE_TIMEOUT,
             raise_fd_limit: true,
             announce: Vec::new(),
+            state_writer: saver::default_writer(),
         }
     }
 }
@@ -383,7 +387,7 @@ async fn run(bound: Bound, opts: Options, stop: Option<tokio::sync::oneshot::Rec
         None => std::env::temp_dir().join(format!("bellwether-nostate-{}", std::process::id())).join("state.json"),
     };
     let (actor_stop_tx, actor_stop) = tokio::sync::oneshot::channel();
-    let setup = actor::Setup { merged: opts.config.merged.clone(), cleaner, state_file, record_to, timings: opts.timings, log: opts.log.clone(), counters: counters.clone() };
+    let setup = actor::Setup { merged: opts.config.merged.clone(), cleaner, state_file, record_to, timings: opts.timings, log: opts.log.clone(), counters: counters.clone(), writer: opts.state_writer.clone() };
     let (inbox, snapshots, actor_task) = actor::start(setup, actor_stop);
     let brain = Arc::new(Brain {
         port: bound.port,

@@ -2,7 +2,8 @@
 //! only writer. Hooks and `/control` reach it over a bounded channel; snapshots leave it on
 //! a `watch` channel carrying `rev`, which is exactly what `/state?after=<rev>&wait=` waits
 //! on. Its timers (the flock tick, the publish throttle, the state.json save) live here
-//! too. A port of brain/brain.mjs.
+//! too; the save itself is the writer thread's (saver.rs), so the disk never holds up a
+//! hook. A port of brain/brain.mjs.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ use bellwether_core::publisher::{Published, Publisher};
 use bellwether_core::redact::Cleaner;
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::saver::{self, Saver};
 use crate::{now_ms, Counters, Logger};
 
 /// What reaches the state machine.
@@ -53,6 +55,8 @@ pub struct Setup {
     pub timings: Timings,
     pub log: Logger,
     pub counters: Arc<Counters>,
+    /// What writes state.json, on the writer thread ([`saver::default_writer`]).
+    pub writer: saver::Writer,
 }
 
 /// Starts the state machine. Returns its inbox and the snapshot channel.
@@ -65,7 +69,8 @@ pub fn start(setup: Setup, stop: oneshot::Receiver<()>) -> (mpsc::Sender<Msg>, w
     let flock = Flock::new(FlockConfig::from_merged(&setup.merged), &persisted, now_ms() as f64);
     let publisher = Publisher::with_limits(&flock.snapshot(), now_ms() as f64, setup.timings.publish_ms, 4, 1000.0);
     let (snap_tx, snap_rx) = watch::channel(Arc::new(publisher.current().clone()));
-    let handle = tokio::task::spawn(run(setup, flock, publisher, rx, snap_tx, stop));
+    let saver = Saver::start(setup.state_file.clone(), setup.writer.clone(), setup.log.clone());
+    let handle = tokio::task::spawn(run(setup, flock, publisher, saver, rx, snap_tx, stop));
     (tx, snap_rx, handle)
 }
 
@@ -74,6 +79,7 @@ struct State {
     flock: Flock,
     publisher: Publisher,
     snap_tx: watch::Sender<Arc<Published>>,
+    saver: Saver,
 }
 
 impl State {
@@ -89,14 +95,13 @@ impl State {
         }
     }
 
+    /// Hands the state to the writer thread when it changed; returns at once.
     fn save(&mut self) {
         if !self.flock.persist_dirty {
             return;
         }
         self.flock.persist_dirty = false;
-        if let Err(e) = persist::save_state(&self.setup.state_file, &self.flock.persistable()) {
-            self.setup.log.log(&format!("warning: could not save {} ({})", self.setup.state_file.display(), bellwether_core::config::io_code(&e)));
-        }
+        self.saver.save(self.flock.persistable());
     }
 
     fn hook(&mut self, payload: Js, headers: Obj, received_at: f64) {
@@ -117,14 +122,14 @@ impl State {
     }
 }
 
-async fn run(setup: Setup, flock: Flock, publisher: Publisher, mut rx: mpsc::Receiver<Msg>, snap_tx: watch::Sender<Arc<Published>>, mut stop: oneshot::Receiver<()>) {
+async fn run(setup: Setup, flock: Flock, publisher: Publisher, saver: Saver, mut rx: mpsc::Receiver<Msg>, snap_tx: watch::Sender<Arc<Published>>, mut stop: oneshot::Receiver<()>) {
     let mut ticker = tokio::time::interval(setup.timings.tick);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ticker.tick().await;
-    let mut saver = tokio::time::interval(setup.timings.persist);
-    saver.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    saver.tick().await;
-    let mut st = State { setup, flock, publisher, snap_tx };
+    let mut save_every = tokio::time::interval(setup.timings.persist);
+    save_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    save_every.tick().await;
+    let mut st = State { setup, flock, publisher, snap_tx, saver };
     loop {
         let due = st.publisher.timer_at().map(|at| Duration::from_millis((at - now_ms() as f64).max(0.0).min(3.6e6) as u64));
         let publish_timer = async {
@@ -168,7 +173,7 @@ async fn run(setup: Setup, flock: Flock, publisher: Publisher, mut rx: mpsc::Rec
                 st.flock.tick(now_ms() as f64);
                 st.mark_dirty(false);
             }
-            _ = saver.tick() => st.save(),
+            _ = save_every.tick() => st.save(),
             _ = publish_timer => {
                 let flock = &st.flock;
                 st.publisher.on_timer(now_ms() as f64, || flock.snapshot());
@@ -177,7 +182,13 @@ async fn run(setup: Setup, flock: Flock, publisher: Publisher, mut rx: mpsc::Rec
             _ = &mut stop => break,
         }
     }
+    // A clean stop saves the last state and waits for it to be on disk (FLUSH_LIMIT at
+    // most), so the brain's exit means state.json is current.
     st.save();
+    let State { saver, setup, .. } = st;
+    if !saver.finish(saver::FLUSH_LIMIT) {
+        setup.log.log(&format!("warning: {} was still being written after {} s; stopping without waiting for it", setup.state_file.display(), saver::FLUSH_LIMIT.as_secs()));
+    }
 }
 
 /// One content-free log line per event: event, short session id, agent, tool.

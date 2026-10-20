@@ -1,7 +1,8 @@
 //! state.json: the only state kept between runs (muted, and per identity its colour,
 //! slots and label). A port of brain/persist.mjs: a missing or unreadable file starts
 //! fresh; the flock itself is rebuilt from incoming events. Written as 2-space pretty JSON
-//! with a newline, mode 0600, through a temporary file and a rename.
+//! with a newline, mode 0600, through a temporary file flushed to disk and a rename, so a
+//! crash leaves the old file or the new one, never a torn one.
 
 use std::io::Write;
 use std::path::Path;
@@ -41,8 +42,7 @@ pub fn write_atomic(file: &Path, tmp: &Path, text: &str, mode: u32) -> std::io::
     write_atomic_sync(file, tmp, text, mode, false)
 }
 
-/// The same, flushed to disk before the rename when `sync` (the token file). state.json
-/// isn't (as in Node): it is rewritten every few seconds on the brain's only thread.
+/// The same, flushed to disk before the rename when `sync` (the token file, state.json).
 pub fn write_atomic_sync(file: &Path, tmp: &Path, text: &str, mode: u32, sync: bool) -> std::io::Result<()> {
     let _ = std::fs::remove_file(tmp);
     let mut opts = std::fs::OpenOptions::new();
@@ -68,13 +68,15 @@ pub fn write_atomic_sync(file: &Path, tmp: &Path, text: &str, mode: u32, sync: b
     result
 }
 
-/// `saveState(file, value)`: pretty JSON and a newline, 0600, `<file>.<pid>.tmp` then rename.
+/// `saveState(file, value)`: pretty JSON and a newline, 0600, `<file>.<pid>.tmp` flushed to
+/// disk, then rename. The brain calls it on its writer thread (brain/src/saver.rs), so the
+/// flush never holds up a hook (M13; until 1.1 it ran on the serving thread unflushed).
 pub fn save_state(file: &Path, value: &Js) -> std::io::Result<()> {
     if let Some(dir) = file.parent() {
         create_private_dir(dir)?;
     }
     let tmp = file.with_file_name(format!("{}.{}.tmp", file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), std::process::id()));
-    write_atomic(file, &tmp, &(json::stringify_pretty(value, "  ") + "\n"), 0o600)
+    write_atomic_sync(file, &tmp, &(json::stringify_pretty(value, "  ") + "\n"), 0o600, true)
 }
 
 #[cfg(test)]

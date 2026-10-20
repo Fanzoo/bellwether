@@ -546,6 +546,330 @@ pub fn serialise(v: &Lj, old: &str) -> String {
     text
 }
 
+// ------------------------------------------------------------------ edit
+
+/// config.json's writer (M13): `new` written into `old`'s own text, changing only what
+/// changed, so an edit to one key leaves every other line byte for byte as it was.
+/// ([`serialise`] lays the whole file out again, as the hook installer's Node original did;
+/// the installer keeps it, and its round trip is pinned by the frozen sample.)
+///
+/// - A value equal to the old one is copied verbatim: its lines, spacing, escapes and
+///   trailing whitespace. So is the text before and after the root value.
+/// - A changed scalar is replaced where it stands.
+/// - A changed object or array is edited member by member (an object's by key, an array's
+///   by index): unchanged members stay as they are, removed ones go, and new ones go after
+///   the last, with the last member's spacing. So a one-line array or object stays on one
+///   line, whatever changed inside it, and a multi-line one stays multi-line.
+/// - A value written fresh (a new key, an empty container that gets members, or a value
+///   whose type changed) is written on one line inside a one-line container, in that
+///   container's spacing (`", "` or `","`, `": "` or `":"`); elsewhere in the file's indent
+///   ([`detect_indent`]) and line ending, from the indent of the line it starts on.
+///
+/// An `old` that isn't valid JSON, or that has a duplicate key (which [`parse`] folds into
+/// one), is laid out again by [`serialise`].
+pub fn edit(old: &str, new: &Lj) -> String {
+    let mut p = Parser { s: old.as_bytes(), text: old, i: 0 };
+    p.ws();
+    let root = match p.node(0) {
+        Ok(n) => n,
+        Err(_) => return serialise(new, old),
+    };
+    p.ws();
+    if p.i < p.s.len() || root.has_duplicate_keys() {
+        return serialise(new, old);
+    }
+    let ed = Editor { text: old, indent: detect_indent(old), eol: if old.contains("\r\n") { "\r\n" } else { "\n" } };
+    let mut out = String::with_capacity(old.len() + 64);
+    out.push_str(&old[..root.start]);
+    let line = line_indent(old, root.start);
+    ed.render(&mut out, &root, new, false, &line, &Style::default());
+    out.push_str(&old[root.end..]);
+    out
+}
+
+/// Whether a valid JSON text repeats a key in one of its objects ([`parse`] keeps the last
+/// value at the first place; [`edit`] lays such a file out again). False for invalid JSON.
+pub fn has_duplicate_keys(text: &str) -> bool {
+    let mut p = Parser { s: text.as_bytes(), text, i: 0 };
+    p.ws();
+    p.node(0).is_ok_and(|n| n.has_duplicate_keys())
+}
+
+/// A value's place in the text.
+struct Node {
+    start: usize,
+    end: usize,
+    shape: Shape,
+}
+
+enum Shape {
+    Scalar(Lj),
+    Obj(Vec<Member>),
+    Arr(Vec<Member>),
+}
+
+/// A member: `lead` is the whitespace before it, `key` the key's text and value (objects),
+/// `mid` the text from the key to the value (`": "`), `post` the whitespace after the value.
+struct Member {
+    lead: (usize, usize),
+    key: Option<(usize, usize, String)>,
+    mid: (usize, usize),
+    value: Node,
+    post: (usize, usize),
+}
+
+impl Node {
+    fn has_duplicate_keys(&self) -> bool {
+        match &self.shape {
+            Shape::Scalar(_) => false,
+            Shape::Arr(ms) => ms.iter().any(|m| m.value.has_duplicate_keys()),
+            Shape::Obj(ms) => {
+                let mut seen = std::collections::HashSet::new();
+                ms.iter().any(|m| !seen.insert(m.key.as_ref().map(|k| k.2.as_str()).unwrap_or("")) || m.value.has_duplicate_keys())
+            }
+        }
+    }
+}
+
+impl Parser<'_> {
+    /// A value with the place of every member, for [`edit`].
+    fn node(&mut self, depth: usize) -> Result<Node, String> {
+        if depth > MAX_DEPTH {
+            return Err(self.err("nested too deeply"));
+        }
+        let start = self.i;
+        let (open, close) = match self.s.get(self.i) {
+            Some(b'{') => (b'{', b'}'),
+            Some(b'[') => (b'[', b']'),
+            _ => {
+                let v = self.value(depth)?;
+                return Ok(Node { start, end: self.i, shape: Shape::Scalar(v) });
+            }
+        };
+        self.i += 1;
+        let mut members = Vec::new();
+        loop {
+            let ls = self.i;
+            self.ws();
+            let lead = (ls, self.i);
+            if members.is_empty() && self.s.get(self.i) == Some(&close) {
+                self.i += 1;
+                break;
+            }
+            let key = if open == b'{' {
+                if self.s.get(self.i) != Some(&b'"') {
+                    return Err(self.err("expected a property name"));
+                }
+                let ks = self.i;
+                let k = self.string()?;
+                Some((ks, self.i, k))
+            } else {
+                None
+            };
+            let ms = self.i;
+            if key.is_some() {
+                self.ws();
+                if self.s.get(self.i) != Some(&b':') {
+                    return Err(self.err("expected ':' after a property name"));
+                }
+                self.i += 1;
+                self.ws();
+            }
+            let mid = (ms, self.i);
+            let value = self.node(depth + 1)?;
+            let ps = self.i;
+            self.ws();
+            members.push(Member { lead, key, mid, value, post: (ps, self.i) });
+            match self.s.get(self.i) {
+                Some(b',') => self.i += 1,
+                Some(c) if *c == close => {
+                    self.i += 1;
+                    break;
+                }
+                _ => return Err(self.err("expected ',' or the end of the object or array")),
+            }
+        }
+        let shape = if open == b'{' { Shape::Obj(members) } else { Shape::Arr(members) };
+        Ok(Node { start, end: self.i, shape })
+    }
+}
+
+/// The separators a fresh one-line value is written with.
+#[derive(Clone)]
+struct Style {
+    comma: String,
+    colon: String,
+}
+
+impl Default for Style {
+    fn default() -> Style {
+        Style { comma: ", ".into(), colon: ": ".into() }
+    }
+}
+
+/// The whitespace that starts the line `at` is on.
+fn line_indent(text: &str, at: usize) -> String {
+    let line = text[..at].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    text[line..at].chars().take_while(|c| *c == ' ' || *c == '\t').collect()
+}
+
+/// A member's line indent: what follows the last newline of its lead, else `fallback`.
+fn indent_of(lead: &str, fallback: &str) -> String {
+    match lead.rfind('\n') {
+        Some(n) => lead[n + 1..].to_string(),
+        None => fallback.to_string(),
+    }
+}
+
+fn write_inline(out: &mut String, v: &Lj, style: &Style) {
+    match v {
+        Lj::Arr(a) if !a.is_empty() => {
+            out.push('[');
+            for (i, x) in a.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(&style.comma);
+                }
+                write_inline(out, x, style);
+            }
+            out.push(']');
+        }
+        Lj::Obj(o) if !o.is_empty() => {
+            out.push('{');
+            for (i, (k, x)) in o.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(&style.comma);
+                }
+                out.push_str(&crate::json::quote(k));
+                out.push_str(&style.colon);
+                write_inline(out, x, style);
+            }
+            out.push('}');
+        }
+        _ => write(out, v, None, 0),
+    }
+}
+
+struct Editor<'a> {
+    text: &'a str,
+    indent: String,
+    eol: &'static str,
+}
+
+impl Editor<'_> {
+    fn at(&self, span: (usize, usize)) -> &str {
+        &self.text[span.0..span.1]
+    }
+
+    /// `new` in place of `node`. `inline`: the container holding it is on one line.
+    fn render(&self, out: &mut String, node: &Node, new: &Lj, inline: bool, line: &str, style: &Style) {
+        match (&node.shape, new) {
+            (Shape::Scalar(old), _) if deep_equal(old, new) => out.push_str(&self.text[node.start..node.end]),
+            (Shape::Obj(ms), Lj::Obj(o)) => {
+                let entries: Vec<(Option<&str>, &Lj)> = o.iter().map(|(k, v)| (Some(k.as_str()), v)).collect();
+                self.container(out, node, ms, &entries, new, inline, line, style)
+            }
+            (Shape::Arr(ms), Lj::Arr(a)) => {
+                let entries: Vec<(Option<&str>, &Lj)> = a.iter().map(|v| (None, v)).collect();
+                self.container(out, node, ms, &entries, new, inline, line, style)
+            }
+            _ => self.fresh(out, new, inline, line, style),
+        }
+    }
+
+    fn fresh(&self, out: &mut String, v: &Lj, inline: bool, line: &str, style: &Style) {
+        if inline {
+            write_inline(out, v, style);
+        } else {
+            out.push_str(&stringify(v, &self.indent).replace('\n', &format!("{}{line}", self.eol)));
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn container(&self, out: &mut String, node: &Node, ms: &[Member], new: &[(Option<&str>, &Lj)], whole: &Lj, inline: bool, line: &str, style: &Style) {
+        let span = &self.text[node.start..node.end];
+        let (open, close) = if matches!(node.shape, Shape::Obj(_)) { ('{', '}') } else { ('[', ']') };
+        if new.is_empty() {
+            if ms.is_empty() {
+                out.push_str(span);
+            } else {
+                out.push(open);
+                out.push(close);
+            }
+            return;
+        }
+        if ms.is_empty() {
+            return self.fresh(out, whole, inline, line, style);
+        }
+        let multiline = span.contains('\n');
+        let last = ms.len() - 1;
+        let colon = match &ms[last].key {
+            Some(_) => self.at(ms[last].mid).to_string(),
+            None => style.colon.clone(),
+        };
+        // The lead of a member added after the last: the last one's, unless the last is
+        // the first of a one-line container (its lead follows the bracket).
+        let added_lead = if ms.len() >= 2 || multiline || !self.at(ms[0].lead).is_empty() {
+            // From the line break on: the line above's trailing spaces stay with it.
+            let l = self.at(ms[last].lead);
+            l[l.find(['\r', '\n']).unwrap_or(0)..].to_string()
+        } else if (open == '{' && colon.ends_with(' ')) || (open == '[' && style.comma.ends_with(' ')) {
+            " ".to_string()
+        } else {
+            String::new()
+        };
+        // What a fresh one-line value inside is written with: this container's spacing
+        // when it is on one line, else what came from outside.
+        // An array has no colon of its own: a tight one (`[1,2]`) asks for a tight one.
+        let colon = if open == '[' && !multiline && added_lead.is_empty() { ":".to_string() } else { colon };
+        let here = Style { comma: if multiline { style.comma.clone() } else { format!(",{added_lead}") }, colon: colon.clone() };
+        out.push(open);
+        for (i, (k, v)) in new.iter().enumerate() {
+            let is_last = i == new.len() - 1;
+            let old = match k {
+                Some(k) => ms.iter().position(|m| m.key.as_ref().is_some_and(|x| x.2 == *k)),
+                None => (i < ms.len()).then_some(i),
+            };
+            let post = match old {
+                Some(j) => {
+                    let m = &ms[j];
+                    let lead = self.at(m.lead);
+                    out.push_str(lead);
+                    if let Some((ks, ke, _)) = &m.key {
+                        out.push_str(&self.text[*ks..*ke]);
+                    }
+                    out.push_str(self.at(m.mid));
+                    self.render(out, &m.value, v, !multiline, &indent_of(lead, line), &here);
+                    if is_last {
+                        self.at(ms[last].post)
+                    } else if j == last {
+                        ""
+                    } else {
+                        self.at(m.post)
+                    }
+                }
+                None => {
+                    out.push_str(&added_lead);
+                    if let Some(k) = k {
+                        out.push_str(&crate::json::quote(k));
+                        out.push_str(&colon);
+                    }
+                    self.fresh(out, v, !multiline, &indent_of(&added_lead, line), &here);
+                    if is_last {
+                        self.at(ms[last].post)
+                    } else {
+                        ""
+                    }
+                }
+            };
+            out.push_str(post);
+            if !is_last {
+                out.push(',');
+            }
+        }
+        out.push(close);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,6 +901,102 @@ mod tests {
         assert_eq!(serialise(&v, ""), "{\n  \"a\": [\n    1\n  ]\n}\n");
         // JSON.stringify cuts a gap to 10 characters.
         assert_eq!(stringify(&v, &" ".repeat(12)), format!("{{\n{0}\"a\": [\n{0}{0}1\n{0}]\n}}", " ".repeat(10)));
+    }
+
+    /// `edit` with `f` applied to the parsed text.
+    fn edited(old: &str, f: impl FnOnce(&mut LObj)) -> String {
+        let mut v = parse(old).unwrap();
+        f(v.as_obj_mut().unwrap());
+        let out = edit(old, &v);
+        assert!(deep_equal(&parse(&out).unwrap(), &v), "{out}");
+        out
+    }
+
+    fn pets(o: &mut LObj) -> &mut LObj {
+        o.get_mut("pets").and_then(Lj::as_obj_mut).unwrap()
+    }
+
+    #[test]
+    fn edit_changes_one_line_and_keeps_every_other_byte() {
+        // config.example.json, with one-line arrays (palette, sleep, redactPatterns) and
+        // an empty inline object: only the pets.default line changes.
+        let old = include_str!("../../../config.example.json");
+        let out = edited(old, |o| pets(o).set("default", Lj::str("brah")));
+        assert_eq!(out, old.replacen("\"default\": \"bellwether\"", "\"default\": \"brah\"", 1));
+        assert_ne!(out, old);
+        // serialise, by contrast, spreads the one-line arrays over several lines.
+        assert!(serialise(&parse(&out).unwrap(), old).contains("\"palette\": [\n"));
+        // Nothing changed: the same bytes, for any valid text without duplicate keys.
+        for t in [old, "{}", " [ ] ", "{\"a\" :1 ,\"b\":[ 1,2 ] }\n\n", "{\r\n  \"a\": \"\\u00e9\\/\"   \r\n}", "\"x\"", "{\n\t\"a\": 1.0e0,\n\t\"b\": [\n\t\t{}, [], {\"c\": -0}\n\t]\n}"] {
+            assert_eq!(edit(t, &parse(t).unwrap()), t, "{t:?}");
+        }
+    }
+
+    #[test]
+    fn an_edited_inline_value_stays_inline_and_a_multi_line_one_multi_line() {
+        let old = "{\n  \"palette\": [\"#a\", \"#b\"],\n  \"tight\": [1,2],\n  \"tall\": [\n    1,\n    2\n  ],\n  \"x\": 0\n}\n";
+        // The edited value is the inline array itself: changed and added elements are
+        // written on its line, in its spacing; removed ones go.
+        let out = edited(old, |o| o.set("palette", parse(r##"["#a", "#c", "#d"]"##).unwrap()));
+        assert_eq!(out, old.replace(r##"["#a", "#b"]"##, r##"["#a", "#c", "#d"]"##));
+        let out = edited(old, |o| o.set("tight", parse("[1,2,[3,{\"k\":4}]]").unwrap()));
+        assert_eq!(out, old.replace("[1,2]", "[1,2,[3,{\"k\":4}]]"));
+        let out = edited(old, |o| o.set("palette", parse(r##"["#z"]"##).unwrap()));
+        assert_eq!(out, old.replace(r##"["#a", "#b"]"##, r##"["#z"]"##));
+        let out = edited(old, |o| o.set("palette", Lj::Arr(vec![])));
+        assert_eq!(out, old.replace(r##"["#a", "#b"]"##, "[]"));
+        // A multi-line array stays multi-line, an added element on a line of its own.
+        let out = edited(old, |o| o.set("tall", parse("[1, 2, 3]").unwrap()));
+        assert_eq!(out, old.replace("    2\n  ],", "    2,\n    3\n  ],"));
+        // A one-element inline array grows in the default ", ".
+        assert_eq!(edited("{\"a\": [1]}", |o| o.set("a", parse("[1,2]").unwrap())), "{\"a\": [1, 2]}");
+        // A value whose type changes, in a multi-line object: laid out in the file's indent.
+        let out = edited(old, |o| o.set("x", parse("{\"y\": [1]}").unwrap()));
+        assert_eq!(out, old.replace("\"x\": 0", "\"x\": {\n    \"y\": [\n      1\n    ]\n  }"));
+    }
+
+    #[test]
+    fn edit_keeps_nested_inline_objects_and_adds_keys_in_the_containers_layout() {
+        let old = "{\n    \"pets\": { \"default\": \"esheep64\", \"byAgentType\": {} },\n    \"strip\": {\"heightPx\":140},\n    \"keep\": {\"a\": {\"b\": [1, 2]}}\n}";
+        let out = edited(old, |o| pets(o).set("default", Lj::str("brah")));
+        assert_eq!(out, old.replace("esheep64", "brah"));
+        // A new key in a one-line object goes on its line, in its spacing.
+        let out = edited(old, |o| pets(o).set("animationMap", parse("{\"brah\": {\"walk\": \"w\"}}").unwrap()));
+        assert_eq!(out, old.replace("\"byAgentType\": {} }", "\"byAgentType\": {}, \"animationMap\": {\"brah\": {\"walk\": \"w\"}} }"));
+        let out = edited(old, |o| o.get_mut("strip").and_then(Lj::as_obj_mut).unwrap().set("scale", Lj::Num("1.5".into())));
+        assert_eq!(out, old.replace("{\"heightPx\":140}", "{\"heightPx\":140,\"scale\":1.5}"));
+        // A new top-level key, in a multi-line object: the last member's lead and indent.
+        let out = edited(old, |o| o.set("z", parse("{\"q\": 1}").unwrap()));
+        assert_eq!(out, old.replace("[1, 2]}}\n}", "[1, 2]}},\n    \"z\": {\n        \"q\": 1\n    }\n}"));
+        // A removed key takes its line with it; the closing line stays.
+        let out = edited(old, |o| {
+            o.remove("keep");
+        });
+        assert_eq!(out, "{\n    \"pets\": { \"default\": \"esheep64\", \"byAgentType\": {} },\n    \"strip\": {\"heightPx\":140}\n}");
+        // An empty object that gets a key, in a one-line parent: on one line.
+        let out = edited(old, |o| pets(o).set("byAgentType", parse("{\"Explore\": \"tiny\"}").unwrap()));
+        assert_eq!(out, old.replace("\"byAgentType\": {} }", "\"byAgentType\": {\"Explore\": \"tiny\"} }"));
+    }
+
+    #[test]
+    fn edit_keeps_trailing_whitespace_line_endings_and_escapes_on_lines_it_doesnt_touch() {
+        let old = "\n{  \r\n  \"a\": \"caf\\u00e9\",   \r\n  \"b\": [1, 2], \r\n  \"c\": 1\r\n}\r\n\r\n";
+        let out = edited(old, |o| o.set("c", Lj::int(2)));
+        assert_eq!(out, old.replace("\"c\": 1", "\"c\": 2"));
+        let out = edited(old, |o| o.set("d", parse("[3]").unwrap()));
+        assert_eq!(out, old.replace("\"c\": 1\r\n}", "\"c\": 1,\r\n  \"d\": [\r\n    3\r\n  ]\r\n}"));
+        // A new file's value in an empty one: the file's layout from serialise's rules.
+        assert_eq!(edited("{}\n", |o| o.set("pets", parse("{\"default\":\"x\"}").unwrap())), "{\n  \"pets\": {\n    \"default\": \"x\"\n  }\n}\n");
+    }
+
+    #[test]
+    fn edit_falls_back_to_serialise_for_duplicate_keys_and_bad_json() {
+        let dup = "{\"a\": 1, \"b\": [1], \"a\": 2}";
+        let v = parse(dup).unwrap();
+        assert_eq!(edit(dup, &v), serialise(&v, dup));
+        let nested = "{\"o\": {\"k\": 1, \"k\": 2}}";
+        assert_eq!(edit(nested, &parse(nested).unwrap()), serialise(&parse(nested).unwrap(), nested));
+        assert_eq!(edit("{nope", &Lj::Obj(LObj::new().with("a", Lj::int(1)))), "{\n  \"a\": 1\n}");
     }
 
     #[test]

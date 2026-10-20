@@ -4879,15 +4879,16 @@ Short, user-facing, in this order:
 #### Later (not M11)
 
 - **M12** (drag a sheep), **M10b** (the goose), Windows and Linux.
-- Saving `state.json` off the hook-serving thread (deviation 130's follow-up). On a
-  stalled disk one hook in every 2 s waits for the write.
+- ~~Saving `state.json` off the hook-serving thread (deviation 130's follow-up). On a
+  stalled disk one hook in every 2 s waits for the write.~~ Done in M13.
 - Moving `shell/src-tauri` to `app/` with a root workspace (deviation 1's wait is over now
   that the live install migrated).
 - Pruning the hidden `__` commands nothing uses.
-- The setup window's pet choice keeps config.json's values but not all of its lines: the
+- ~~The setup window's pet choice keeps config.json's values but not all of its lines: the
   lossless writer spreads one-line arrays (`palette`, `strategies`, …) over several lines.
   Found in M10b's by-hand check (2026-10-19); the writer is M7's, so 1.0 does it too.
-  Keep inline arrays inline, as M10b's Done-when ("keep their values and lines") expects.
+  Keep inline arrays inline, as M10b's Done-when ("keep their values and lines") expects.~~
+  Done in M13.
 - A development binary that refuses port 47417 outright, in addition to M11-a's home
   rule.
 
@@ -5222,6 +5223,84 @@ replay <fixture> --tag <name>` against that port, one real session with `claude 
 8. `bellwether shell restart` puts every sheep back in its slot, on its terminal's monitor;
    the brain's log has no `placed` for a dropped sheep.
 9. CPU: with no drag under way, the strip's CPU is as before (the redraw cap is unchanged).
+
+### M13. config.json keeps its lines; state.json is saved off the serving thread (1.1.1)
+
+Added 2026-10-19: the maintainer chose two items from M11's "Later" list for a 1.1.1.
+
+**Scope:**
+
+1. **The setup window's pet choice changes only the lines it must.** `pet_select` (M7,
+   deviation 64) wrote config.json through `lossless::serialise`, which lays the whole
+   file out again: every one-line array and object (`palette`, `sleep`, `redactPatterns`,
+   `strategies`, …) came back spread over several lines. A new `lossless::edit(old, new)`
+   writes the new value into the old text instead, and `pet_select` and migrate's
+   `drop_obsolete` (the other config.json editor) use it. The hook installer keeps
+   `serialise`: its layout is the Node original's, pinned by the frozen sample (M11-f).
+   The rules:
+   - a value that didn't change is copied byte for byte (its lines, spacing, escapes,
+     trailing whitespace), and so is the text around the root value;
+   - a changed scalar is replaced where it stands;
+   - a changed object or array is edited member by member (by key, or by index):
+     unchanged members stay as they are, removed ones go, new ones go after the last with
+     its spacing. **So an inline array or object that is itself the edited value stays on
+     one line, and a multi-line one stays multi-line;**
+   - a value written fresh (a new key, an empty container getting members, a value whose
+     type changed) goes on one line inside a one-line container, in that container's
+     spacing; elsewhere in the file's indent and line ending, from its line's indent;
+   - a file with a duplicate key (which `parse` folds into one) is laid out again by
+     `serialise`, as before.
+2. **state.json is saved on a thread of its own** (deviation 130's follow-up). The state
+   machine's 2 s timer still decides when to save, but it only hands the snapshot to the
+   writer thread (`crates/brain/src/saver.rs`) and goes back to serving. Only the latest
+   snapshot waits: a newer one replaces one not yet written. The write is atomic (a
+   temporary file, then a rename) and now flushed to disk before the rename. A clean stop
+   (SIGTERM, SIGINT, the parent gone, a test's stop) hands over the last state and waits up
+   to 5 s for it to be written before the brain exits; after that it logs a warning and
+   exits anyway.
+
+**Done when:**
+
+- Choosing a pet in the setup window changes only the `"default"` line of
+  config.example.json (and, for an imported pet, adds its map), and choosing the first pet
+  again gives back the same bytes: M10b's "config.json's other keys keep their values and
+  lines".
+- An edit that changes nothing gives back the same bytes for every valid text in the frozen
+  `json` sample without a duplicate key; every edit gives valid JSON with the new value.
+- With a state.json write held mid-write, hooks and `/state` are answered at once; the
+  newest state is written once the disk answers; the test fails with the write moved back
+  onto the serving thread.
+- After a clean stop, state.json holds the state from just before it, written before
+  `serve` returns.
+- `npm run test:cargo`, `npm run build:dev`, then `npm test` pass.
+
+#### M13 status (developer, 2026-10-19): built and tested locally; not yet released
+
+- **Fix 1:** `lossless::edit` and `lossless::has_duplicate_keys` (crates/core/src/lossless.rs),
+  used by `set_pet_default` (shell/src-tauri/src/onboarding.rs) and `drop_obsolete`
+  (crates/brain/src/migrate.rs). Tests: five in lossless.rs (one line of
+  config.example.json; an inline array that is itself the edited value, grown, shrunk,
+  emptied, and a tight `[1,2]`; a multi-line array growing; nested inline objects and new
+  keys in one-line and multi-line objects; a removed key; CRLF, trailing whitespace and
+  `\u00e9` kept on untouched lines; the duplicate-key and bad-JSON fallbacks), one over the
+  frozen `json` sample (crates/core/tests/frozen.rs: of its 1 600 valid texts, every one
+  without a duplicate key comes back byte for byte, 1 386 of them), and
+  `set_pet_default_writes_a_new_file_and_keeps_an_old_ones_layout` now checks
+  config.example.json both ways and an imported pet's map.
+- **Fix 2:** `saver.rs` (the thread, coalescing, `finish` with `FLUSH_LIMIT`), actor.rs
+  (the timer hands over; the stop flushes), `Options::state_writer` (tests put in a held or
+  slow writer), `persist::save_state` flushes before the rename. Tests: two in saver.rs
+  (49 saves behind a held write return in under 50 ms and only the latest is written; a
+  stalled disk at stop gives up after the limit), and two in crates/brain/tests/http.rs:
+  `a_stalled_state_json_write_never_holds_up_a_hook` (60 hooks and a `/state` while the
+  write is held, the slowest under 500 ms; with the save moved back onto the serving
+  thread for a check, the first hook got no answer in 20 s and the test failed) and
+  `a_clean_stop_writes_the_last_state_before_serve_returns` (a 300 ms write, the save
+  timer never due: the mute is in state.json when `serve` returns).
+- Deviation 142.
+- **Tests:** see deviation 142.
+- **Not verified:** a real stalled disk (the tests hold the writer in code); the app's
+  setup window by hand (the function it calls is tested on config.example.json).
 
 ## Test plan
 
@@ -7155,3 +7234,37 @@ Recorded by the developer while fixing the flaky Rust throughput test (2026-10-1
      - **Tests after round 2:** `npm run test:cargo` 275 passed, 0 failed; then `npm run
        build:dev` and `npm test`: 1013 tests, 1012 pass, 0 fail, 1 skipped; `build-pet
        --check` up to date; the tripwire's highest IoU for the goose 0.606.
+142. **Deviations in building milestone 13** (developer, 2026-10-19).
+     - **state.json is now flushed to disk; before M13 it wasn't.** The brief for M13 said
+       state.json "is saved with fsync (deviation 30)". Deviation 30 says the opposite: it
+       was written without a flush because the save ran on the brain's only thread. Off
+       that thread the flush costs a hook nothing, so `persist::save_state` now flushes the
+       temporary file before the rename, as the token file does. migrate and `--to-app`,
+       which call the same function once, flush too.
+     - **The stall was larger than the Later list said.** The brain runs on a
+       current-thread runtime, so while the save ran on it, every hook, `/state` and
+       `/control` waited, not only the hook being handled. Now all of them are answered
+       while a write is held (the http.rs test).
+     - **A stopping brain waits at most 5 s** (`saver::FLUSH_LIMIT`) for the last write,
+       then logs a warning and exits. The plan didn't give a limit: a stalled disk must not
+       keep a quitting app's brain alive.
+     - **`Options::state_writer`** (public) lets a test put in a held or slow writer;
+       the brain's is `saver::default_writer()`.
+     - **migrate's `drop_obsolete` uses `lossless::edit` too.** The Later item named only
+       the setup window's pet choice, but this is config.json's other editor (an
+       `--to-app` copy that drops `autostart` and `brain.nodePath`). Its test's output is
+       the same. The hook installer keeps `serialise`: its layout is the Node original's,
+       pinned by the frozen sample, and deviation 64's "laid out again, as the installer
+       does" still describes the installer.
+     - **A file with a duplicate key is still laid out again.** `parse` keeps one value
+       for a repeated key, so there is no single line to keep; `edit` uses `serialise`
+       there. `lossless::has_duplicate_keys` is public so the frozen test can tell those
+       texts apart (214 of the sample's 1 600 valid texts).
+     - **A member added after an existing last member doesn't copy that line's trailing
+       spaces.** It takes the last member's lead from the line break on.
+     - **Tests:** `npm run test:cargo` 285 passed, 0 failed (275 before; 10 new). Then
+       `npm run build:dev` and `npm test`: 1023 tests, 1022 pass, 0 fail, 1 skipped
+       (165 s). An earlier full run had three files time out after about 930 s each; the
+       Mac's power log shows it idle-slept for about 900 s three times during that run,
+       and each of the three passed alone (brain-server 22 of 22, pets-bundled 45 of 45,
+       tester-regression 25 of 25). The counted run was held awake with `caffeinate -i`.

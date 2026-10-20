@@ -96,6 +96,35 @@ fn settings_json_round_trips_the_frozen_sample_as_node_did() {
     });
 }
 
+/// config.json's writer (M13): on every valid text of the sample, an edit that changes
+/// nothing gives back the same bytes (for a duplicate key, serialise's layout), and an
+/// edit that adds a key or changes the first one gives valid JSON with exactly that value.
+#[test]
+fn the_config_writer_keeps_every_frozen_text_and_edits_it_validly() {
+    let (_, cases) = frozen("json");
+    let (mut same, mut valid) = (0, 0);
+    for (i, c) in cases.iter().enumerate() {
+        let text = jsstr::to_string_lossy(c.get("case").get("text").as_str().unwrap());
+        let Ok(v) = lossless::parse(&text) else { continue };
+        valid += 1;
+        let out = lossless::edit(&text, &v);
+        let want = if lossless::has_duplicate_keys(&text) { lossless::serialise(&v, &text) } else { text.clone() };
+        assert_eq!(out, want, "case {i}: {text:?}");
+        same += (out == text) as usize;
+        let mut w = v.clone();
+        if let Some(o) = w.as_obj_mut() {
+            if let Some(k) = o.keys().first().map(|k| k.to_string()) {
+                o.set(k, lossless::parse("[1, {\"m13\": [true]}]").unwrap());
+            }
+            o.set("m13", lossless::parse("{\"a\": []}").unwrap());
+        }
+        let out = lossless::edit(&text, &w);
+        let back = lossless::parse(&out).unwrap_or_else(|e| panic!("case {i}: {e}: {out:?}"));
+        assert!(lossless::deep_equal(&back, &w), "case {i}: {text:?} -> {out:?}");
+    }
+    assert!(valid >= 1000 && same * 2 >= valid, "{same} of {valid} valid texts kept byte for byte");
+}
+
 #[test]
 fn diffs_answer_the_frozen_sample_as_node_did() {
     check("diff", 2000, |c| {

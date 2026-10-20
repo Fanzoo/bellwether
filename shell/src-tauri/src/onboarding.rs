@@ -612,7 +612,8 @@ pub fn other_handlers(settings: &Lj, port: u16) -> usize {
 }
 
 /// config.json's text with `pets.default` set (and `pets.animationMap.<name>` when given),
-/// the rest of the file as it was: the lossless writer keeps its layout.
+/// the rest of the file as it was, byte for byte: `lossless::edit` changes only the lines
+/// of what changed, and a one-line array or object stays on one line (M13).
 pub fn set_pet_default(old: Option<&str>, name: &str, map: Option<&bellwether_core::json::Obj>) -> Result<String, String> {
     use bellwether_core::lossless::{self, LObj};
     let mut root = match old {
@@ -633,7 +634,7 @@ pub fn set_pet_default(old: Option<&str>, name: &str, map: Option<&bellwether_co
         maps.set(name, Lj::from_js(&bellwether_core::json::Js::Obj(m.clone())));
     }
     Ok(match old {
-        Some(t) => lossless::serialise(&root, t),
+        Some(t) => lossless::edit(t, &root),
         None => lossless::stringify(&root, "  ") + "\n",
     })
 }
@@ -1360,15 +1361,16 @@ mod tests {
         assert_eq!(tiny["still"]["transparency"], "Magenta");
         assert!(ob.pet_select("nothere", &Value::Null).unwrap_err().contains("isn't a pet"));
         // A config.json of the user's own: only pets changes; the rest keeps its lines (4-space
-        // indent here). An inline object would be laid out again, as the hook installer does.
+        // indent here), and an inline object stays on its line (M13).
         let config = ob.ctx.home.join("config.json");
-        std::fs::write(&config, "{\n    \"strip\": {\n        \"heightPx\": 150\n    },\n    \"pets\": {\n        \"scale\": 2\n    }\n}\n").unwrap();
+        std::fs::write(&config, "{\n    \"strip\": {\n        \"heightPx\": 150\n    },\n    \"pets\": {\n        \"scale\": 2\n    },\n    \"bubble\": {\"redactPatterns\": [\"a=\\\\S+\", \"b\"]}\n}\n").unwrap();
         let merged = ob.pet_select("tiny", &Value::Null).unwrap();
         assert_eq!(merged.pointer("/pets/default").and_then(Value::as_str), Some("tiny"));
         assert_eq!(merged.pointer("/pets/animationMap/tiny/walk").and_then(Value::as_str), Some("walk"), "the proposed map, so it walks");
         assert_eq!(merged.pointer("/strip/heightPx").and_then(Value::as_f64), Some(150.0));
         let text = std::fs::read_to_string(&config).unwrap();
         assert!(text.starts_with("{\n    \"strip\": {\n        \"heightPx\": 150\n    },\n    \"pets\": {\n        \"scale\": 2,\n        \"default\": \"tiny\","), "{text}");
+        assert!(text.ends_with("    },\n    \"bubble\": {\"redactPatterns\": [\"a=\\\\S+\", \"b\"]}\n}\n"), "{text}");
         // A pet whose file changed after import is listed with its problem and can't be chosen.
         std::fs::write(bellwether_brain::pets::pet_file(&ob.ctx.home, "tiny"), TINY_PET.replace("tiny", "tinz")).unwrap();
         assert!(ob.pets(&Value::Null)["list"][0]["problem"].as_str().unwrap().contains("changed after it was imported"));
@@ -1388,6 +1390,18 @@ mod tests {
         assert!(set_pet_default(Some("[1]"), "tiny", None).is_err());
         assert!(set_pet_default(Some("{\"pets\": 3}"), "tiny", None).is_err());
         assert!(set_pet_default(Some("{nope"), "tiny", None).is_err());
+        // M13: the pet choice changes one line of config.example.json; its one-line arrays
+        // (palette, sleep, redactPatterns, ...) stay on their lines.
+        let example = include_str!("../../../config.example.json");
+        let brah = set_pet_default(Some(example), "brah", None).unwrap();
+        assert_eq!(brah, example.replacen("\"default\": \"bellwether\"", "\"default\": \"brah\"", 1));
+        assert_eq!(set_pet_default(Some(&brah), "bellwether", None).unwrap(), example);
+        // An imported pet's map goes in as a new key of the multi-line pets object.
+        let mut map = bellwether_core::json::Obj::new();
+        map.set("walk", bellwether_core::json::Js::Str("w".into()));
+        let tiny = set_pet_default(Some(example), "tiny", Some(&map)).unwrap();
+        let changed: Vec<&str> = tiny.lines().filter(|l| !example.lines().any(|e| e == *l)).collect();
+        assert_eq!(changed, ["    \"default\": \"tiny\",", "      },", "      \"tiny\": {", "        \"walk\": \"w\""], "{tiny}");
     }
 
     #[test]

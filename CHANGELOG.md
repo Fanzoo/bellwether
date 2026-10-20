@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Choosing a pet in the setup window no longer reflows config.json.** It changes the
+  `"default"` line (and adds an imported pet's animation map) and leaves every other line
+  as it was: one-line arrays such as `palette` stay on one line. Moving an old install's
+  config.json into the app keeps its lines the same way.
+- **A slow disk no longer holds up a hook.** state.json (each sheep's colour and place,
+  and Quiet) is now saved on a thread of its own and flushed to disk; the last state is
+  still saved when Bellwether quits.
+
 ## 1.1.0
 
 You can now drag a sheep somewhere else on the strip, and there's a second pet to choose:
