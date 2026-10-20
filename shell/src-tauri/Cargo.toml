@@ -1,6 +1,6 @@
 [package]
 name = "bellwether-shell"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "bellwether's overlay: a transparent click-through strip of sheep, one per Claude Code session"
 license = "MIT"

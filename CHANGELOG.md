@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.1.1
+
+Two fixes: the setup window keeps your config.json's layout, and a slow disk can no
+longer hold up Claude Code's hooks.
 
 - **Choosing a pet in the setup window no longer reflows config.json.** It changes the
   `"default"` line (and adds an imported pet's animation map) and leaves every other line

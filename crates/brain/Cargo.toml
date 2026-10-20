@@ -1,6 +1,6 @@
 [package]
 name = "bellwether-brain"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "bellwether's brain in Rust: the loopback listener (/hook, /health, /state, /control) and the brain's CLI commands"
 license = "MIT"
