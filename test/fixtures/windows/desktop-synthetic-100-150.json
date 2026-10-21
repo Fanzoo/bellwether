@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "os": {
+    "version": "10.0.26100.0",
+    "displayVersion": "synthetic"
+  },
+  "monitors": [
+    {
+      "name": "\\\\.\\DISPLAY1",
+      "primary": true,
+      "scale": 1.0,
+      "rect": [0, 0, 1920, 1080],
+      "work": [0, 0, 1920, 1032],
+      "taskbar": "bottom",
+      "strip": [0, 892, 1920, 1032]
+    },
+    {
+      "name": "\\\\.\\DISPLAY2",
+      "primary": false,
+      "scale": 1.5,
+      "rect": [1920, 0, 5760, 2160],
+      "work": [1920, 0, 5760, 2088],
+      "taskbar": "bottom",
+      "strip": [1920, 1878, 5760, 2088]
+    }
+  ],
+  "foreground": 132456,
+  "processes": [
+    { "pid": 8800, "ppid": 4100, "exe": "WindowsTerminal.exe" },
+    { "pid": 9050, "ppid": 8800, "exe": "pwsh.exe" },
+    { "pid": 9100, "ppid": 9050, "exe": "claude.exe" }
+  ],
+  "windows": [
+    {
+      "hwnd": 132456,
+      "pid": 8800,
+      "exe": "WindowsTerminal.exe",
+      "class": "CASCADIA_HOSTING_WINDOW_CLASS",
+      "bounds": [1930, 10, 3800, 1400],
+      "cloaked": false,
+      "tool": false,
+      "topmost": false
+    }
+  ]
+}

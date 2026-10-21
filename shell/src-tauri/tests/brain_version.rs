@@ -8,6 +8,8 @@
 //! `print` and logs every call), and the "brains" are a small /health server in this test
 //! or this binary's own `serve`, on free ports (never 47417). The binary isn't inside an app
 //! bundle, so with the stand-in its agent label is the permanent id's.
+// launchd, its stand-in (a shell script) and SIGTERM: macOS only. Windows' brain restarts are W6's.
+#![cfg(unix)]
 
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;

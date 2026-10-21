@@ -263,6 +263,10 @@ keeps the plain name.
 - **Screen sharing:**
   - The strip asks macOS to leave it out of screen captures (`privacy.captureExclusion`,
     `sharingType none`). Newer macOS capture APIs may ignore that, so it isn't relied on.
+    Its default differs by OS: on on macOS, off on Windows (where it would also take the
+    sheep out of your own screenshots; Windows plan WD5). `config.example.json` leaves the
+    key out so each OS gets its default; set it to `true` or `false` to choose. The shell
+    log's `privacy:` line says which it is and why.
     The shell reads its config only when it starts: after changing `privacy.*` (or
     anything else in `config.json`), restart the strip (`bellwether shell restart` for the
     app's).
@@ -711,6 +715,33 @@ node scripts/build-pet.mjs --check                 # npm test and CI run this to
 node scripts/build-pet.mjs review bellwether --out /tmp/review   # the review sheets
 ```
 
+## Windows (in progress)
+
+Windows is being built milestone by milestone (docs/WINDOWS-PLAN.md, W1–W10). Today
+(W1): the strip and its demo flock. There is no installer, brain or CLI on Windows yet.
+
+- **Compiling for Windows on a Mac:** `rustup target add x86_64-pc-windows-msvc`, then
+  `cargo install cargo-xwin` and `brew install llvm lld` (cargo-xwin downloads Microsoft's
+  CRT and SDK headers on first use; LLVM supplies `clang-cl`, `llvm-lib` and `lld-link`):
+  ```
+  export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
+  cargo xwin check --manifest-path shell/src-tauri/Cargo.toml --workspace --all-targets --target x86_64-pc-windows-msvc
+  node scripts/build-windows-test.mjs --xwin
+  ```
+  It compiles and links; it can't run the tests or the exe. CI's `windows` job does.
+- **The test folder** (`shell/src-tauri/target-dev/windows-test/bellwether-windows-test/`,
+  and CI's `bellwether-windows-test` artifact): an unsigned `Bellwether.exe` built with
+  `--features test-build`, `run-test.cmd`, `config.json` on port 47491, the bundled pets
+  and a README. `run-test.cmd` sets a scratch home beside itself and starts only the demo
+  (or `--dump-desktop`), so it never reads or writes `%APPDATA%\Bellwether`,
+  `%USERPROFILE%\.claude` or port 47417.
+- **The flags W1 added** (every OS): `--demo --demo-monitors` (the demo flock on a strip on
+  every monitor), `--heartbeat` (each page logs a heartbeat every 10 s and the shell logs a
+  silence of 25 s: the WebView2 throttling measure), and, in development and test builds
+  only, `--dump-desktop <file>` (Windows: the monitors, taskbar edges, processes and windows,
+  never titles, command lines or environment).
+- **The by-hand checks** for each milestone are in its status in docs/WINDOWS-PLAN.md.
+
 ## Licences of dependencies
 
 `THIRD-PARTY.md` lists every Rust crate and npm package with its licence. Regenerate it
@@ -730,6 +761,7 @@ with `node scripts/third-party.mjs` after changing a dependency (offline;
 | `node scripts/release.mjs version\|check\|assets\|cask` | Release steps (docs/RELEASING.md) |
 | `node scripts/third-party.mjs [--check]` | Regenerates THIRD-PARTY.md |
 | `node scripts/health-gap.mjs --port P --seconds S` | Measures the brain's longest gap in answering `/health` (across an update) |
+| `node scripts/build-windows-test.mjs [--xwin]` | The Windows test folder (below); `--xwin` cross-builds it on a Mac |
 
 ## Tests
 
@@ -782,8 +814,11 @@ without it makes `npm test` stop at once with the build command.
 `npm run build:dev`, `node scripts/fetch-pets.mjs`, `npm test`, `build-pet --check`),
 `cargo` (the cargo tests with and without the `conformance` feature), `bundle` (an
 unsigned universal `tauri build` with its DMG and updater files, signed with a key made and
-thrown away in the job, and its refusal of `__fixture`), and `cross-check` (`cargo check`
-of `crates/core` and `crates/brain` for Linux and Windows). The redaction time budgets are
+thrown away in the job, and its refusal of `__fixture`), `cross-check` (`cargo check`
+of `crates/core` and `crates/brain` for Linux and Windows), and `windows` (on
+`windows-2025`: `cargo check` of the whole workspace, `npm run test:cargo`, the Windows
+test folder, a 25 s smoke run of its demo, and its `--dump-desktop`; the folder is
+uploaded as the `bellwether-windows-test` artifact). The redaction time budgets are
 written for a developer's Mac and scale with the machine's speed, measured in the same
 process (`machineSlowdown` in `test/helpers.mjs`).
 

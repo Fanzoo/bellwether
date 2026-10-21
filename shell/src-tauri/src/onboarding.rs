@@ -852,7 +852,12 @@ pub fn open<R: Runtime>(app: &AppHandle<R>) {
         let _ = w.set_focus();
         return;
     }
-    let built = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("onboarding.html".into()))
+    let mut builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("onboarding.html".into()));
+    // Every webview of the process gets the strips' WebView2 arguments (strips.rs).
+    if let Some(args) = crate::strips::webview2_args(cfg!(windows) && crate::strips::WEBVIEW2_UNTHROTTLED) {
+        builder = builder.additional_browser_args(&args);
+    }
+    let built = builder
         .title("Set up Bellwether")
         .inner_size(520.0, 600.0)
         .min_inner_size(440.0, 480.0)
@@ -1114,7 +1119,9 @@ mod tests {
         assert!(r["preview"]["diffText"].as_str().unwrap().contains("echo edited"));
         let done = ob.hooks_apply(&fresh).unwrap();
         assert_eq!(done["outcome"], "applied", "{done}");
-        assert!(done["backup"].as_str().unwrap().contains("backups/settings-"));
+        // `<home>/backups/settings-…`, with the OS's separator (a backslash on Windows).
+        let backup = Path::new(done["backup"].as_str().unwrap());
+        assert!(backup.parent().is_some_and(|d| d.ends_with("backups")) && backup.file_name().unwrap().to_string_lossy().starts_with("settings-"), "{backup:?}");
         let written = std::fs::read_to_string(&file).unwrap();
         assert!(written.contains(T) && written.contains("echo edited"));
         // Already installed: no plan.
@@ -1404,6 +1411,8 @@ mod tests {
         assert_eq!(changed, ["    \"default\": \"tiny\",", "      },", "      \"tiny\": {", "        \"walk\": \"w\""], "{tiny}");
     }
 
+    // The CLI link is a symlink: Unix only; Windows puts a folder on PATH instead (WD7, W7).
+    #[cfg(unix)]
     #[test]
     fn the_cli_tool_is_a_link_to_this_app_and_never_replaces_a_stranger() {
         let base = temp("cli");

@@ -145,6 +145,8 @@ pub enum Trigger {
     Tray,
 }
 
+// Only macOS asks (NSAlert) until W8 (rfd on Windows).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
     Install,

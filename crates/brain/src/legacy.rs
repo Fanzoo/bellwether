@@ -344,6 +344,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(home);
     }
 
+    // /bin/sleep and /bin/echo: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn a_slow_launchctl_is_unknown_and_stopped() {
         let mut cmd = std::process::Command::new("/bin/sleep");

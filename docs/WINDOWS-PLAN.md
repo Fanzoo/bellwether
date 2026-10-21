@@ -5,7 +5,8 @@ one per Claude Code session, as they do along the Dock on macOS. Windows gets th
 app, brain, CLI and setup window, signed and updating itself.
 
 Status: proposal, with the maintainer's decisions of 2026-10-20 applied (see "Decisions
-(maintainer, 2026-10-20)" under Open questions). Nothing in it is built yet. Items marked
+(maintainer, 2026-10-20)" under Open questions). W1 is built, not yet run on Windows (its
+status, under W1); nothing else is built yet. Items marked
 **ASSUMPTION** are technical guesses that a milestone proves. Bracketed numbers such as
 [4] point to the Sources list at the end. Crate versions were read from `Cargo.lock` and
 crates.io on 2026-10-19 [21]. The Tauri, tao and wry behaviour quoted here was read from
@@ -1008,6 +1009,177 @@ Builds:
    exclusion is off by default on Windows).
 9. Run `run-test.cmd --dump-desktop desktop.json` and attach the file and both logs.
 
+#### W1 status (developer, 2026-10-19, updated 2026-10-20): built; the cargo suite green on Windows in a VM; the Windows CI job and the by-hand checks on the maintainer's PC not yet run
+
+**Update, 2026-10-20.** The maintainer ran the test folder in a Windows 11 ARM64 Parallels
+VM on this Mac (x64 build under emulation): placement, drag, clicks and the heartbeat
+looked right; the sheep were missing from screenshots until W1-10, and are there since.
+The coordinator then ran `cargo test --workspace --no-fail-fast` natively in that VM
+(Windows 11 25H2, build 26200; Rust 1.99.1, target `x86_64-pc-windows-msvc`; VS 2022
+Build Tools 14.44 and SDK 26100; scratch USERPROFILE, APPDATA and LOCALAPPDATA): 254
+passed, 5 failed, one target never ran (W1-11). After the fixes, the same run in the VM:
+**257 passed, 0 failed**, every test target run (21 executables and the doc tests). The
+Mac runs 304: the 47 more are the Unix-only tests (W1-7, W1-11). On the Mac after W1-11:
+`npm run test:cargo` 304 passed, 0 failed; `npm test` 1037 tests, 1036 pass, 0 fail, 1
+skipped (the exe-name guard is new). This is not CI: the `windows-2025` job is still
+unrun, and the VM is ARM64 with one virtual display, not the two-monitor x64 PC the
+by-hand list is for.
+
+After BR-3K's W1 fixes (W1-12 to W1-14): the VM's cargo run **258 passed, 0 failed**
+(every target; the new `PhysRect::matches` test included); on the Mac
+`npm run test:cargo` 305 passed, 0 failed, and `npm test` 1037 tests, 1036 pass, 0 fail,
+1 skipped; the xwin check clean. In the VM, with the rebuilt folder:
+`run-test.cmd --dump-desktop Z:\nope\x.json` printed `Could not write … (exit code 1)`
+and the log's line `--dump-desktop: cannot write Z:\nope\x.json: The system cannot find
+the path specified. (os error 3)`, and exited 1; a dump to a real folder wrote the file
+(1 monitor, 149 processes, 17 windows), logged it and exited 0. The fresh-log move was run
+with a stand-in exe (no window): the old `shell.log` became `shell.previous.log`. The
+deferred re-fit after a scale change has not run on Windows (by-hand step 4).
+
+Before that update: the code compiled and linked for
+`x86_64-pc-windows-msvc` on the Mac (cargo-xwin, below), and the pure parts are tested on
+the Mac. Whether the Windows CI job is green, and everything in the by-hand list, is
+unproven until CI runs on `windows-2025` and the maintainer runs the list on his PC.
+
+Built:
+
+- **The whole shell crate compiles for Windows.** `icons/icon.ico` (deviation W1-1). The
+  shell's `libc` calls outside tests go through `sys.rs`, with Windows stand-ins until W2,
+  W3 and W6 (deviation W1-8). Tests that need a shell script, `/bin` programs, symlinks, a
+  FIFO, Unix permission bits, launchd or LaunchAgents are `#[cfg(unix)]`, each with its
+  reason (deviation W1-7).
+- **Strip frames in physical pixels** (WD1, WD3): `desktop.rs` (pure): `taskbar_edge`,
+  `physical_strip_rect` (the work area's bottom minus `strip.heightPx × scale`), and the
+  `Space` seam (`Points`, today's macOS maths, unchanged; `Physical` on Windows).
+  strips.rs sets a Windows strip with `PhysicalPosition`/`PhysicalSize` before it is shown,
+  re-reads every strip's monitor every 2 s (the privacy loop's Dock check, every pass on
+  Windows), puts a strip back to its frame on `ScaleFactorChanged`, and logs each monitor's
+  taskbar edge when it is first seen and when it changes (`taskbar on monitor
+  "\\.\DISPLAY1": bottom (screen …, work area …, physical px, scale 1)`). The cursor poll,
+  `cursor_now` (the drag) and the monitor list go through the seam, so the cursor maps to
+  the right strip with mixed scales (WD3's example is a test).
+- **`WS_EX_TOOLWINDOW`** on every strip, kept by a window subclass on every style change
+  (`win.rs`; deviation W1-2). Logged as `strip-0: a tool window (WS_EX_TOOLWINDOW, kept on
+  every style change): not in the taskbar, Alt-Tab or Task View`.
+- **The WebView2 throttling measure** (WD2 step 2, WR1): `--heartbeat`. Each strip's page
+  logs `heartbeat N: <ticks> ticks in <s> s, longest gap <ms> ms, page <visibility>, <n>
+  sprites` every 10 s from a 1 s timer, and the shell logs `heartbeat: strip-0 silent for N
+  s: its page is throttled or suspended (WR1)` after 25 s without one, and `… is back after
+  N s of silence` (`heartbeat.rs`; deviation W1-6). The browser-arguments fallback is
+  `strips::WEBVIEW2_UNTHROTTLED` (false) and `webview2_args`, applied to the strips and the
+  setup window alike when it is turned on.
+- **`--dump-desktop <file>`** (WD12 3): `dump.rs` (the file's shape, tested on the Mac) and
+  `win.rs` (the collection). Development builds and the test build only (`dump::allowed`).
+  Fixture: `test/fixtures/windows/desktop-synthetic-100-150.json` (deviation W1-4).
+- **Capture exclusion off by default on Windows** (brought forward from W5 after the
+  maintainer's first run; deviation W1-10): `privacy::capture_exclusion`, config.json's
+  value wins on any OS, the log says which and why.
+- **`--demo --demo-monitors`**: a strip on every monitor, each with the whole demo flock
+  (deviation W1-5). `--demo` alone is unchanged.
+- **The test folder** (WD12 5): `scripts/build-windows-test.mjs` builds `Bellwether.exe`
+  (release profile, `--features test-build`), `run-test.cmd`, `config.json` on port 47491,
+  the two bundled pets and a README (deviation W1-3).
+- **CI** (`ci.yml`, job `windows`, `windows-2025`, no secrets): LF checkout; `cargo check
+  --locked … --workspace --all-targets`; `npm run test:cargo -- --no-fail-fast`; the test
+  folder; a 25 s smoke run of its demo (`::warning` and skipped if no strip opens, never
+  passed silently; fails if the tool-window, taskbar or `--quit-after` lines are missing);
+  `--dump-desktop` on the runner; the folder uploaded as the `bellwether-windows-test`
+  artifact (GitHub zips it: `bellwether-windows-test.zip`).
+- **Docs:** docs/DEVELOPMENT.md "Windows (in progress)", the script table and the CI
+  paragraph.
+
+How the Windows code was compiled here: the Mac has `x86_64-pc-windows-msvc` (rustup).
+`cargo check --target x86_64-pc-windows-msvc` alone stops at `ring`'s C build (no Windows
+headers), so `cargo-xwin` 0.23.1 (`cargo install cargo-xwin`, which downloads Microsoft's
+CRT and SDK headers) with Homebrew's LLVM and LLD 23.1.3 (`clang-cl`, `llvm-lib`,
+`lld-link`): `cargo xwin check … --workspace --all-targets --target x86_64-pc-windows-msvc`
+passes with no warnings, and `node scripts/build-windows-test.mjs --xwin` links a 12.6 MB
+`PE32+ executable (GUI) x86-64`. Nothing Windows can run here: no test and no exe ran
+on Windows.
+
+Tested here (macOS):
+
+- `npm run test:cargo`: 304 passed, 0 failed (290 before; 14 new: desktop.rs 5, the
+  Windows cursor-mapping table in clickthrough.rs 3, dump.rs 3, heartbeat.rs 2, and the
+  per-OS capture-exclusion default in privacy.rs 1, after W1-10). Then
+  `npm run build:dev` and `npm test`: 1036 tests, 1035 pass, 0 fail, 1 skipped (new:
+  `test/windows.test.mjs`, 8 tests; `test/docs.test.mjs` now allows the developer doc to
+  name docs/WINDOWS-PLAN.md; the two `the example config` vectors in
+  `test/fixtures/config-vectors.json` lose `captureExclusion`, as config.example.json did,
+  W1-10). Held awake with `caffeinate -i`. Rerun after W1-10: the same counts.
+- macOS unchanged: a 23 s `--demo --demo-monitors --heartbeat --snapshot` run of the
+  development build (scratch home, port 47431, one display) logs the same strip lines as
+  before (`strip strip-0 on monitor "Monitor #41053": x 0 y 911 1728x140 (logical px)`, no
+  taskbar or desktop-space line) and `webview: heartbeat 1: 10 ticks in 10.0 s, longest gap
+  1010 ms, page visible, 13 sprites`, then quits.
+- `actionlint` 1.7.12 on ci.yml: clean. The job's two PowerShell steps parse with `pwsh`
+  7 on the Mac, and were run against a stand-in `Bellwether.exe` (a shell script writing a
+  log, and the fixture as the dump): the pass, the "no strip opened" warning and skip, and
+  the missing-line failure all behave.
+
+**What only a CI run on `windows-2025` can prove:** that `cargo check` and every cargo
+test pass on Windows (the static pass above found the Unix-only tests it could see; any
+other test that assumes Unix paths or programs will show in the first run, all at once
+with `--no-fail-fast`); that the test folder builds natively with MSVC; that the exe
+starts, opens strips, logs the tool-window and taskbar lines and quits (if the runner has
+a desktop); and that `--dump-desktop` writes a valid file.
+
+**What only the maintainer's PC can prove:** everything in the by-hand list below.
+
+**By hand (the maintainer, about 25 minutes, on the Windows 11 PC with two monitors).**
+Never on the installed app: the test folder has its own home and port and starts only the
+demo.
+
+Before you start: open the latest green `ci` run of this branch on GitHub, and under
+**Artifacts** download `bellwether-windows-test`. Right-click the zip > Properties > tick
+**Unblock** > OK, then Extract All, for example to `Downloads\bellwether-windows-test`.
+Open Windows Terminal in that folder. If Windows says it protected your PC when the app
+starts (it is unsigned), click More info > Run anyway.
+
+1. Press Win+R, type `winver`, Enter. Write down the version and OS build it shows (for
+   example "Version 24H2 (OS Build 26100.4652)"). Then in Settings > System > Display,
+   set one monitor to 100% and the other to 150% (Scale). Run `.\run-test.cmd`. The demo
+   flock appears on both monitors, the sheep's feet on the taskbar's top edge. Take a
+   screenshot of each monitor's bottom edge (Win+Shift+S, then paste into Paint and save).
+2. Settings > Personalization > Taskbar > Taskbar behaviors: turn **Show my taskbar on
+   all displays** on, then off. Each time, each monitor's strip moves to the taskbar's
+   top edge (or the screen's bottom, where there is no taskbar) within 2 seconds.
+3. In the same place turn **Automatically hide the taskbar** on: the strips drop to the
+   screens' bottom edges within 2 seconds. Turn it off again: they come back up.
+4. Change the second monitor's scale (for example 150% to 125%, then back) while it runs:
+   its strip fits again within 2 seconds, the sheep the right size, standing on the
+   taskbar.
+5. Move the mouse slowly across several sheep, on both monitors. Note any flash or
+   flicker of the strip.
+6. Press Win+Tab, click **New desktop**, switch to it. Is the strip there? Switch back.
+7. Play a video full screen (F11 in a browser, or a video's full-screen button) on the
+   second monitor. Note whether the strip shows over it (expected for now; W5 hides it).
+8. Win+Shift+S, drag a region over the strip: the sheep **are** in the capture.
+9. Quit the demo (the sheep icon in the notification area, which may be under ^, then
+   **Quit Bellwether**; or wait: it quits by itself after 30 minutes). Run
+   `.\run-test.cmd --dump-desktop desktop.json`. Attach `desktop.json` and
+   `home\shell.log` (there is no `brain.log` in W1: the demo starts no brain). Each demo
+   run starts a fresh `shell.log` (the run before is kept as `shell.previous.log`), so
+   attach the log of the run you are reporting on.
+
+The rest of W1's Done-when, in the same run (start `.\run-test.cmd` again if it was quit):
+
+10. Open Notepad and put its window partly behind a strip. Click in the strip's band away
+    from any sheep: the click reaches Notepad (or whatever is underneath).
+11. Type in Notepad, then click a sheep: it hops, and typing carries on in Notepad without
+    clicking it again (focus never moved). `home\shell.log` has `sprite clicked`.
+12. The strip is not in the taskbar, not in Alt-Tab (hold Alt, press Tab), and not in Task
+    View (Win+Tab).
+13. Leave it running 10 minutes. During that time press Win+D (and again), lock the screen
+    (Win+L) and unlock it, and maximise a window on the same monitor as a strip. Afterwards,
+    in `home\shell.log`, the `webview: heartbeat` lines keep coming every 10 s for each
+    strip, and no line says `silent`. If one does, the page was throttled: say so, with the
+    log.
+
+Send back: the winver text, the screenshots (step 1, step 8), notes for steps 2–7 and
+10–13, `desktop.json` and `home\shell.log`. Afterwards you can delete the folder and
+`%LOCALAPPDATA%\local.bellwether.p47491` (WebView2's files for the test build).
+
 ### W2. The brain and the CLI on Windows: real sessions
 
 Builds:
@@ -1056,7 +1228,13 @@ Builds:
   `WT_SESSION` ignored when `HERDR_PANE_ID` is present, the pipe-name check for
   `HERDR_SOCKET_PATH`, the herdr path fallback, focus through herdr's CLI (WD4);
 - `SetForegroundWindow` with `SW_RESTORE`, the flash fallback, the log lines;
-- fixtures from W1's `desktop.json` and new dumps; unit tests over them.
+- fixtures from W1's `desktop.json` and new dumps; unit tests over them;
+- the Windows log without macOS wording (BR-3K's W1 observation 3): today Windows logs
+  `dock: Accessibility not granted to this binary …`, `locator: … (AppleScript on: iTerm2
+  and Terminal may ask for Automation permission)` and the macOS strategy chain
+  (`herdr > iterm2 > terminal-app …`); on Windows these say what is true there (no
+  permission needed; the Windows chain, `locator.strategies` defaulting to the Windows
+  order).
 
 **Done when:**
 
@@ -1112,14 +1290,15 @@ Builds:
 
 - the Windows process-name reader and Windows rules in `sharing_warnings_for`;
 - the full-screen detector per monitor and `SHQueryUserNotificationState` (WD5);
-- `privacy.captureExclusion` defaulting to false on Windows (true on macOS, unchanged), the
-  effective value in doctor and the log, and `GetWindowDisplayAffinity` read back when it
-  is on;
-- `config.example.json` and the README note that the default differs by OS.
+- the effective `privacy.captureExclusion` in doctor, and `GetWindowDisplayAffinity` read
+  back when it is on (the per-OS default itself, false on Windows, its log line and
+  `config.example.json` without the key came forward to W1: deviation W1-10);
+- the README notes that the default differs by OS (when the README covers Windows).
 
 **Done when:**
 
-- with the defaults: Win+Shift+S over the strip shows the sheep;
+- with the defaults: Win+Shift+S over the strip shows the sheep (first checked in W1, step
+  8; here again with the W5 build);
 - Zoom sharing the whole screen: `CptHost.exe` hides the strip at once; it is back 2 s after
   sharing stops; the far side never sees it once sharing has started (the hide lands
   within one 500 ms poll; recorded in W5's status);
@@ -1479,4 +1658,131 @@ elsewhere still point here.
 Recorded by the developer while building W1–W10, in the macOS plan's form. Each one: what
 the plan said, what is true, and what was done.
 
-(None yet.)
+1. **Deviations in building milestone W1** (developer, 2026-10-19). Numbered W1-n, as the code cites them.
+
+- **W1-1, `icons/icon.ico`.** The plan expected the shell crate to need only `cfg(windows)`
+  stubs. `tauri-build` also refuses to build for Windows without `icons/icon.ico` (the
+  exe's resource icon), so the whole-workspace check could never have passed. Made from
+  `icons/icon.png` with the pinned CLI's `tauri icon` (only the `.ico` kept). The
+  notification-area icon is still the macOS template sheep, drawn in black, and may be
+  hard to see on a dark taskbar; W7's colour `.ico` is separate.
+- **W1-2, the tool-window style is kept, not set once.** WD2 says to add
+  `WS_EX_TOOLWINDOW` through the HWND after the window is built. tao 0.37.1 rewrites the
+  whole extended style (`SetWindowLongW(GWL_EXSTYLE, …)` from its own flags) whenever a
+  window flag changes: click-through on and off, show, hide (`window_state.rs`,
+  `apply_diff`). A style set once would be gone at the first toggle. `win.rs` installs a
+  window subclass that adds `WS_EX_TOOLWINDOW` (and removes `WS_EX_APPWINDOW`) in every
+  `WM_STYLECHANGING` for the extended style, then sets it once.
+- **W1-3, the test folder's port and home are set by `run-test.cmd`, not compiled in.**
+  WD12 5 describes a build "with a compile-time test port and scratch home". In W1 the
+  folder runs only the demo, which starts no brain and reaches no CLI command
+  (`run-test.cmd` always passes `--demo` first, which dispatch.rs gives to the app). The exe
+  runs in the repository layout: `run-test.cmd` sets `BELLWETHER_AGENT_DIR` to the folder
+  (its `config.json`, port 47491, and `pets\`) and `BELLWETHER_HOME` to `home\` beside it,
+  and clears the other `BELLWETHER_*` variables. Started any other way (a double-click on
+  the exe) it finds no checkout and exits. The compile-time port and home, and the refusal
+  of `hooks install` without `--settings`, come with W2, which puts the brain and the CLI
+  in the folder. The `--dump-desktop` switch for a release-profile exe is a new cargo
+  feature, `test-build`, which only `scripts/build-windows-test.mjs` turns on (tested).
+  The plan names the CI artifact `bellwether-windows-test.zip`; the job uploads the folder
+  and GitHub serves it as that zip.
+- **W1-4, the desktop file's shape.** The data model's `desktop.json` used the key
+  `windows` twice (the OS version and the window list). The version is under `os`
+  (`version` from the registry's `CurrentMajorVersionNumber.Minor.CurrentBuildNumber.UBR`,
+  `displayVersion` such as `24H2`). Rectangles are `[left, top, right, bottom]` in
+  physical pixels. Each monitor also has `strip` (where the strip would stand), and each
+  window `topmost`. The herdr subcommand word for `herdr.exe` processes is not in W1's
+  file: it needs the process's command line, which the W3 code reads (PEB); W3 adds it.
+- **W1-5, `--demo-monitors`.** `--demo` showed its flock on the primary monitor only, and
+  W1's Done-when wants it on every monitor. A new flag (with `--demo`) opens a strip on
+  every monitor and gives each the whole demo flock; `run-test.cmd` passes it. `--demo`
+  alone is unchanged, on macOS too.
+- **W1-6, the heartbeat is its own flag.** The page already had a heartbeat, but only
+  under `BELLWETHER_SHELL_TRACE` (a line a second, among every other trace line).
+  `--heartbeat` logs one line every 10 s per strip with what a throttled page would show
+  (ticks that arrived, the longest gap), and the shell itself notices and logs a silence.
+- **W1-7, the cargo tests on Windows.** W1's Done-when has `npm run test:cargo` passing on
+  Windows. Tests that can't run there are compiled out with `#[cfg(unix)]` and a comment
+  each: the launchctl stand-ins and every test using them (agent.rs, brain.rs), symlinks
+  (migration.rs, onboarding.rs's CLI link, tester_m7.rs), a FIFO (settings.rs), Unix
+  permission bits (tester_m7.rs), `/bin/sleep` and `/bin/echo` (legacy.rs), `/usr/bin/true`
+  (toapp.rs), and the integration files about launchd, LaunchAgents and migrate
+  (brain_version.rs, migration_fixtures.rs, no_launchagents.rs), four more toapp.rs tests
+  found by the VM run (W1-11), and the development CLI's
+  home rule (dev_home.rs, until W2 brings the CLI to Windows). On the Mac they all still
+  run. This was a static pass: the first CI run may find more, so the job runs with
+  `--no-fail-fast`. The job checks out with LF line endings (`core.autocrlf false`):
+  several tests read their own source, and the fixtures and pinned pets compare bytes.
+- **W1-8, `sys.rs`.** The shell called `libc::getuid`, `getppid` and `kill` outside any
+  `cfg`, which doesn't compile for Windows. They go through `sys::uid`, `parent_pid`,
+  `alive` and `terminate`, exactly the libc calls on Unix. On Windows they are stand-ins
+  until the milestone that needs them (uid 0 until W3's SID check; no parent pid and no
+  liveness until W2; no stop until W6's tokened stop), so `shell stop` and `autostart
+  uninstall` can't stop a strip on Windows yet. Neither is usable there before W6.
+- **W1-9, compiling here.** The plan says the Mac has the Windows target installed. It
+  does, but `cargo check --target x86_64-pc-windows-msvc` of the whole workspace stops at
+  `ring`'s C build (no Windows headers; CI's existing cross-check covers only core and
+  brain). cargo-xwin and Homebrew's LLVM and LLD were installed on the Mac to check and
+  link (docs/DEVELOPMENT.md, "Windows (in progress)").
+- **W1-11, no exe name with "install", "setup", "update" or "patch"** (the VM run,
+  2026-10-20). Windows' installer detection asks for elevation before it runs an exe whose
+  name contains one of those words, so `crates/core/tests/installer.rs` (an exe,
+  `installer-<hash>.exe`, like every test target there) never ran: "The requested
+  operation requires elevation (os error 740)". Renamed `crates/core/tests/hook_vectors.rs`
+  (references in test/hooks.test.mjs and test/DIVERGENCES.md updated; the history in
+  DISTRIBUTION-PLAN.md keeps the old name). **Naming rule from now on:** no cargo test
+  target, binary or package name may contain `install`, `setup`, `update` or `patch` (any
+  case); `test/windows.test.mjs` fails if one does. Shipped installers (Tauri's
+  `-setup.exe`) are meant to ask, and are not test targets. The same run found five more
+  failures, handled so:
+  - `onboarding::tests::the_preview_is_the_clis_diff_masked_and_install_applies_exactly_it`
+    asserted the backup path contains `backups/settings-`; on Windows it is
+    `backups\settings-…`, which is right. The assertion now checks the path's parts (its
+    folder is `backups`, its name starts `settings-`) on every OS. Fixed, not skipped.
+  - Four `toapp` tests (`a_run_killed_between_the_plist_moves_is_recovered_by_a_rerun_or_an_undo`,
+    `one_migration_at_a_time`, `undo_quits_the_strip_before_the_old_agents_start`,
+    `the_swap_marker_is_there_only_during_step_4`, and their helper `AppIsMe`) are
+    `#[cfg(unix)]`: `migrate --to-app` moves LaunchAgents plists and takes an `flock`,
+    macOS only, and is never reached on Windows (as W1-7).
+- **W1-12, the re-fit after a scale change is deferred** (BR-3K's W1 verdict, finding 1).
+  The `ScaleFactorChanged` handler called `run_on_main_thread`, which in
+  tauri-runtime-wry 2.12.1 runs the closure at once when called on the main thread
+  (`send_user_message`). The handler runs inside tao's `WM_DPICHANGED` handling, whose
+  `SetWindowPos` (Windows' suggested rectangle) comes after it, so the re-fit was
+  overwritten and only the 2 s re-read fixed the strip, while the log said "re-fitting".
+  Tauri's event gives the new size by value, so it can't be written back. Now the handler
+  posts the re-fit from another thread, 50 ms later, which queues it for a later turn of
+  the event loop. The log says what happens: `strip-1: scale changed to 1.25; Windows
+  resizes it to <w>x<h>; it is put back to its frame after that`, then `strip-1: moved
+  after a scale change: x … physical px at scale 1.25` when the frame differed. The pure
+  part, `PhysRect::matches` (what the re-fit and the 2 s re-read compare), has a test
+  with Windows' kind of suggestion. Whether the deferred re-fit beats the 2 s re-read on a
+  real scale change is by-hand step 4; the re-read stays as the backstop.
+- **W1-13, a failed `--dump-desktop` says why** (BR-3K finding 2).
+  `run-test.cmd --dump-desktop Z:\nope\x.json` said "Could not write" and exited 0, and
+  nothing said why: `start /wait` on a GUI exe loses its stderr. The exe now logs every
+  outcome of `--dump-desktop` to shell.log (`--dump-desktop: cannot write …: <error>`, or
+  `--dump-desktop: wrote …`), and run-test.cmd exits with the exe's code (1 if the file
+  is missing) and prints the log's `--dump-desktop:` lines.
+- **W1-14, a fresh log per run** (BR-3K's observation). shell.log appends across runs, so
+  an attached log held old runs too. Each `run-test.cmd` demo run now moves the old log to
+  `home\shell.previous.log` first; the folder's README says so. A dump adds its lines to
+  the current log.
+- **W1-10, capture exclusion off by default on Windows, brought forward from W5**
+  (maintainer's run, 2026-10-20). The plan put the per-OS default of
+  `privacy.captureExclusion` in W5, but W1's by-hand step 8 expects the sheep in
+  Win+Shift+S captures. The maintainer ran the W1 test folder in a Windows 11 ARM64
+  Parallels VM (the x64 build under emulation): placement, drag, clicks and the heartbeat
+  looked right, but the sheep were missing from screenshots, with `strip-0: capture
+  exclusion on (sharingType none)` in the log. Two causes: the shell defaulted the key to
+  true on every OS, and `config.example.json`, which the test folder's `config.json` is
+  made from, set it to `true` explicitly. Now `privacy::capture_exclusion` (pure, tested on
+  the Mac) gives config.json's boolean when there is one, on any OS, and otherwise the OS's
+  default: false on Windows, true on macOS (unchanged) and elsewhere. The key is gone from
+  `config.example.json` so each OS gets its default (macOS behaviour is the same: absent
+  means true there). The log line says the value and why: `privacy: capture exclusion off
+  (the Windows default; privacy.captureExclusion: true turns it on), hide while sharing …`
+  or `… on (privacy.captureExclusion in config.json) …`; the strip's own line names
+  `WDA_EXCLUDEFROMCAPTURE` on Windows. W5 keeps the doctor line and the affinity read-back.
+  The W1 run was in a VM on ARM64, not on the planned x64 PC with two monitors, so the
+  by-hand list still stands for that PC.

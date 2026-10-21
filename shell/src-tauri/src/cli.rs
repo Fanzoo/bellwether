@@ -330,7 +330,7 @@ pub fn is_app_mode(args: &str) -> bool {
 /// this process or the ones that started it.
 fn own_strips() -> Vec<i32> {
     let me = std::process::id() as i32;
-    let parent = unsafe { libc::getppid() };
+    let parent = crate::sys::parent_pid();
     crate::identity::bundle_processes().into_iter().filter(|(pid, _, a)| *pid != me && *pid != parent && is_app_mode(a)).map(|(p, _, _)| p).collect()
 }
 
@@ -338,13 +338,13 @@ fn own_strips() -> Vec<i32> {
 /// strip quits as from the menu: it stops a brain it started. Returns (pid, stopped).
 fn stop_strips(strips: &[i32]) -> Vec<(i32, bool)> {
     for pid in strips {
-        unsafe { libc::kill(*pid, libc::SIGTERM) };
+        crate::sys::terminate(*pid);
     }
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while std::time::Instant::now() < deadline && strips.iter().any(|p| unsafe { libc::kill(*p, 0) } == 0) {
+    while std::time::Instant::now() < deadline && strips.iter().any(|p| crate::sys::alive(*p)) {
         std::thread::sleep(Duration::from_millis(100));
     }
-    strips.iter().map(|p| (*p, unsafe { libc::kill(*p, 0) } != 0)).collect()
+    strips.iter().map(|p| (*p, !crate::sys::alive(*p))).collect()
 }
 
 /// After `uninstall --write`: SIGTERM to this bundle's running strip (when the app item
@@ -368,7 +368,7 @@ pub(crate) fn stop_own_instances(app_removed: bool) {
 /// process but `--action` runs. Never this process or the ones that started it.
 pub(crate) fn stragglers(app_removed: bool) -> Vec<String> {
     let me = std::process::id() as i32;
-    let parent = unsafe { libc::getppid() };
+    let parent = crate::sys::parent_pid();
     std::thread::sleep(Duration::from_millis(300));
     let mut out = Vec::new();
     for (pid, ppid, args) in crate::identity::bundle_processes().into_iter().filter(|(pid, _, _)| *pid != me && *pid != parent) {
@@ -504,7 +504,7 @@ pub(crate) fn start_strip(bundle: &Path, restart: bool) -> Result<String, (Strin
         let fresh: Vec<i32> = own_strips().into_iter().filter(|p| !quit.contains(p)).collect();
         if let Some(&pid) = fresh.first() {
             std::thread::sleep(Duration::from_millis(1500));
-            if unsafe { libc::kill(pid, 0) } == 0 {
+            if crate::sys::alive(pid) {
                 return Ok(format!("{} the strip (pid {pid}); it starts a brain of its own only if none answers", if restart { "restarted" } else { "started" }));
             }
             quit.push(pid);
@@ -1089,7 +1089,7 @@ mod tests {
         assert!(start_failure(b, &[]).contains("no strip of it is running after 10 s"));
         let src = include_str!("cli.rs");
         let body = src.split("fn start_strip(").nth(1).unwrap().split("\nfn ").next().unwrap();
-        assert!(body.find("libc::kill(pid, 0)").unwrap() < body.find("Ok(format!(\"{} the strip (pid {pid})").unwrap(), "alive is checked before success is said");
+        assert!(body.find("crate::sys::alive(pid)").unwrap() < body.find("Ok(format!(\"{} the strip (pid {pid})").unwrap(), "alive is checked before success is said");
         assert_eq!(command_result("shell", &s(&["start", "--dev"])).unwrap_err().1, exit::BAD_CONFIG);
     }
 

@@ -52,7 +52,7 @@ pub trait Launchd {
 }
 
 fn uid() -> u32 {
-    unsafe { libc::getuid() }
+    crate::sys::uid()
 }
 
 /// The real launchd, for this bundle's own label only.
@@ -344,6 +344,7 @@ pub fn doctor_suffix(theirs: &str, ours: &str, pid: i64, label: Option<&str>, ow
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     /// A stand-in launchctl: `print` answers launchd's pid for the label from `$dir/agent-pid`
@@ -352,6 +353,7 @@ pub(crate) mod tests {
     /// unless `$dir/stuck` exists, one at `$dir/new-version`. The "brain" is the health
     /// closure below (`$dir/version`, `$dir/pid`); what a pid runs is `$dir/exe-<pid>`
     /// ("deleted", or a path), this bundle's executable when there is no such file.
+    #[cfg(unix)]
     const FAKE: &str = r#"#!/bin/sh
 D="$(dirname "$0")"
 echo "$*" >> "$D/launchctl.log"
@@ -368,13 +370,16 @@ esac
 exit 64
 "#;
 
+    #[cfg(unix)]
     pub const THIS: &str = "/x/Applications/Bellwether.app/Contents/MacOS/Bellwether";
     const COPY: &str = "/x/Downloads/Bellwether.app/Contents/MacOS/Bellwether";
 
+    #[cfg(unix)]
     pub struct World {
         pub dir: PathBuf,
     }
 
+    #[cfg(unix)]
     impl World {
         pub fn new(name: &str, version: &str, pid: i32, agent_pid: Option<i32>) -> World {
             let dir = std::env::temp_dir().join(format!("bw-agent-{name}-{}", std::process::id()));
@@ -421,6 +426,7 @@ exit 64
         }
     }
 
+    #[cfg(unix)]
     impl Drop for World {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
@@ -428,8 +434,11 @@ exit 64
     }
 
     pub const OURS: &str = "0.2.0-rc.3";
+    #[cfg(unix)]
     const SHORT: Duration = Duration::from_millis(400);
 
+    // A shell-script launchctl stand-in: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn an_older_agent_brain_is_restarted_and_answers_with_the_apps_version() {
         let w = World::new("older", "0.2.0-rc.2", 4001, Some(4001));
@@ -445,6 +454,8 @@ exit 64
         assert!(matches!(reconcile(&mut w.check(), &mut w.health(), OURS), Outcome::Restarted { .. }));
     }
 
+    // A shell-script launchctl stand-in: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn after_an_update_the_agents_deleted_executable_still_counts_as_this_installs() {
         // Jeff's case: the update deleted the old bundle under the running agent.
@@ -455,6 +466,8 @@ exit 64
         assert_eq!(w.kickstarts(), 1);
     }
 
+    // A shell-script launchctl stand-in: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn another_copy_of_the_app_never_restarts_the_installed_agent() {
         // This strip is a copy elsewhere (Downloads, an opened DMG) with the same id; the
@@ -480,6 +493,8 @@ exit 64
         assert_eq!(o.notice(OURS), None);
     }
 
+    // A shell-script launchctl stand-in: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn the_same_version_is_left_alone_and_launchd_is_not_even_asked() {
         let w = World::new("same", OURS, 4001, Some(4001));
@@ -487,6 +502,8 @@ exit 64
         assert!(w.calls().is_empty(), "{:?}", w.calls());
     }
 
+    // A shell-script launchctl stand-in: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn a_brain_that_isnt_the_apps_agent_is_never_restarted() {
         // launchd runs the agent as another pid (a dev brain or a legacy agent's holds the port).
@@ -521,6 +538,8 @@ exit 64
         assert_eq!(w.kickstarts(), 0);
     }
 
+    // A shell-script launchctl stand-in: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn a_restart_that_doesnt_take_is_tried_a_bounded_number_of_times_then_said() {
         let w = World::new("stuck", "0.2.0-rc.2", 4001, Some(4001));
@@ -543,6 +562,8 @@ exit 64
         assert!(o.log_line(47999, OURS).contains("launchctl said: Could not kickstart"));
     }
 
+    // A shell-script launchctl stand-in: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn the_stand_in_only_under_a_temp_home_and_never_launchctl_itself() {
         assert_eq!(choose(true, None), Ok(None));

@@ -167,6 +167,8 @@ fn pet_select_refuses_names_that_could_escape_and_writes_nothing() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+// A symlink to /dev/null: Unix only (Windows plan W1).
+#[cfg(unix)]
 #[test]
 fn a_symlinked_pet_source_or_unreadable_one_is_a_message_not_a_panic() {
     let base = temp("petsrc");
@@ -192,6 +194,8 @@ fn a_repository_layout_never_makes_a_token_or_writes_config() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+// Unix permission bits: Unix only; the Windows ACL check is W2's.
+#[cfg(unix)]
 #[test]
 fn an_unwritable_settings_dir_fails_with_a_cause_and_leaves_the_file_and_no_backup() {
     use std::os::unix::fs::PermissionsExt;

@@ -74,7 +74,6 @@
           ]
         },
         "privacy": {
-          "captureExclusion": true,
           "hideWhenSharing": true,
           "sharingProcesses": {
             "darwin": [
@@ -716,7 +715,6 @@
           ]
         },
         "privacy": {
-          "captureExclusion": true,
           "hideWhenSharing": true,
           "sharingProcesses": {
             "darwin": [
@@ -823,7 +821,6 @@
           "slotWidthPx": 110
         },
         "privacy": {
-          "captureExclusion": true,
           "hideWhenSharing": true,
           "sharingProcesses": {
             "darwin": [

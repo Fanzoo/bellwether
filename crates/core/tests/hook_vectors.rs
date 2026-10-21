@@ -6,6 +6,10 @@
 //! One vector differs on purpose (test/DIVERGENCES.md): "exotic numbers, escapes and
 //! integer-like keys", where `JSON.parse` moves the keys "1" and "2" first and the port
 //! keeps file order.
+//!
+//! Named `hook_vectors`, not `installer`: Windows asks for elevation before running an exe
+//! whose name has "install", "setup", "update" or "patch" in it (Windows plan, deviation
+//! W1-11), and every test target is an exe there.
 
 use std::path::{Path, PathBuf};
 

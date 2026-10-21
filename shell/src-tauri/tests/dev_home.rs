@@ -4,6 +4,8 @@
 //! a copy inside a scratch `Bellwether.app`, reached through a symlink as Homebrew's is,
 //! uses the app's home without it. Temp HOMEs only: nothing here reads or writes the real
 //! Application Support, and no brain is left running.
+// Unix process and symlink calls; the CLI on Windows is W2's, which runs these checks there.
+#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

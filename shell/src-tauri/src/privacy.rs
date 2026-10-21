@@ -25,9 +25,44 @@ pub fn sharing_match(running: &[String], wanted: &[String]) -> Option<String> {
     running.iter().find(|n| wanted.iter().any(|w| !w.is_empty() && w.eq_ignore_ascii_case(n))).cloned()
 }
 
+/// This build's platform name, as `privacy.sharingProcesses` spells it.
+pub fn os_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "darwin"
+    } else if cfg!(windows) {
+        "win32"
+    } else {
+        "linux"
+    }
+}
+
+/// `privacy.captureExclusion` when config.json doesn't set it: on everywhere but Windows.
+/// On Windows it hides the sheep from the user's own screenshots too, so it is an opt-in
+/// there (Windows plan WD5, the maintainer's decision Q9, 2026-10-20). macOS keeps what it
+/// has always shipped.
+pub fn capture_exclusion_default(os: &str) -> bool {
+    os != "win32"
+}
+
+/// Whether the strips are left out of screen captures, and why: config.json's
+/// `privacy.captureExclusion` when it is a boolean (on any OS), else this OS's default.
+pub fn capture_exclusion(config: &Value, os: &str) -> (bool, String) {
+    match config.pointer("/privacy/captureExclusion").and_then(Value::as_bool) {
+        Some(v) => (v, "privacy.captureExclusion in config.json".into()),
+        None => {
+            let why = match os {
+                "darwin" => "the macOS default",
+                "win32" => "the Windows default; privacy.captureExclusion: true turns it on",
+                _ => "the default",
+            };
+            (capture_exclusion_default(os), why.into())
+        }
+    }
+}
+
 /// The names from `privacy.sharingProcesses` for this OS.
 pub fn wanted_names(config: &Value) -> Vec<String> {
-    let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(windows) { "win32" } else { "linux" };
+    let os = os_name();
     config
         .pointer(&format!("/privacy/sharingProcesses/{os}"))
         .and_then(Value::as_array)
@@ -38,8 +73,7 @@ pub fn wanted_names(config: &Value) -> Vec<String> {
 /// Why each `privacy.sharingProcesses` entry for this OS can never match (empty if all
 /// can). The same rules as brain/privacy.mjs, which `bellwether doctor` uses.
 pub fn sharing_warnings(config: &Value) -> Vec<String> {
-    let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(windows) { "win32" } else { "linux" };
-    sharing_warnings_for(config, os)
+    sharing_warnings_for(config, os_name())
 }
 
 /// The same rules for one platform's list (`darwin`, `win32`, `linux`), as
@@ -158,6 +192,8 @@ fn proc_name(pid: i32) -> Option<String> {
 /// The process list, cheaply: one call for the pids, and a name lookup only for pids
 /// not seen before (about 700 lookups a poll cost ~0.3% CPU, measured). Everything is
 /// looked up afresh every 10 s, in case a pid was reused.
+// Read on macOS only until W5 (a Toolhelp snapshot on Windows).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Default)]
 pub struct ProcessNames {
     names: std::collections::HashMap<i32, Option<String>>,
@@ -187,6 +223,28 @@ impl ProcessNames {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_exclusion_defaults_off_on_windows_only_and_config_wins_everywhere() {
+        let none = serde_json::json!({"privacy": {"hideWhenSharing": true}});
+        assert_eq!(capture_exclusion(&none, "darwin"), (true, "the macOS default".into()), "macOS unchanged");
+        assert_eq!(capture_exclusion(&none, "win32"), (false, "the Windows default; privacy.captureExclusion: true turns it on".into()), "Windows: the sheep stay in his screenshots (Q9)");
+        assert_eq!(capture_exclusion(&serde_json::json!({}), "linux"), (true, "the default".into()));
+        for os in ["darwin", "win32", "linux"] {
+            for v in [true, false] {
+                let c = serde_json::json!({"privacy": {"captureExclusion": v}});
+                assert_eq!(capture_exclusion(&c, os), (v, "privacy.captureExclusion in config.json".into()), "{os} {v}");
+            }
+            // Not a boolean: the OS's default, as an absent key.
+            let odd = serde_json::json!({"privacy": {"captureExclusion": "yes"}});
+            assert_eq!(capture_exclusion(&odd, os).0, capture_exclusion_default(os));
+        }
+        // The example config doesn't set it, so a copy of it gets each OS's default.
+        let example: Value = serde_json::from_str(include_str!("../../../config.example.json")).unwrap();
+        assert_eq!(example.pointer("/privacy/captureExclusion"), None);
+        assert!(!capture_exclusion(&example, "win32").0 && capture_exclusion(&example, "darwin").0);
+        assert_eq!(os_name(), if cfg!(target_os = "macos") { "darwin" } else if cfg!(windows) { "win32" } else { "linux" });
+    }
 
     #[test]
     fn sharing_names_match_whole_and_case_insensitively() {

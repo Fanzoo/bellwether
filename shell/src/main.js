@@ -1271,6 +1271,7 @@ async function boot() {
     setInterval(() => log(`trace: heartbeat ${++beats}, ${sprites.size} sprites, page ${document.visibilityState}`), 1000);
     document.addEventListener('visibilitychange', () => log(`trace: visibility -> ${document.visibilityState}`));
   }
+  if (display.heartbeat) heartbeat();
   follow();
   if (display.demoDrag) demoDrag();
   if (display.snapshotAfterMs) setTimeout(snapshots, display.snapshotAfterMs);
@@ -1278,6 +1279,31 @@ async function boot() {
     let n = 0;
     setInterval(() => snapshots(`t${String(++n).padStart(2, '0')}`), display.snapshotEveryMs);
   }
+}
+
+/**
+ * `--heartbeat` (Windows plan W1, risk WR1): a 1 s timer, and every 10 s a line saying how
+ * many of its ticks arrived and the longest gap between two. A throttled page shows fewer
+ * ticks and long gaps; a suspended one goes silent, which the shell logs.
+ */
+function heartbeat() {
+  let n = 0;
+  let ticks = 0;
+  let longest = 0;
+  let last = performance.now();
+  let since = last;
+  setInterval(() => {
+    const now = performance.now();
+    ticks += 1;
+    longest = Math.max(longest, now - last);
+    last = now;
+    if (now - since >= 10000) {
+      log(`heartbeat ${++n}: ${ticks} ticks in ${((now - since) / 1000).toFixed(1)} s, longest gap ${Math.round(longest)} ms, page ${document.visibilityState}, ${sprites.size} sprites`);
+      ticks = 0;
+      longest = 0;
+      since = now;
+    }
+  }, 1000);
 }
 
 /**

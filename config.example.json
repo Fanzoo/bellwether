@@ -51,7 +51,6 @@
     "redactPatterns": ["(?i)(token|secret|password|api[_-]?key)=\\S+"]
   },
   "privacy": {
-    "captureExclusion": true,
     "hideWhenSharing": true,
     "sharingProcesses": {
       "darwin": ["CptHost", "zoom.us Screen Share"],

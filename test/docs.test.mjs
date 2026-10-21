@@ -59,8 +59,9 @@ describe('repository setup', () => {
     assert.match(r, /desktopPet[\s\S]*eSheep/);
     assert.match(r, /never committed or bundled/);
     assert.doesNotMatch(r, /agents\/bellwether|PLAN\.md|hub `\.env`|hub-root/);
-    // the developer doc names the repository's own docs/DISTRIBUTION-PLAN.md, never a hub's
-    assert.doesNotMatch(read('docs', 'DEVELOPMENT.md'), /agents\/bellwether|(?<!DISTRIBUTION-)PLAN\.md|hub `\.env`|hub-root/);
+    // the developer doc names the repository's own docs/DISTRIBUTION-PLAN.md and
+    // docs/WINDOWS-PLAN.md, never a hub's
+    assert.doesNotMatch(read('docs', 'DEVELOPMENT.md'), /agents\/bellwether|(?<!DISTRIBUTION-|WINDOWS-)PLAN\.md|hub `\.env`|hub-root/);
   });
   test('the README is for the installed app: the cask or the DMG, the setup window, the CLI on PATH; the checkout, Node and the old name are in docs/DEVELOPMENT.md', () => {
     const r = read('README.md');

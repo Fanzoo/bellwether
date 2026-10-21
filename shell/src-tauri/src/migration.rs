@@ -455,6 +455,7 @@ pub fn command(args: &[String]) -> Result<i32, (String, i32)> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     fn release() -> AppBuild {
         AppBuild::Release
     }
@@ -483,6 +484,8 @@ mod tests {
         assert!(matches!(this_build(), AppBuild::NotTheApp(_)));
     }
 
+    // Symlinks and shell-script stand-ins: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn the_real_machine_only_for_the_real_home_and_never_from_a_test() {
         assert_eq!(choose(true, false, None, None, None, release), Ok(Kind::Real));

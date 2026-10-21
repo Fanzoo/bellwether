@@ -259,6 +259,8 @@ mod tests {
     /// `hook-token` is a FIFO nobody writes to, so opening it blocks: the token file must be
     /// read only when the environment has no token. (A test that only checked the answer
     /// passed even with the read moved above the early return.)
+    // A FIFO: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn the_token_file_is_read_only_when_the_environment_has_no_token() {
         let dir = std::env::temp_dir().join(format!("bellwether-lazy-{}", std::process::id()));

@@ -395,6 +395,7 @@ mod tests {
 
     /// A brain on a free port whose /health is the agent test world's files (version, pid),
     /// so the stand-in launchctl's "restart" changes what it answers. Anything else: 503.
+    #[cfg(unix)]
     fn world_brain(dir: std::path::PathBuf) -> u16 {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -419,6 +420,8 @@ mod tests {
         port
     }
 
+    // The launchctl stand-in is a shell script: Unix only (Windows plan W1).
+    #[cfg(unix)]
     fn wired(w: &crate::agent::tests::World) -> (BrainConfig, std::sync::mpsc::Receiver<String>) {
         let (tx, rx) = std::sync::mpsc::channel();
         let tx = Mutex::new(tx);
@@ -439,6 +442,8 @@ mod tests {
     /// Deviation 135, the path that failed for the maintainer: the strip's brain thread
     /// (`run`) checks the version before anything else, restarts this app's agent, and
     /// hands a restart that doesn't take to the tray (`notify`). A no-op check fails this.
+    // The launchctl stand-in is a shell script: Unix only (Windows plan W1).
+    #[cfg(unix)]
     #[test]
     fn the_brain_thread_restarts_an_old_agent_and_tells_the_tray_when_it_cant() {
         use crate::agent::tests::World;

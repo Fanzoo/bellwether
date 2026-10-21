@@ -9,6 +9,8 @@
 //! System Settings on screen), the Automation actions (Apple Events), and the strip (a
 //! window). The strip's startup check is `bellwether_brain::legacy::scan_here`, which
 //! only reads (legacy.rs, `scanning_only_reads`; tray.rs, its test).
+// LaunchAgents: macOS only (Windows plan W1).
+#![cfg(unix)]
 
 use std::collections::BTreeMap;
 use std::os::unix::process::CommandExt;

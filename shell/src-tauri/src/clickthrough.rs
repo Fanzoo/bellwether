@@ -139,7 +139,8 @@ impl Drag {
     }
 }
 
-/// One strip window's frame, in global logical points (top-left origin).
+/// One strip window's frame, in the desktop space (`desktop::Space`: global logical
+/// points on macOS, physical pixels on Windows), top-left origin.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StripFrame {
     pub label: String,
@@ -148,6 +149,8 @@ pub struct StripFrame {
     pub y: f64,
     pub w: f64,
     pub h: f64,
+    /// Desktop units per logical pixel of this strip: 1 on macOS, its scale on Windows.
+    pub per_logical: f64,
 }
 
 /// The cursor on the strip of the monitor under it.
@@ -174,14 +177,15 @@ pub fn window_points(physical: (f64, f64), window_scale: f64) -> (f64, f64) {
     cursor_points(physical, window_scale)
 }
 
-/// The monitor under a point (global logical points), and that point in its strip window.
-/// The monitor wins however the monitors are arranged; None when the point is on no
-/// monitor, or on one that has no strip.
+/// The monitor under a point (the desktop space), and that point in its strip window's
+/// logical pixels. The monitor wins however the monitors are arranged; None when the point
+/// is on no monitor, or on one that has no strip.
 pub fn locate_cursor(at: (f64, f64), monitors: &[crate::locator::Monitor], strips: &[StripFrame]) -> Option<CursorAt> {
     let (x, y) = at;
     let m = monitors.iter().find(|m| x >= m.rect.x && x < m.rect.x + m.rect.w && y >= m.rect.y && y < m.rect.y + m.rect.h)?;
     let s = strips.iter().find(|s| s.monitor == m.name)?;
-    Some(CursorAt { label: s.label.clone(), monitor: m.name.clone(), x: x - s.x, y: y - s.y, w: s.w })
+    let per = crate::desktop::sane(s.per_logical);
+    Some(CursorAt { label: s.label.clone(), monitor: m.name.clone(), x: (x - s.x) / per, y: (y - s.y) / per, w: s.w / per })
 }
 
 /// Whether any mouse button is down, from the window server's combined session state.
@@ -208,16 +212,17 @@ pub struct Screens {
     pub now: Mutex<(Vec<crate::locator::Monitor>, f64)>,
 }
 
-/// The strip windows' frames now, in global logical points.
+/// The strip windows' frames now, in the desktop space.
 pub fn strip_frames<R: Runtime>(app: &AppHandle<R>) -> Vec<StripFrame> {
+    let space = crate::desktop::Space::NATIVE;
     let by_monitor = app.state::<crate::strips::Strips>().by_monitor.lock().unwrap().clone();
     by_monitor
         .into_iter()
         .filter_map(|(monitor, label)| {
             let w = app.get_webview_window(&label)?;
             let (p, sz, sc) = (w.outer_position().ok()?, w.outer_size().ok()?, w.scale_factor().ok()?);
-            let (x, y) = window_points((p.x as f64, p.y as f64), sc);
-            Some(StripFrame { label, monitor, x, y, w: sz.width as f64 / sc, h: sz.height as f64 / sc })
+            let r = space.rect((p.x as f64, p.y as f64), (sz.width as f64, sz.height as f64), sc);
+            Some(StripFrame { label, monitor, x: r.x, y: r.y, w: r.w, h: r.h, per_logical: space.per_logical(sc) })
         })
         .collect()
 }
@@ -226,7 +231,7 @@ pub fn strip_frames<R: Runtime>(app: &AppHandle<R>) -> Vec<StripFrame> {
 pub fn cursor_now<R: Runtime>(app: &AppHandle<R>) -> Option<CursorAt> {
     let c = app.cursor_position().ok()?;
     let (monitors, scale) = app.state::<Screens>().now.lock().unwrap().clone();
-    locate_cursor(cursor_points((c.x, c.y), scale), &monitors, &strip_frames(app))
+    locate_cursor(crate::desktop::Space::NATIVE.cursor((c.x, c.y), scale), &monitors, &strip_frames(app))
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -304,7 +309,8 @@ pub fn run<R: Runtime>(app: AppHandle<R>, fade_radius: f64, demo_drag: bool) {
         let hold = drag.hold.lock().unwrap().clone();
         fast |= hold.is_some();
         let (monitors, primary_scale) = app.state::<Screens>().now.lock().unwrap().clone();
-        let point = cursor_points((cursor.x, cursor.y), if primary_scale > 0.0 { primary_scale } else { 0.0 });
+        let space = crate::desktop::Space::NATIVE;
+        let point = space.cursor((cursor.x, cursor.y), if primary_scale > 0.0 { primary_scale } else { 0.0 });
         for (label, window) in app.webview_windows() {
             // Only strips are click-through; the onboarding window is a normal window.
             if !crate::strips::is_strip(&label) {
@@ -312,13 +318,16 @@ pub fn run<R: Runtime>(app: AppHandle<R>, fade_radius: f64, demo_drag: bool) {
             }
             let Ok(pos) = window.outer_position() else { continue };
             let Ok(scale) = window.scale_factor() else { continue };
-            // The cursor in the window's logical pixels. tao gives the cursor at the primary
-            // monitor's scale and the window at its own, so each is made logical by its own
-            // (until the primary's scale is known, the window's: the same on one monitor).
-            let (cx, cy) = if primary_scale > 0.0 { point } else { cursor_points((cursor.x, cursor.y), scale) };
-            let (wx, wy) = window_points((pos.x as f64, pos.y as f64), scale);
-            let x = cx - wx;
-            let y = cy - wy;
+            // The cursor in the window's logical pixels. On macOS tao gives the cursor at the
+            // primary monitor's scale and the window at its own, so each is made logical by
+            // its own (until the primary's scale is known, the window's: the same on one
+            // monitor). On Windows both are physical: the difference is divided by the
+            // window's scale (WD3).
+            let (cx, cy) = if primary_scale > 0.0 || space == crate::desktop::Space::Physical { point } else { cursor_points((cursor.x, cursor.y), scale) };
+            let (wx, wy) = space.point((pos.x as f64, pos.y as f64), scale);
+            let per = space.per_logical(scale);
+            let x = (cx - wx) / per;
+            let y = (cy - wy) / per;
             if let Some(b) = boxes.get(&label) {
                 close.extend(near(b, x, y, fade_radius));
                 let ids = over(b, x, y);
@@ -465,7 +474,7 @@ mod tests {
         crate::locator::Monitor { name: name.into(), rect: crate::locator::Rect { x, y, w, h }, primary: name == "Built-in" }
     }
     fn strip(label: &str, monitor: &str, x: f64, y: f64, w: f64) -> StripFrame {
-        StripFrame { label: label.into(), monitor: monitor.into(), x, y, w, h: 140.0 }
+        StripFrame { label: label.into(), monitor: monitor.into(), x, y, w, h: 140.0, per_logical: 1.0 }
     }
 
     #[test]
@@ -514,6 +523,66 @@ mod tests {
         let at = locate_cursor(cursor_points((1828.0, 1350.0), 1.0), &monitors, &[strip("strip-1", "DELL", 1728.0, 1300.0, 2560.0)]).unwrap();
         assert_eq!((at.x, at.y), (100.0, 50.0));
         assert_eq!(cursor_points((10.0, 10.0), 0.0), (10.0, 10.0), "an unknown scale counts as 1");
+    }
+
+    // Windows (WD3): the physical desktop space. Monitors, strips and the cursor are
+    // physical pixels of one virtual screen; only the offset inside a strip is divided, by
+    // that strip's own scale.
+    fn wstrip(label: &str, monitor: &str, r: crate::desktop::PhysRect, scale: f64) -> StripFrame {
+        StripFrame { label: label.into(), monitor: monitor.into(), x: r.x as f64, y: r.y as f64, w: r.w as f64, h: r.h as f64, per_logical: scale }
+    }
+    fn wmon(name: &str, x: f64, y: f64, w: f64, h: f64, primary: bool) -> crate::locator::Monitor {
+        crate::locator::Monitor { name: name.into(), rect: crate::locator::Rect { x, y, w, h }, primary }
+    }
+    fn on(work: (i32, i32, u32, u32), scale: f64) -> crate::desktop::PhysRect {
+        crate::desktop::physical_strip_rect(crate::desktop::PhysRect { x: work.0, y: work.1, w: work.2, h: work.3 }, scale, 140.0)
+    }
+
+    #[test]
+    fn windows_side_by_side_at_100_and_150_percent() {
+        let space = crate::desktop::Space::Physical;
+        let monitors = [wmon("\\\\.\\DISPLAY1", 0.0, 0.0, 1920.0, 1080.0, true), wmon("\\\\.\\DISPLAY2", 1920.0, 0.0, 3840.0, 2160.0, false)];
+        let (one, two) = (on((0, 0, 1920, 1032), 1.0), on((1920, 0, 3840, 2088), 1.5));
+        assert_eq!((two.x, two.y, two.w, two.h), (1920, 1878, 3840, 210));
+        let strips = [wstrip("strip-0", &monitors[0].name, one, 1.0), wstrip("strip-1", &monitors[1].name, two, 1.5)];
+        // 150 physical px into the second strip, 75 down: 100 x 50 of its CSS pixels.
+        let at = locate_cursor(space.cursor((2070.0, 1953.0), 1.0), &monitors, &strips).unwrap();
+        assert_eq!((at.label.as_str(), at.x, at.y, at.w), ("strip-1", 100.0, 50.0, 2560.0));
+        let at = locate_cursor(space.cursor((100.0, 950.0), 1.0), &monitors, &strips).unwrap();
+        assert_eq!((at.label.as_str(), at.x, at.y, at.w), ("strip-0", 100.0, 58.0, 1920.0));
+        // The cursor on the 150% monitor's left edge is not on the 100% one (the macOS maths
+        // would have folded it to x 1280, inside the primary).
+        assert_eq!(locate_cursor((1920.0, 1900.0), &monitors, &strips).unwrap().label, "strip-1");
+        assert_eq!(locate_cursor((1919.0, 1000.0), &monitors, &strips).unwrap().label, "strip-0");
+        // Below the shorter monitor, beside the taller one: on no monitor.
+        assert_eq!(locate_cursor((100.0, 1500.0), &monitors, &strips), None);
+    }
+
+    #[test]
+    fn windows_stacked_by_the_monitor_not_by_x() {
+        // A 150% monitor above the primary, overlapping it in x.
+        let monitors = [wmon("A", 0.0, 0.0, 1920.0, 1080.0, true), wmon("B", -400.0, -2160.0, 3840.0, 2160.0, false)];
+        let strips = [wstrip("strip-0", "A", on((0, 0, 1920, 1032), 1.0), 1.0), wstrip("strip-1", "B", on((-400, -2160, 3840, 2088), 1.5), 1.5)];
+        let at = locate_cursor((500.0, -150.0), &monitors, &strips).unwrap();
+        // Strip B: y from -282 (2088 - 210 - 2160); 900 px right of its left edge.
+        assert_eq!((at.label.as_str(), at.x, at.y), ("strip-1", 600.0, 88.0));
+        let at = locate_cursor((500.0, 1000.0), &monitors, &strips).unwrap();
+        assert_eq!((at.label.as_str(), at.x, at.y), ("strip-0", 500.0, 108.0));
+    }
+
+    #[test]
+    fn windows_a_175_percent_monitor_left_of_the_primary_at_negative_x() {
+        let monitors = [wmon("P", 0.0, 0.0, 1920.0, 1080.0, true), wmon("L", -2560.0, 0.0, 2560.0, 1440.0, false), wmon("R", 1920.0, 0.0, 3840.0, 2160.0, false)];
+        let l = on((-2560, 0, 2560, 1356), 1.75);
+        assert_eq!((l.x, l.y, l.h), (-2560, 1111, 245));
+        let strips = [wstrip("strip-0", "P", on((0, 0, 1920, 1032), 1.0), 1.0), wstrip("strip-1", "L", l, 1.75), wstrip("strip-2", "R", on((1920, 0, 3840, 2088), 1.5), 1.5)];
+        // 350 physical px right of L's left edge, 70 down: 200 x 40 CSS px at 175%.
+        let at = locate_cursor((-2210.0, 1181.0), &monitors, &strips).unwrap();
+        assert_eq!((at.label.as_str(), at.x, at.y), ("strip-1", 200.0, 40.0));
+        assert!((at.w - 2560.0 / 1.75).abs() < 1e-9);
+        assert_eq!(locate_cursor((-1.0, 1200.0), &monitors, &strips).unwrap().label, "strip-1");
+        assert_eq!(locate_cursor((0.0, 1000.0), &monitors, &strips).unwrap().label, "strip-0");
+        assert_eq!(locate_cursor((5000.0, 2000.0), &monitors, &strips).unwrap().label, "strip-2");
     }
 
     #[test]

@@ -15,6 +15,8 @@
 //!   login items' `register` starts this binary's `serve` on the same port as the app's
 //!   brain agent would, and `unregister` stops that pid. Every pid is tracked and stopped
 //!   at the end, each after checking what it runs.
+// `migrate` and its shell-script stand-ins: macOS only (Windows plan: no Windows legacy to migrate).
+#![cfg(unix)]
 
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;

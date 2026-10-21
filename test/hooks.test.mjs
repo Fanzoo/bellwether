@@ -383,7 +383,7 @@ describe('every installer vector through the CLI (milestone 4: the Rust preview 
   };
   // The exotic vector is the one intended difference (test/DIVERGENCES.md): JSON.parse
   // moves its integer-like keys first, and the Rust brain keeps file order. Its preview and
-  // bytes are pinned by crates/core/tests/installer.rs.
+  // bytes are pinned by crates/core/tests/hook_vectors.rs.
   const same = (v) => v.group !== 'exotic';
   for (const v of vectors.cases) {
     test(`hooks install previews ${v.name} as Node does; install then uninstall ${v.roundTrip ? 'gives back the original bytes' : "gives back Node's bytes"}`, () => {

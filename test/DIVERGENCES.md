@@ -213,7 +213,7 @@ file mentions, went with the Node brain). This file is history: no new entries.
   writes them, so an escape such as `\/` or `\u00e9` in a settings file is rewritten as
   `/` or `é` by both brains (decided in milestone 4: the preview stays Node's, and only the
   key order differs).
-- **Pinned by:** `crates/core/tests/installer.rs` (the exotic vector: the keys stay `b`,
+- **Pinned by:** `crates/core/tests/hook_vectors.rs` (the exotic vector: the keys stay `b`,
   `2`, `1`, and after install and uninstall only the escaped string's line differs from the
   original); `test/hooks.test.mjs`, "every installer vector through the CLI"; the
   differential's `json` area counts such cases as explained only when reading Rust's

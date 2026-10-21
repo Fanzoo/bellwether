@@ -1703,6 +1703,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    // /usr/bin/true: Unix only (Windows plan W1); --to-app is macOS only.
+    #[cfg(unix)]
     #[test]
     fn a_new_brain_that_never_answers_puts_the_old_setup_back() {
         let base = temp("rollback");
@@ -1738,6 +1740,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    // `migrate --to-app` is macOS only (LaunchAgents, launchd, flock); Windows plan W1-7.
+    #[cfg(unix)]
     #[test]
     fn the_swap_marker_is_there_only_during_step_4() {
         let base = temp("marker");
@@ -1866,6 +1870,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    // `migrate --to-app` is macOS only (LaunchAgents, launchd, flock); Windows plan W1-7.
+    #[cfg(unix)]
     #[test]
     fn one_migration_at_a_time() {
         let base = temp("lock");
@@ -1932,7 +1938,9 @@ mod tests {
     }
 
     /// A recorder whose `app_agent` is this process: an in-process brain plays the app's agent.
+    #[cfg(unix)]
     struct AppIsMe(Rec);
+    #[cfg(unix)]
     impl Host for AppIsMe {
         fn acts(&self) -> bool { true }
         fn domain(&self) -> String { self.0.domain() }
@@ -1952,6 +1960,8 @@ mod tests {
     /// are booted out, the record says only `swap: started`, the brain plist sits in legacy/
     /// and the shell plist is still in LaunchAgents. The rerun finds the repository through the
     /// moved plist (its token and port) and finishes; undo, run instead, puts both back.
+    // `migrate --to-app` is macOS only (LaunchAgents, launchd, flock); Windows plan W1-7.
+    #[cfg(unix)]
     #[test]
     fn a_run_killed_between_the_plist_moves_is_recovered_by_a_rerun_or_an_undo() {
         let sim = |name: &str| -> (PathBuf, Options, u16) {
@@ -2212,6 +2222,8 @@ mod tests {
     /// Undo from the CLI quits the app's strip once its login items are unregistered and
     /// before the old agents start (they bring their own): never two strips. Not when the
     /// login items couldn't be unregistered (the app is still the setup).
+    // `migrate --to-app` is macOS only (LaunchAgents, launchd, flock); Windows plan W1-7.
+    #[cfg(unix)]
     #[test]
     fn undo_quits_the_strip_before_the_old_agents_start() {
         let base = temp("undo-quits");

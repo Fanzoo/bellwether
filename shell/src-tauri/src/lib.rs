@@ -18,7 +18,10 @@ pub mod login_items;
 pub mod migration;
 pub mod onboarding;
 mod ax;
+mod desktop;
 mod dock;
+mod dump;
+mod heartbeat;
 mod locator;
 mod log;
 mod placement;
@@ -26,8 +29,11 @@ mod privacy;
 mod signals;
 mod settings;
 mod strips;
+mod sys;
 mod tray;
 mod updater;
+#[cfg(windows)]
+mod win;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -118,6 +124,10 @@ struct Shared {
     snapshot_every: Option<f64>,
     /// Debug only (`--demo --demo-drag`): the strip runs a scripted drag (D10).
     demo_drag: bool,
+    /// `--demo --demo-monitors` (Windows plan W1): every strip shows the whole demo flock.
+    demo_everywhere: bool,
+    /// `--heartbeat` (W1, WR1): each page logs a heartbeat; the shell notices a silence.
+    heartbeat: Option<std::sync::Mutex<heartbeat::Beats>>,
 }
 
 #[derive(Serialize)]
@@ -223,6 +233,7 @@ fn get_pet(shared: tauri::State<'_, Shared>) -> Result<PetPayload, String> {
         "snapshotAfterMs": shared.snapshot.as_ref().map(|(_, secs)| secs * 1000.0),
         "snapshotEveryMs": shared.snapshot.as_ref().and(shared.snapshot_every).map(|secs| secs * 1000.0),
         "demoDrag": shared.demo_drag,
+        "heartbeat": shared.heartbeat.is_some(),
     });
     let overlays = bundled_overlays(&folder);
     Ok(PetPayload { folder, xml, animation_map, overlays, display })
@@ -237,6 +248,7 @@ async fn get_snapshot(
     brain: tauri::State<'_, Arc<Brain>>,
     places: tauri::State<'_, Arc<std::sync::Mutex<Places>>>,
     strips: tauri::State<'_, strips::Strips>,
+    shared: tauri::State<'_, Shared>,
 ) -> Result<Option<Value>, String> {
     let brain = brain.inner().clone();
     let b2 = brain.clone();
@@ -249,7 +261,8 @@ async fn get_snapshot(
     strips.ready.lock().unwrap().insert(window.label().to_string());
     let snap = snap.map(|s| {
         let p = places.lock().unwrap();
-        let mine = strips.monitor_of(window.label()).unwrap_or_else(|| p.primary.clone());
+        // `--demo-monitors`: every strip draws the whole demo flock, as the primary's does.
+        let mine = if shared.demo_everywhere { p.primary.clone() } else { strips.monitor_of(window.label()).unwrap_or_else(|| p.primary.clone()) };
         let open: std::collections::HashSet<String> = strips.by_monitor.lock().unwrap().keys().cloned().collect();
         let mut v = placement::view_for(&s, &mine, &p.primary, &p.placed, &open, &p.book, &p.dropped);
         if v.get("shell").is_some() {
@@ -442,9 +455,14 @@ fn sprite_drag(
 
 /// One line from the webview into the shell's log (pet warnings, sheep arriving).
 #[tauri::command]
-fn shell_log(line: String, app: tauri::AppHandle, shared: tauri::State<'_, Shared>) {
+fn shell_log(line: String, window: tauri::WebviewWindow, app: tauri::AppHandle, shared: tauri::State<'_, Shared>) {
     let line: String = line.chars().filter(|c| !c.is_control()).take(500).collect();
     log(&format!("webview: {line}"));
+    if let (Some(beats), true) = (&shared.heartbeat, line.starts_with("heartbeat ")) {
+        if let Some(back) = beats.lock().unwrap().beat(window.label(), std::time::Instant::now()) {
+            log(&back);
+        }
+    }
     if shared.selftest {
         println!("{line}");
         if line.starts_with("selftest: done") {
@@ -511,6 +529,10 @@ struct Flags {
     demo: bool,
     /// With --demo: a scripted drag through the strip's own state machine (D10).
     demo_drag: bool,
+    /// With --demo: a strip on every monitor, each showing the demo flock (Windows plan W1).
+    demo_monitors: bool,
+    /// The WebView2 throttling measure (W1): a heartbeat in the log from every strip.
+    heartbeat: bool,
     /// Open the onboarding window now (`open -b <id> --args --onboarding`).
     onboarding: bool,
     /// Debug: locate one terminal (the snapshot's `terminal` object as JSON), print
@@ -530,6 +552,8 @@ fn flags() -> Flags {
         selftest: args.iter().any(|a| a == "--selftest"),
         demo: args.iter().any(|a| a == "--demo"),
         demo_drag: args.iter().any(|a| a == "--demo") && args.iter().any(|a| a == "--demo-drag"),
+        demo_monitors: args.iter().any(|a| a == "--demo") && args.iter().any(|a| a == "--demo-monitors"),
+        heartbeat: args.iter().any(|a| a == "--heartbeat"),
         onboarding: args.iter().any(|a| a == "--onboarding"),
         locate: value("--locate"),
     }
@@ -553,6 +577,18 @@ pub fn run() {
         });
         std::process::exit(0);
     }
+    // `--dump-desktop <file>` (Windows plan WD12): what this PC looks like, then quit.
+    // Development and test builds only; nothing of the app starts.
+    if let Some(i) = argv.iter().position(|a| a == "--dump-desktop") {
+        // Its outcome goes to shell.log too: a GUI-subsystem exe started by `start /wait`
+        // (run-test.cmd) has no stderr anyone sees.
+        let settings = Settings::load().ok();
+        if let Some(s) = &settings {
+            log::init(s.log_file.clone());
+        }
+        let height = settings.map(|s| s.f64_at("/strip/heightPx", 140.0)).unwrap_or(140.0);
+        std::process::exit(dump::run(argv.get(i + 1).map(String::as_str), height));
+    }
     let flags = flags();
     let settings = match Settings::load() {
         Ok(s) => s,
@@ -565,6 +601,9 @@ pub fn run() {
     match &settings.agent_dir {
         Some(dir) => log(&format!("starting: repository layout, agent dir {}, data {}, brain on 127.0.0.1:{}", dir.display(), settings.data_dir.display(), settings.port)),
         None => log(&format!("starting: Bellwether {}, app data {}, brain on 127.0.0.1:{}", bellwether_brain::VERSION, settings.data_dir.display(), settings.port)),
+    }
+    if desktop::Space::NATIVE == desktop::Space::Physical {
+        log("desktop space: physical pixels (per-monitor DPI v2); strips stand on each monitor's work area, re-read every 2 s");
     }
 
     let brain = Brain::new();
@@ -588,12 +627,15 @@ pub fn run() {
         snapshot: flags.snapshot.clone().map(|p| (p, flags.snapshot_after)),
         snapshot_every: flags.snapshot_every,
         demo_drag: flags.demo_drag,
+        demo_everywhere: flags.demo_monitors,
+        heartbeat: flags.heartbeat.then(|| std::sync::Mutex::new(heartbeat::Beats::default())),
     };
-    let capture_exclusion = settings.config.pointer("/privacy/captureExclusion").and_then(Value::as_bool).unwrap_or(true);
+    // Per OS (Windows plan WD5, Q9): off by default on Windows, on on macOS; config wins.
+    let (capture_exclusion, capture_why) = privacy::capture_exclusion(&settings.config, privacy::os_name());
     let hide_when_sharing = settings.config.pointer("/privacy/hideWhenSharing").and_then(Value::as_bool).unwrap_or(true);
     let sharing_names = if hide_when_sharing { privacy::wanted_names(&settings.config) } else { Vec::new() };
     log(&format!(
-        "privacy: capture exclusion {}, hide while sharing {} ({})",
+        "privacy: capture exclusion {} ({capture_why}), hide while sharing {} ({})",
         if capture_exclusion { "on" } else { "off" },
         if hide_when_sharing { "on" } else { "off" },
         if sharing_names.is_empty() { "no process names".to_string() } else { sharing_names.join(", ") }
@@ -759,6 +801,24 @@ pub fn run() {
             brain_for_setup.update_view(|v| v.show_labels = kept.show_labels);
             let index = app.state::<strips::Strips>().next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             strips::open(&handle, &monitor, strip_height, index, capture_exclusion, kept.hidden)?;
+            if flags.demo_monitors {
+                // A strip on every other monitor too, each with the whole demo flock.
+                let primary = strips::monitor_name(&monitor);
+                for other in app.available_monitors()?.into_iter().filter(|m| strips::monitor_name(m) != primary) {
+                    let index = app.state::<strips::Strips>().next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    strips::open(&handle, &other, strip_height, index, capture_exclusion, kept.hidden)?;
+                }
+            }
+            if flags.heartbeat {
+                log(&format!("--heartbeat: every strip's page logs a heartbeat every 10 s; a silence of {} s is logged (WebView2 throttling, WR1)", heartbeat::SILENCE.as_secs()));
+                let h = handle.clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(Duration::from_secs(5));
+                    let live: Vec<String> = h.state::<strips::Strips>().by_monitor.lock().unwrap().values().cloned().collect();
+                    let lines = h.state::<Shared>().heartbeat.as_ref().map(|b| b.lock().unwrap().check(std::time::Instant::now(), &live)).unwrap_or_default();
+                    lines.iter().for_each(|l| log(l));
+                });
+            }
             if open_onboarding {
                 onboarding::open(&handle);
             }
@@ -928,7 +988,10 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
                 brain.update_view(|v| v.dock = extents);
             }
             let fresh = dock::read_prefs();
-            if fresh != dock || now.duration_since(last_follow) >= std::time::Duration::from_secs(10) {
+            // Windows: no Dock settings to watch; the work areas are re-read every 2 s, so a
+            // taskbar that moves, auto-hides or changes size is followed (WD1).
+            let every_check = desktop::Space::NATIVE == desktop::Space::Physical;
+            if every_check || fresh != dock || now.duration_since(last_follow) >= std::time::Duration::from_secs(10) {
                 if fresh != dock {
                     log(&format!("dock settings changed: autohide {}, {:?}", fresh.autohide, fresh.side));
                 }
@@ -1024,7 +1087,7 @@ fn make_locator(config: &Value) -> locator::Locator {
     locator::Locator::new(
         Arc::new(locator::RealRunner),
         Arc::new(locator::RealWindows),
-        locator::Settings { strategies, herdr_path, apple_script, uid: unsafe { libc::getuid() } },
+        locator::Settings { strategies, herdr_path, apple_script, uid: sys::uid() },
         Box::new(|m| log(m)),
     )
 }
@@ -1073,25 +1136,23 @@ fn monitors_main(app: &tauri::AppHandle) -> Vec<locator::Monitor> {
     rx.recv_timeout(Duration::from_secs(1)).unwrap_or_default()
 }
 
-/// The connected monitors, in global points (top-left origin), as the window list
-/// uses. Main thread only (see `monitors_main`).
+/// The connected monitors, in the desktop space (global points on macOS, as the window
+/// list uses; physical pixels on Windows), top-left origin. Main thread only (see `monitors_main`).
 fn monitors_of(app: &tauri::AppHandle) -> Vec<locator::Monitor> {
     let primary = app.primary_monitor().ok().flatten().map(|m| strips::monitor_name(&m));
     let all = app.available_monitors().unwrap_or_else(|e| {
         log(&format!("warning: could not list the monitors ({e})"));
         Vec::new()
     });
+    let space = desktop::Space::NATIVE;
     all
         .iter()
         .map(|m| {
             let sc = m.scale_factor();
             let (p, s) = (m.position(), m.size());
             let name = strips::monitor_name(m);
-            locator::Monitor {
-                primary: Some(&name) == primary.as_ref(),
-                rect: locator::Rect { x: p.x as f64 / sc, y: p.y as f64 / sc, w: s.width as f64 / sc, h: s.height as f64 / sc },
-                name,
-            }
+            let r = space.rect((p.x as f64, p.y as f64), (s.width as f64, s.height as f64), sc);
+            locator::Monitor { primary: Some(&name) == primary.as_ref(), rect: locator::Rect { x: r.x, y: r.y, w: r.w, h: r.h }, name }
         })
         .collect()
 }

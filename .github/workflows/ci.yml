@@ -1,6 +1,7 @@
 # The test suite against the Rust brain, the cargo tests, the cross-platform check
-# (distribution plan, milestones 2 and 11) and an unsigned universal app with its release
-# files (milestone 9, plan D7).
+# (distribution plan, milestones 2 and 11), an unsigned universal app with its release
+# files (milestone 9, plan D7), and Windows (Windows plan W1): the whole workspace checked
+# and tested on windows-2025, and the test folder the maintainer checks by hand.
 #
 # Needs no secrets: nothing here signs with a Developer ID, notarizes or publishes, no job
 # names an environment, and the token has read access only, so a pull request from a fork
@@ -160,3 +161,87 @@ jobs:
       # The platform-neutral crates only (plan D1): the brain's logic and its server.
       - name: cargo check -p bellwether-core -p bellwether-brain
         run: cargo check --manifest-path shell/src-tauri/Cargo.toml -p bellwether-core -p bellwether-brain --all-targets --target ${{ matrix.target }}
+
+  windows:
+    name: Windows (windows-2025) - workspace check, cargo tests, the test folder
+    # Pinned, as release.yml pins macos-15 (Windows plan, Stack).
+    runs-on: windows-2025
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The runner's git turns LF into CRLF on checkout; the source-reading tests, the
+      # fixtures and the pinned pets compare bytes, so the checkout keeps the repository's.
+      - name: Check out with LF line endings
+        run: git config --global core.autocrlf false && git config --global core.eol lf
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Rust toolchain (release.yml's), the Windows target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target x86_64-pc-windows-msvc
+          rustup default 1.99.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            shell/src-tauri/target-dev
+          key: cargo-windows-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+      - name: cargo check, the whole workspace, every target
+        run: cargo check --locked --manifest-path shell/src-tauri/Cargo.toml --workspace --all-targets
+      # Every failure in one run, not just the first crate's.
+      - name: npm run test:cargo
+        run: npm run test:cargo -- --no-fail-fast
+      - name: The test folder (unsigned; --features test-build; Windows plan WD12)
+        run: node scripts/build-windows-test.mjs
+      # The demo flock with a scratch home on the test port, for 25 s. A runner without an
+      # interactive desktop opens no strip: then this says so as a warning and is skipped,
+      # never passed (WD12 4).
+      - name: Smoke run, run-test.cmd's demo with a scratch home
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $dir = "shell/src-tauri/target-dev/windows-test/bellwether-windows-test"
+          $bwhome = Join-Path $env:RUNNER_TEMP "bw-smoke"
+          New-Item -ItemType Directory -Force $bwhome | Out-Null
+          $env:BELLWETHER_AGENT_DIR = (Resolve-Path $dir).Path
+          $env:BELLWETHER_HOME = $bwhome
+          $p = Start-Process -FilePath "$dir/Bellwether.exe" -ArgumentList "--demo","--demo-monitors","--heartbeat","--quit-after","25" -PassThru -Wait
+          $log = Join-Path $bwhome "shell.log"
+          $text = if (Test-Path $log) { Get-Content -Raw $log } else { "" }
+          Write-Output "exit code $($p.ExitCode)"
+          Write-Output $text
+          if ($text -notmatch "strip strip-0 on monitor") {
+            Write-Output "::warning title=Windows smoke run skipped::no strip opened (no interactive desktop on this runner?); exit code $($p.ExitCode). The maintainer's by-hand checks cover it."
+            exit 0
+          }
+          foreach ($want in @("a tool window \(WS_EX_TOOLWINDOW", "taskbar on monitor", "--quit-after reached")) {
+            if ($text -notmatch $want) { Write-Output "::error::the log has no line matching '$want'"; exit 1 }
+          }
+          if ($text -notmatch "webview: heartbeat 1:") { Write-Output "::warning::no heartbeat from the page in 25 s (WebView2 throttled on the runner, or slow to start)" }
+      - name: --dump-desktop writes the desktop file (the test build answers it)
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $dir = "shell/src-tauri/target-dev/windows-test/bellwether-windows-test"
+          $out = Join-Path $env:RUNNER_TEMP "desktop.json"
+          $env:BELLWETHER_AGENT_DIR = (Resolve-Path $dir).Path
+          $env:BELLWETHER_HOME = Join-Path $env:RUNNER_TEMP "bw-dump"
+          $p = Start-Process -FilePath "$dir/Bellwether.exe" -ArgumentList "--dump-desktop","$out" -PassThru -Wait
+          if ($p.ExitCode -ne 0 -or -not (Test-Path $out)) { Write-Output "::error::--dump-desktop exited $($p.ExitCode)"; exit 1 }
+          $d = Get-Content -Raw $out | ConvertFrom-Json
+          Write-Output "os $($d.os.version) $($d.os.displayVersion); $($d.monitors.Count) monitor(s); $($d.processes.Count) processes; $($d.windows.Count) windows"
+          $d.monitors | ForEach-Object { Write-Output "  $($_.name) scale $($_.scale) rect $($_.rect -join ',') work $($_.work -join ',') taskbar $($_.taskbar) strip $($_.strip -join ',')" }
+          if ($d.version -ne 1) { exit 1 }
+      - name: Upload the test folder (bellwether-windows-test.zip)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bellwether-windows-test
+          path: shell/src-tauri/target-dev/windows-test/bellwether-windows-test
+          if-no-files-found: error
+          retention-days: 30

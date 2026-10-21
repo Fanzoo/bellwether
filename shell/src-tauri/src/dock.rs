@@ -17,6 +17,8 @@ pub struct Frame {
     pub h: f64,
 }
 
+// Only macOS reads a side; elsewhere the Dock is always the default.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Side {
     Bottom,
