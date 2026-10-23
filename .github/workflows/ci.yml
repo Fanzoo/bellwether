@@ -230,6 +230,8 @@ jobs:
           if ($LASTEXITCODE -ne 2) { Write-Output "::error::status with no brain should exit 2, got $LASTEXITCODE"; exit 1 }
           # The folder ships without a home or a token: the next steps' smoke runs, and the artifact, start clean.
           Remove-Item -Recurse -Force "$dir\home", "$dir\hooks.json"
+          # The expected exit 2 above would otherwise become this step's result.
+          $global:LASTEXITCODE = 0
       # The demo flock with a scratch home on the test port, for 25 s. A runner without an
       # interactive desktop opens no strip: then this says so as a warning and is skipped,
       # never passed (WD12 4).
