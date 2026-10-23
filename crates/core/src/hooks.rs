@@ -442,7 +442,7 @@ pub fn plan_edit(file: &Path, action: Action, port: u16, token: &str, data_dir: 
     let before = match &bytes {
         None => Lj::Obj(LObj::new()),
         Some(_) => {
-            let v = lossless::parse(&old_text).map_err(|e| ConfigError::new(format!("{} is not valid JSON ({e}). Fix it first; nothing was written.", file.display())))?;
+            let v = lossless::parse(lossless::split_bom(&old_text).1).map_err(|e| ConfigError::new(format!("{} is not valid JSON ({e}). Fix it first; nothing was written.", file.display())))?;
             if !v.is_obj() {
                 return Err(ConfigError::new(format!("{} does not hold a JSON object; nothing was written.", file.display())));
             }
@@ -459,7 +459,9 @@ pub fn plan_edit(file: &Path, action: Action, port: u16, token: &str, data_dir: 
     };
     assert_others_preserved(&before, &after, port)?;
     let changed = !deep_equal(&before, &after);
-    let new_text = if changed { lossless::serialise(&after, &old_text) } else { old_text.clone() };
+    // CRLF and the indent are the file's own (serialise); a BOM is kept too (W2).
+    let (bom, body) = lossless::split_bom(&old_text);
+    let new_text = if changed { format!("{bom}{}", lossless::serialise(&after, body)) } else { old_text.clone() };
     let record = match action {
         Action::Uninstall => None,
         Action::Install => {
@@ -478,7 +480,7 @@ pub fn plan_edit(file: &Path, action: Action, port: u16, token: &str, data_dir: 
             Some(Created { events, hooks })
         }
     };
-    let layout_kept = bytes.is_none() || lossless::serialise(&before, &old_text) == old_text;
+    let layout_kept = bytes.is_none() || format!("{bom}{}", lossless::serialise(&before, body)) == old_text;
     Ok(Plan {
         file: file.to_path_buf(),
         action,
@@ -520,9 +522,17 @@ pub fn apply_plan(plan: &mut Plan, backup_dir: &Path, data_dir: Option<&Path>, s
     let target = if plan.exists { std::fs::canonicalize(&plan.file).map_err(|e| fail(format!("cannot resolve {}: {}", plan.file.display(), io_code(&e))))? } else { plan.file.clone() };
     let mut backup = None;
     if plan.exists {
+        #[cfg(windows)]
+        let fresh = !backup_dir.exists();
         std::fs::create_dir_all(backup_dir).map_err(|e| fail(format!("cannot create {}: {}", backup_dir.display(), io_code(&e))))?;
+        // Windows (W2): the backups hold the token, so their folder is the user's only
+        // (acl.rs), as their 0600 is on Unix. Best effort; the backup file below is too.
+        #[cfg(windows)]
+        if fresh {
+            let _ = crate::acl::make_private(backup_dir, true);
+        }
         let b = backup_dir.join(format!("settings-{stamp}.json"));
-        write_new(&b, plan.original_bytes.as_deref().unwrap_or(&[]), 0o600).map_err(|e| fail(format!("cannot write the backup {}: {}", b.display(), io_code(&e))))?;
+        write_backup(&b, plan.original_bytes.as_deref().unwrap_or(&[])).map_err(|e| fail(format!("cannot write the backup {}: {}", b.display(), io_code(&e))))?;
         let now = std::fs::read(&target).map_err(|e| fail(format!("cannot read {}: {}", target.display(), io_code(&e))))?;
         if Some(sha256_hex(&now)) != plan.original_hash {
             return Err(fail(format!("{} changed while bellwether was editing it. Nothing was written; run the command again.", plan.file.display())));
@@ -535,10 +545,10 @@ pub fn apply_plan(plan: &mut Plan, backup_dir: &Path, data_dir: Option<&Path>, s
     let base = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = dir.join(format!(".{base}.bellwether-{}.tmp", std::process::id()));
     let _ = std::fs::remove_file(&tmp);
-    let written = write_new(&tmp, plan.new_text.as_bytes(), mode).and_then(|_| set_mode(&tmp, mode)).and_then(|_| std::fs::rename(&tmp, &target));
+    let written = write_new(&tmp, plan.new_text.as_bytes(), mode).and_then(|_| set_mode(&tmp, mode)).and_then(|_| crate::persist::replace_file(&tmp, &target));
     if let Err(e) = written {
         let _ = std::fs::remove_file(&tmp);
-        return Err(fail(format!("cannot write {}: {}", target.display(), io_code(&e))));
+        return Err(write_failure(&plan.file, &e, crate::persist::rename_is_transient(&e)));
     }
     // The settings file is written. From here on nothing may fail the command: a problem
     // with the advisory record becomes a warning.
@@ -593,6 +603,34 @@ fn write_new(p: &Path, bytes: &[u8], mode: u32) -> std::io::Result<()> {
     o.open(p)?.write_all(bytes)
 }
 
+/// Why the settings file couldn't be replaced, named by the path the user gave (not the
+/// resolved `\\?\C:\…` form Windows' canonicalize returns). `in_use`: Windows still
+/// refused after the retry (another program has it open; W2-15): exit 3, as the other
+/// "nothing was written" refusals, with what to do. Anything else stays exit 1.
+pub fn write_failure(file: &Path, e: &std::io::Error, in_use: bool) -> ConfigError {
+    if in_use {
+        return ConfigError { message: format!("{} is in use by another program (an editor, or a virus scan), so it wasn't changed. Close it there and run the command again", file.display()), code: BAD_CONFIG };
+    }
+    ConfigError { message: format!("cannot write {}: {}", file.display(), io_code(e)), code: UNEXPECTED }
+}
+
+/// A settings backup: a new file, 0600 on Unix; on Windows the user's only (a protected
+/// DACL, acl.rs) before anything is written to it (W2).
+fn write_backup(p: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    let mut f = o.open(p)?;
+    #[cfg(windows)]
+    let _ = crate::acl::make_private(p, false);
+    f.write_all(bytes)
+}
+
 /// `writeFileSync(p, bytes, { mode })`: created with `mode`, or truncated and rewritten.
 pub fn write_replace(p: &Path, bytes: &[u8], mode: u32) -> std::io::Result<()> {
     use std::io::Write;
@@ -616,6 +654,20 @@ pub fn bad_config(message: impl Into<String>) -> ConfigError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W2-15 (BR-3K's D2): a settings file another program still holds after the retry is
+    /// named as the user gave it, says what to do, and is exit 3; other failures stay exit 1.
+    #[test]
+    fn a_file_in_use_says_so_and_is_exit_3() {
+        let given = Path::new("C:\\Users\\me\\scratch.json");
+        let e = write_failure(given, &std::io::Error::from_raw_os_error(32), true);
+        assert_eq!(e.code, BAD_CONFIG);
+        assert!(e.message.starts_with("C:\\Users\\me\\scratch.json is in use by another program") && e.message.contains("run the command again"), "{}", e.message);
+        assert!(!e.message.contains("\\\\?\\") && !e.message.contains("EACCES"));
+        let other = write_failure(given, &std::io::Error::from(std::io::ErrorKind::NotFound), false);
+        assert_eq!(other.code, UNEXPECTED);
+        assert!(other.message.starts_with("cannot write C:\\Users\\me\\scratch.json"));
+    }
 
     const T: &str = "testTokenNotReal_abcdefghijklmnop";
 

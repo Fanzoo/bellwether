@@ -73,7 +73,8 @@ describe('webview surface', () => {
     assert.equal([...lib.matchAll(/\.plugin\(/g)].length, 2);
     assert.match(lib, /if updates_on \{\s*builder = builder\.plugin\(tauri_plugin_updater::Builder::new\(\)\.build\(\)\);\s*\}/);
     assert.equal(fs.readdirSync(path.join(TAURI, 'capabilities')).sort().join(), 'onboarding.json,strip.json');
-    for (const f of fs.readdirSync(path.join(TAURI, 'src'))) {
+    // Every source file, src/bin/ (the Windows console CLI, W2) included.
+    for (const f of fs.readdirSync(path.join(TAURI, 'src'), { recursive: true }).filter((n) => n.endsWith('.rs'))) {
       const s = read(path.join(TAURI, 'src', f));
       assert.doesNotMatch(s, /\beval_script\b|\bevaluate_script\b|\bopen_devtools\b|\bon_navigation\b|WebviewUrl::External/, `${f}`);
       // M5-1: with_webview is allowed in exactly one place (strips.rs), and only to hand the

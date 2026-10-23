@@ -220,6 +220,16 @@ pub fn deep_equal(a: &Lj, b: &Lj) -> bool {
 // ------------------------------------------------------------------ parse
 
 /// `parseLossless(text)`. The error says what was wrong and where.
+/// `text` and whether it starts with a UTF-8 byte order mark (U+FEFF), which the parser
+/// refuses: a settings.json saved by Notepad as "UTF-8 with BOM" has one. The installer and
+/// doctor read the text after it, and the installer writes it back (Windows plan W2).
+pub fn split_bom(text: &str) -> (&'static str, &str) {
+    match text.strip_prefix('\u{feff}') {
+        Some(rest) => ("\u{feff}", rest),
+        None => ("", text),
+    }
+}
+
 pub fn parse(text: &str) -> Result<Lj, String> {
     let mut p = Parser { s: text.as_bytes(), text, i: 0 };
     p.ws();

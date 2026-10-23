@@ -2,6 +2,7 @@
 //! parts of brain/*.mjs that need no network or runtime. crates/brain serves them over
 //! HTTP; the CLI and the conformance commands call them directly.
 
+pub mod acl;
 pub mod json;
 pub mod lossless;
 pub mod diff;
@@ -17,6 +18,7 @@ pub mod cliargs;
 pub mod envfile;
 pub mod mask;
 pub mod outfile;
+pub mod paths;
 pub mod persist;
 pub mod publisher;
 pub mod replay;

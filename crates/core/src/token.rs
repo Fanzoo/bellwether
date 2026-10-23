@@ -44,11 +44,14 @@ pub fn check(token: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// The token from the file alone: its first line, trimmed.
+/// The token from the file alone: its first line, trimmed, after a UTF-8 byte order mark
+/// if the file starts with one (Notepad, PowerShell 5.1's `Set-Content -Encoding UTF8`;
+/// W2-16). Every reader of the file goes through here: the brain, the strip, doctor and
+/// the CLI.
 pub fn read_file(home: &Path) -> Result<Option<String>, ConfigError> {
     let f = file(home);
     match std::fs::read_to_string(&f) {
-        Ok(text) => Ok(Some(text.lines().next().unwrap_or("").trim().to_string()).filter(|t| !t.is_empty())),
+        Ok(text) => Ok(Some(crate::lossless::split_bom(&text).1.lines().next().unwrap_or("").trim().to_string()).filter(|t| !t.is_empty())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(ConfigError::new(format!("no hook token: {} can't be read ({})", f.display(), io_code(&e)))),
     }
@@ -138,12 +141,27 @@ pub fn init(home: &Path, from: Option<&Path>, force: bool) -> Result<Init, Confi
         None => (generate()?, if unusable.is_some() { "a new hook token in place of the unusable one".to_string() } else { "a new hook token".to_string() }),
     };
     write(home, &token)?;
-    Ok(Init { changed: true, unusable: false, message: format!("wrote {what} to {} (mode 0600); the value isn't shown", f.display()) })
+    Ok(Init { changed: true, unusable: false, message: format!("wrote {what} to {} ({}); the value isn't shown", f.display(), crate::acl::PRIVATE) })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W2-16 (BR-3K's D3): a token file saved with a BOM and CRLF reads as the token.
+    #[test]
+    fn a_bom_and_crlf_around_the_token_are_not_part_of_it() {
+        let home = std::env::temp_dir().join(format!("bw-token-bom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(file(&home), "\u{feff}bomTokenNotReal_0123456789ab\r\n").unwrap();
+        assert_eq!(read_file(&home).unwrap().as_deref(), Some("bomTokenNotReal_0123456789ab"));
+        assert_eq!(read(&home, None).unwrap().0, "bomTokenNotReal_0123456789ab", "and it passes the check");
+        // A BOM alone is an empty file, as before.
+        std::fs::write(file(&home), "\u{feff}\r\n").unwrap();
+        assert_eq!(read_file(&home).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn generated_tokens_pass_the_check() {

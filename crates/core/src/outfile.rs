@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 use crate::config::{io_code, ConfigError};
 use crate::json::{self, Js};
 
-/// `~/.claude/settings.json`, from HOME.
+/// Claude Code's user settings file: `~/.claude/settings.json` (`%USERPROFILE%` on
+/// Windows), or in `CLAUDE_CONFIG_DIR` when that is set (paths.rs).
 pub fn user_settings() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".claude").join("settings.json")
+    crate::paths::user_settings()
 }
 
 fn lower_name(p: &Path) -> String {
@@ -30,7 +31,9 @@ pub fn is_claude_settings_path(p: &Path) -> bool {
         return true;
     }
     let norm = |x: &Path| std::fs::canonicalize(x).unwrap_or_else(|_| absolute(x));
-    norm(p) == norm(&user_settings())
+    // A CLAUDE_CONFIG_DIR of any name holds the user's settings too.
+    let in_config_dir = (base == "settings.json" || base == "settings.local.json") && p.parent().is_some_and(|d| norm(d) == norm(&crate::paths::claude_dir()));
+    in_config_dir || norm(p) == norm(&user_settings())
 }
 
 fn absolute(p: &Path) -> PathBuf {

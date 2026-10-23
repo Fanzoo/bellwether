@@ -13,17 +13,23 @@
  * The folder:
  *   Bellwether.exe   the unsigned release-profile exe with `--features test-build` (it
  *                    answers --dump-desktop; a release never does)
- *   run-test.cmd     the only way to start it: a scratch home beside it, the test port,
- *                    and `--demo`, so it never reads or writes %APPDATA%\Bellwether,
- *                    %USERPROFILE%\.claude or port 47417, and never reaches the CLI
+ *   bin\bellwether.exe   the console CLI (W2, WD7; `--features console-cli`), the same build
+ *   run-test.cmd     the only way to start the strip: a scratch home beside it, the test
+ *                    port, and `--demo`, or `--sessions` (W2: real Claude Code sessions,
+ *                    with the strip's own brain), so it never reads or writes
+ *                    %APPDATA%\Bellwether, %USERPROFILE%\.claude or port 47417
+ *   cli.cmd          the CLI with the same home and config: `.\cli doctor` (not
+ *                    bellwether.cmd: beside Bellwether.exe, `.\bellwether` runs the exe,
+ *                    since cmd tries .EXE before .CMD and NTFS ignores case)
  *   config.json      config.example.json on the test port (TEST_PORT)
  *   pets\<name>\animations.xml   Bellwether's own pets (checked against the pins compiled in)
  *   README.txt
  *
- * The exe runs in the repository layout (it is not inside an installed app): run-test.cmd
- * points BELLWETHER_AGENT_DIR at the folder and BELLWETHER_HOME at `home\` in it. A test
- * port and home compiled into the exe (the Windows form of build-app.mjs --test-port and
- * --test-home) come with W2, when the zip gets the brain and the CLI (deviation W1-3).
+ * The exes run in the repository layout (they are not inside an installed app): the two
+ * .cmd files point BELLWETHER_AGENT_DIR at the folder and BELLWETHER_HOME at `home\` in it
+ * (deviation W1-3). The test build itself refuses what would reach the live install
+ * (cli.rs `test_build_refusal`, deviation W2-2): `hooks install|uninstall`, `token rotate`
+ * and `migrate` without --settings, `autostart install|uninstall`, and port 47417.
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -51,12 +57,14 @@ export function testConfig(example, port = TEST_PORT) {
 export function runTestCmd(port = TEST_PORT) {
   const lines = [
     '@echo off',
-    'rem Bellwether test build (Windows plan W1). Never the installed app: a scratch home',
-    'rem beside this file, test port ' + port + ', and the demo flock (no brain, no hooks).',
+    'rem Bellwether test build (Windows plan W1, W2). Never the installed app: a scratch home',
+    'rem beside this file, test port ' + port + '.',
     '',
     'rem   run-test.cmd                           the demo flock on every monitor, with the',
     'rem                                          heartbeat in the log; quits after 30 minutes',
     'rem   run-test.cmd --quit-after 900          ... after 15 minutes instead',
+    'rem   run-test.cmd --sessions                real Claude Code sessions: the strip and its',
+    'rem                                          brain; then claude --settings hooks.json',
     'rem   run-test.cmd --dump-desktop desktop.json   the monitors and windows, as a file',
     'setlocal',
     'set "HERE=%~dp0"',
@@ -67,6 +75,7 @@ export function runTestCmd(port = TEST_PORT) {
     'set "BELLWETHER_HOOK_TOKEN="',
     'if not exist "%BELLWETHER_HOME%" mkdir "%BELLWETHER_HOME%"',
     'if /i "%~1"=="--dump-desktop" goto dump',
+    'if /i "%~1"=="--sessions" goto sessions',
     'rem Each run starts a fresh log; the one before is kept as shell.previous.log.',
     'if exist "%BELLWETHER_HOME%\\shell.log" move /y "%BELLWETHER_HOME%\\shell.log" "%BELLWETHER_HOME%\\shell.previous.log" >nul',
     'echo Starting the demo flock on every monitor (test port ' + port + ').',
@@ -74,6 +83,22 @@ export function runTestCmd(port = TEST_PORT) {
     'echo Quit: the sheep icon in the notification area (it may be under ^^), Quit Bellwether.',
     'start "" /wait "%HERE%Bellwether.exe" --demo --demo-monitors --heartbeat %* --quit-after 1800',
     'echo Stopped. Log: %BELLWETHER_HOME%\\shell.log',
+    'goto :eof',
+    ':sessions',
+    'rem The hook token (made once, kept in home\\hook-token), and the hooks as a file for',
+    'rem claude --settings: your own settings.json is never touched.',
+    'call "%HERE%cli.cmd" token init',
+    'if errorlevel 1 exit /b 1',
+    'call "%HERE%cli.cmd" hooks print --out "%HERE%hooks.json"',
+    'if errorlevel 1 exit /b 1',
+    'if exist "%BELLWETHER_HOME%\\shell.log" move /y "%BELLWETHER_HOME%\\shell.log" "%BELLWETHER_HOME%\\shell.previous.log" >nul',
+    'echo Starting the strip and its brain for real sessions (test port ' + port + ').',
+    'echo In another terminal (a Windows Terminal tab, or a herdr pane), start Claude Code with:',
+    'echo   claude --settings "%HERE%hooks.json"',
+    'echo Logs: %BELLWETHER_HOME%\\shell.log and %BELLWETHER_HOME%\\logs\\brain.log',
+    'echo Quit: the sheep icon in the notification area (it may be under ^^), Quit Bellwether.',
+    'start "" /wait "%HERE%Bellwether.exe"',
+    'echo Stopped. Logs: %BELLWETHER_HOME%\\shell.log and %BELLWETHER_HOME%\\logs\\brain.log',
     'goto :eof',
     ':dump',
     'if "%~2"=="" (',
@@ -98,6 +123,27 @@ export function runTestCmd(port = TEST_PORT) {
   return lines.join('\r\n') + '\r\n';
 }
 
+/** cli.cmd: the console CLI with the folder's home and config, CRLF. */
+export function cliCmd(port = TEST_PORT) {
+  const lines = [
+    '@echo off',
+    'rem The Bellwether test build\'s command line (Windows plan W2): bin\\bellwether.exe with',
+    'rem this folder\'s home and config.json (test port ' + port + '), never the installed app\'s.',
+    'rem   .\\cli version     .\\cli doctor     .\\cli status --watch',
+    'setlocal',
+    'set "HERE=%~dp0"',
+    'set "BELLWETHER_AGENT_DIR=%HERE:~0,-1%"',
+    'set "BELLWETHER_HOME=%HERE%home"',
+    'set "BELLWETHER_CONFIG=%HERE%config.json"',
+    'set "BELLWETHER_DATA_DIR="',
+    'set "BELLWETHER_HOOK_TOKEN="',
+    'if not exist "%BELLWETHER_HOME%" mkdir "%BELLWETHER_HOME%"',
+    '"%HERE%bin\\bellwether.exe" %*',
+    'exit /b %ERRORLEVEL%',
+  ];
+  return lines.join('\r\n') + '\r\n';
+}
+
 export function readme(port = TEST_PORT) {
   return [
     'Bellwether: Windows test build (unsigned; never ship it)',
@@ -106,14 +152,27 @@ export function readme(port = TEST_PORT) {
     'demo flock (one sheep per behaviour) on every monitor, standing on the taskbar. It runs',
     `on test port ${port} with its own home folder, home\\, next to this file. It never reads`,
     'or writes %APPDATA%\\Bellwether or %USERPROFILE%\\.claude, never uses port 47417, and',
-    'starts no brain and no hooks.',
+    'never installs hooks into your settings.',
     '',
     '  run-test.cmd                              the demo; quits after 30 minutes',
     '  run-test.cmd --quit-after 900             quits after 15 minutes instead',
+    '  run-test.cmd --sessions                   real Claude Code sessions (below)',
     '  run-test.cmd --dump-desktop desktop.json  writes the monitors and windows to a file',
     '',
+    'Real sessions: run-test.cmd --sessions makes a hook token (home\\hook-token, once) and',
+    'hooks.json beside this file, then starts the strip and its brain. In another terminal,',
+    'start Claude Code with: claude --settings <this folder>\\hooks.json',
+    'A sheep walks on for it; /exit and it leaves. Your own settings.json is never changed.',
+    '',
+    'The command line: .\\cli <command> in this folder (cli.cmd runs bin\\bellwether.exe',
+    'with this folder\'s home and port), e.g. .\\cli version, .\\cli doctor,',
+    '.\\cli status --watch (not .\\bellwether: in this folder that is Bellwether.exe).',
+    'hooks install and uninstall need --settings <a scratch copy>: this build refuses to',
+    'edit your own settings.json.',
+    '',
     'Quit early: the sheep icon in the notification area (it may be under the ^), Quit',
-    'Bellwether. The log is home\\shell.log. Each run-test.cmd demo run starts a fresh one',
+    'Bellwether. The logs are home\\shell.log (the strip) and home\\logs\\brain.log (the',
+    'brain, with --sessions). Each run-test.cmd run starts a fresh shell.log',
     '(the run before is kept as home\\shell.previous.log), so attach shell.log after the run',
     'you are reporting on. --dump-desktop adds its outcome to the current shell.log, and',
     'exits with a non-zero code if the file could not be written.',
@@ -145,20 +204,23 @@ function parse(argv) {
 
 function build(o) {
   const manifest = path.join(TAURI_DIR, 'Cargo.toml');
-  const args = ['build', '--release', '--locked', '--manifest-path', manifest, '--features', 'test-build'];
+  const args = ['build', '--release', '--locked', '--manifest-path', manifest, '--features', 'test-build,console-cli'];
   const [cmd, full] = o.xwin ? ['cargo', ['xwin', ...args, '--target', TRIPLE]] : ['cargo', args];
   process.stdout.write(`$ ${cmd} ${full.join(' ')}\n`);
   execFileSync(cmd, full, { stdio: 'inherit', cwd: AGENT });
-  const exe = path.join(TARGET_DEV, ...(o.xwin ? [TRIPLE] : []), 'release', 'bellwether-shell.exe');
-  if (!fs.existsSync(exe)) fail(`${exe} is missing after the build`);
-  return exe;
+  const dir = path.join(TARGET_DEV, ...(o.xwin ? [TRIPLE] : []), 'release');
+  const exes = { app: path.join(dir, 'bellwether-shell.exe'), cli: path.join(dir, 'bellwether.exe') };
+  for (const exe of Object.values(exes)) if (!fs.existsSync(exe)) fail(`${exe} is missing after the build`);
+  return exes;
 }
 
-function assemble(exe, out) {
+function assemble(exes, out) {
   fs.rmSync(out, { recursive: true, force: true });
-  fs.mkdirSync(out, { recursive: true });
-  fs.copyFileSync(exe, path.join(out, 'Bellwether.exe'));
+  fs.mkdirSync(path.join(out, 'bin'), { recursive: true });
+  fs.copyFileSync(exes.app, path.join(out, 'Bellwether.exe'));
+  fs.copyFileSync(exes.cli, path.join(out, 'bin', 'bellwether.exe'));
   fs.writeFileSync(path.join(out, 'run-test.cmd'), runTestCmd());
+  fs.writeFileSync(path.join(out, 'cli.cmd'), cliCmd());
   fs.writeFileSync(path.join(out, 'config.json'), testConfig(fs.readFileSync(path.join(AGENT, 'config.example.json'), 'utf8')));
   fs.writeFileSync(path.join(out, 'README.txt'), readme());
   for (const pet of PETS) {
@@ -171,8 +233,8 @@ function assemble(exe, out) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const o = parse(process.argv.slice(2));
-  const exe = build(o);
-  assemble(exe, o.out);
+  const exes = build(o);
+  assemble(exes, o.out);
   const files = fs.readdirSync(o.out).sort();
   process.stdout.write(`files: ${files.join(', ')}\n`);
   process.stdout.write(`test build (unsigned, never ship one), port ${TEST_PORT}: ${o.out}\n`);

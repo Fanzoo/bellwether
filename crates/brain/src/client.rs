@@ -48,6 +48,17 @@ fn code_of(e: &std::io::Error) -> Failure {
     }
 }
 
+/// A failed connect to 127.0.0.1. On Windows nothing listening isn't refused at once: TCP
+/// retries the connection for about 2 s first, so a shorter timeout (doctor's 1 s probe)
+/// ends in a timeout. A loopback listener accepts at once, so there a timed-out connect
+/// means nothing listens: refused (Windows plan W2). Elsewhere as it is.
+pub fn connect_failure(e: &std::io::Error, windows: bool) -> Failure {
+    match code_of(e) {
+        Failure::Code(c) if windows && c == "ETIMEDOUT" => Failure::Refused,
+        f => f,
+    }
+}
+
 /// One request; `headers` are added to Host, Connection and Content-Length.
 pub fn request(port: u16, method: &str, path: &str, headers: &[(&str, &str)], body: Option<&[u8]>, timeout: Duration) -> Result<Reply, Failure> {
     let r = once(port, method, path, headers, body, timeout);
@@ -59,7 +70,7 @@ pub fn request(port: u16, method: &str, path: &str, headers: &[(&str, &str)], bo
 
 fn once(port: u16, method: &str, path: &str, headers: &[(&str, &str)], body: Option<&[u8]>, timeout: Duration) -> Result<Reply, Failure> {
     let addr = SocketAddr::from((BIND_HOST, port));
-    let mut s = TcpStream::connect_timeout(&addr, timeout.min(Duration::from_secs(10))).map_err(|e| code_of(&e))?;
+    let mut s = TcpStream::connect_timeout(&addr, timeout.min(Duration::from_secs(10))).map_err(|e| connect_failure(&e, cfg!(windows)))?;
     let _ = s.set_nodelay(true);
     s.set_read_timeout(Some(timeout)).map_err(|e| code_of(&e))?;
     s.set_write_timeout(Some(timeout)).map_err(|e| code_of(&e))?;
@@ -124,4 +135,18 @@ fn parse(raw: &[u8]) -> Option<Reply> {
         }
     };
     Some(Reply { status, body })
+}
+
+#[cfg(test)]
+mod connect_tests {
+    use super::*;
+
+    #[test]
+    fn a_timed_out_loopback_connect_is_refused_on_windows_only() {
+        let timed_out = std::io::Error::from(std::io::ErrorKind::TimedOut);
+        assert_eq!(connect_failure(&timed_out, true), Failure::Refused);
+        assert_eq!(connect_failure(&timed_out, false), Failure::Code("ETIMEDOUT".into()));
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert_eq!(connect_failure(&refused, false), Failure::Refused);
+    }
 }

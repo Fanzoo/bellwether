@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { AGENT_DIR } from './helpers.mjs';
-import { PETS, TEST_PORT, readme, runTestCmd, testConfig } from '../scripts/build-windows-test.mjs';
+import { PETS, TEST_PORT, cliCmd, readme, runTestCmd, testConfig } from '../scripts/build-windows-test.mjs';
 
 /**
  * Windows plan W1: the test folder the maintainer runs on his PC (scripts/build-windows-test.mjs)
@@ -34,7 +34,7 @@ describe('the Windows test folder (W1, WD12)', () => {
     assert.throws(() => testConfig('{"nested": {"port": 1}}'), /top-level "port"/);
   });
 
-  test('run-test.cmd: CRLF, a scratch home beside it, and only the demo or the dump', () => {
+  test('run-test.cmd: CRLF, a scratch home beside it, and only the demo, the sessions or the dump', () => {
     const cmd = runTestCmd();
     assert.ok(cmd.endsWith('\r\n') && !/[^\r]\n/.test(cmd), 'CRLF line endings throughout');
     const lines = cmd.split('\r\n');
@@ -42,11 +42,20 @@ describe('the Windows test folder (W1, WD12)', () => {
     assert.ok(lines.includes('set "BELLWETHER_AGENT_DIR=%HERE:~0,-1%"'));
     for (const v of ['BELLWETHER_CONFIG', 'BELLWETHER_DATA_DIR', 'BELLWETHER_HOOK_TOKEN']) assert.ok(lines.includes(`set "${v}="`), `${v} cleared`);
     const runs = lines.filter((l) => l.includes('Bellwether.exe"'));
-    assert.equal(runs.length, 2);
+    assert.equal(runs.length, 3);
     // `--demo` comes first, so whatever is passed after it is the app's flags, never a CLI
     // subcommand (dispatch.rs: a first argument starting with `-` is the app's).
     assert.match(runs[0], /^start "" \/wait "%HERE%Bellwether\.exe" --demo --demo-monitors --heartbeat %\* --quit-after 1800$/);
-    assert.match(runs[1], /^start "" \/wait "%HERE%Bellwether\.exe" --dump-desktop "%~f2"$/);
+    // W2: real sessions, the strip with no argument at all (it starts its own brain).
+    assert.match(runs[1], /^start "" \/wait "%HERE%Bellwether\.exe"$/);
+    assert.match(runs[2], /^start "" \/wait "%HERE%Bellwether\.exe" --dump-desktop "%~f2"$/);
+    // --sessions: the token made once, and the hooks as a file for claude --settings,
+    // through cli.cmd (the folder's home and config), stopping on a failure.
+    const sessions = lines.slice(lines.indexOf(':sessions'), lines.indexOf(':dump'));
+    const calls = sessions.filter((l) => l.startsWith('call '));
+    assert.deepEqual(calls, ['call "%HERE%cli.cmd" token init', 'call "%HERE%cli.cmd" hooks print --out "%HERE%hooks.json"']);
+    assert.equal(sessions.filter((l) => l === 'if errorlevel 1 exit /b 1').length, 2);
+    assert.ok(sessions.some((l) => l.includes('claude --settings "%HERE%hooks.json"')));
     // A failed dump says why (shell.log's --dump-desktop lines) and exits non-zero.
     const dump = lines.slice(lines.indexOf(':dump'));
     assert.ok(dump.includes('set "RC=%ERRORLEVEL%"') && dump.includes('exit /b %RC%') && dump.some((l) => l.startsWith('findstr /c:"--dump-desktop:"')));
@@ -54,7 +63,19 @@ describe('the Windows test folder (W1, WD12)', () => {
     const demo = lines.slice(0, lines.indexOf(':dump'));
     const move = demo.findIndex((l) => l.startsWith('if exist "%BELLWETHER_HOME%\\shell.log" move /y'));
     assert.ok(move >= 0 && move < demo.findIndex((l) => l.includes('--demo --demo-monitors')) && demo[move].includes('shell.previous.log'));
-    assert.ok(!/APPDATA|USERPROFILE|\.claude|47417|hooks|autostart/.test(lines.filter((l) => !l.startsWith('rem') && !l.startsWith('echo')).join('\n')), 'nothing of the live install');
+    const code = lines.filter((l) => !l.startsWith('rem') && !l.startsWith('echo')).join('\n');
+    assert.ok(!/APPDATA|USERPROFILE|\.claude|47417|autostart|install/.test(code), 'nothing of the live install');
+    assert.deepEqual(code.match(/hooks [a-z]+/g), ['hooks print'], 'hooks are printed to a file, never installed');
+  });
+
+  test('cli.cmd: CRLF, the console CLI with the folder\'s home and config (W2)', () => {
+    const cmd = cliCmd();
+    assert.ok(cmd.endsWith('\r\n') && !/[^\r]\n/.test(cmd), 'CRLF line endings throughout');
+    const lines = cmd.split('\r\n');
+    for (const l of ['setlocal', 'set "BELLWETHER_HOME=%HERE%home"', 'set "BELLWETHER_CONFIG=%HERE%config.json"', 'set "BELLWETHER_AGENT_DIR=%HERE:~0,-1%"', 'set "BELLWETHER_DATA_DIR="', 'set "BELLWETHER_HOOK_TOKEN="', '"%HERE%bin\\bellwether.exe" %*', 'exit /b %ERRORLEVEL%']) {
+      assert.ok(lines.includes(l), l);
+    }
+    assert.ok(!/APPDATA|USERPROFILE|\.claude|47417/.test(lines.filter((l) => !l.startsWith('rem')).join('\n')));
   });
 
   test('the README says what it never touches and how to clean up', () => {
@@ -75,7 +96,10 @@ describe('the Windows test folder (W1, WD12)', () => {
     for (const f of ['scripts/build-app.mjs', 'scripts/release.mjs', '.github/workflows/release.yml', 'shell/src-tauri/tauri.conf.json', 'shell/src-tauri/tauri.dist.conf.json', 'package.json']) {
       assert.ok(!read(f).includes('test-build'), f);
     }
-    assert.ok(read('scripts', 'build-windows-test.mjs').includes("'--features', 'test-build'"));
+    assert.ok(read('scripts', 'build-windows-test.mjs').includes("'--features', 'test-build,console-cli'"));
+    // The console CLI (W2, WD7) is only built with its feature, so macOS builds are unchanged.
+    assert.match(cargo, /\[\[bin\]\]\nname = "bellwether"\npath = "src\/bin\/bellwether\.rs"\nrequired-features = \["console-cli"\]/);
+    assert.match(cargo, /^default-run = "bellwether-shell"$/m);
   });
 });
 
@@ -95,6 +119,10 @@ describe('the Windows CI job (W1)', () => {
     assert.ok(at(/cargo check --locked --manifest-path shell\/src-tauri\/Cargo\.toml --workspace --all-targets/) >= 0);
     assert.ok(at(/run: npm run test:cargo/) >= 0);
     assert.ok(at(/node scripts\/build-windows-test\.mjs$/) >= 0);
+    // W2: conformance, the black-box hook suite, the console CLI's exit codes and refusals.
+    assert.ok(at(/run: npm run test:cargo -- --no-fail-fast --features bellwether-shell\/conformance$/) >= 0);
+    assert.ok(at(/node --import \.\/test\/setup\.mjs --test .*test\/hook-route-blackbox\.test\.mjs$/) >= 0);
+    assert.match(win, /cli\.cmd hooks install --write 2>&1"\n\s+if \(\$LASTEXITCODE -ne 3 /);
     assert.match(win, /name: bellwether-windows-test\n/);
   });
 

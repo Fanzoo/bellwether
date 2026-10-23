@@ -74,9 +74,47 @@ pub fn run(args: &[String]) -> i32 {
 /// on stderr and gives the exit code (3). `run` asks it first, and main.rs asks it before
 /// `serve`, which starts the brain without going through `run`.
 pub fn refused_without_home(command: &str) -> Option<i32> {
-    let message = home_refusal(command, crate::identity::in_app_bundle(), std::env::var_os("BELLWETHER_HOME"))?;
+    let message = home_refusal(command, crate::identity::in_app_bundle(), std::env::var_os("BELLWETHER_HOME")).or_else(|| {
+        // The Windows test folder's build only (WD12 5).
+        if !cfg!(feature = "test-build") {
+            return None;
+        }
+        let tail: Vec<String> = std::env::args().skip(2).collect();
+        let home = bellwether_brain::home::dir();
+        let config_port = bellwether_core::config::load(&home, std::env::var("BELLWETHER_CONFIG").ok().as_deref()).ok().map(|c| c.port());
+        test_build_refusal(command, &tail, config_port)
+    })?;
     eprintln!("bellwether: {message}");
     Some(exit::BAD_CONFIG)
+}
+
+/// The Windows test folder's build (`--features test-build`; Windows plan WD12 5, W2) runs
+/// on the maintainer's own PC beside his real Claude Code. So it never edits a settings
+/// file it wasn't given: `hooks install|uninstall`, `token rotate` and `migrate` need
+/// `--settings <file>` (a scratch copy). It never starts at login (`autostart install|
+/// uninstall`, W6). And it never uses the live port 47417, from `--port` or the config.
+/// `config_port`: the port the config gives (None: it can't be read; the command says why).
+pub fn test_build_refusal(command: &str, tail: &[String], config_port: Option<u16>) -> Option<String> {
+    let sub = tail.first().map(String::as_str);
+    let has = |flag: &str| tail.iter().any(|a| a == flag || a.starts_with(&format!("{flag}=")));
+    let edits_settings = matches!((command, sub), ("hooks", Some("install" | "uninstall")) | ("token", Some("rotate")) | ("migrate", _));
+    if edits_settings && !has("--settings") {
+        return Some(format!(
+            "this test build never edits your own Claude Code settings: give `{command}{}` a scratch copy with --settings <file> (for example: copy %USERPROFILE%\\.claude\\settings.json scratch-settings.json)",
+            sub.map(|s| format!(" {s}")).unwrap_or_default()
+        ));
+    }
+    if command == "autostart" && matches!(sub, Some("install" | "uninstall")) {
+        return Some("this test build never starts at login: `autostart` is for the installed app (W6)".into());
+    }
+    if matches!(command, "help" | "--help" | "-h" | "version" | "--version") {
+        return None;
+    }
+    let arg_port = tail.iter().enumerate().filter_map(|(i, a)| if a == "--port" { tail.get(i + 1).map(String::as_str) } else { a.strip_prefix("--port=") }).last().and_then(|v| v.parse::<u16>().ok());
+    if arg_port.or(config_port) == Some(bellwether_brain::DEFAULT_PORT) {
+        return Some(format!("this test build never uses port {}, the installed app's: run it through the test folder's cli.cmd (its config.json has the test port), or pass another --port", bellwether_brain::DEFAULT_PORT));
+    }
+    None
 }
 
 /// Milestone 11 (M11-a): a binary outside an app bundle (a development build in
@@ -89,6 +127,10 @@ fn home_refusal(command: &str, in_bundle: bool, home: Option<std::ffi::OsString>
     let known = command.starts_with("__") || KNOWN_COMMANDS.contains(&command);
     if in_bundle || exempt || !known || home.is_some_and(|h| !h.is_empty()) {
         return None;
+    }
+    if cfg!(windows) {
+        // The Windows test folder's exes are such binaries (W2): its cli.cmd sets the home.
+        return Some(format!("this is a development or test binary, not an installed Bellwether, and BELLWETHER_HOME isn't set, so `{command}` would use the installed app's files (%APPDATA%\\Bellwether). In the Windows test folder, run `.\\cli {command}` (cli.cmd sets its home); in a checkout, set BELLWETHER_HOME to its data folder first (docs/DEVELOPMENT.md)"));
     }
     Some(format!("this is a development binary outside Bellwether.app, and BELLWETHER_HOME isn't set, so `{command}` would use the installed app's files. In a checkout, `export BELLWETHER_HOME=\"$PWD/data\"` first (see docs/DEVELOPMENT.md); the app's own command is Bellwether.app's `Contents/MacOS/Bellwether`"))
 }
@@ -582,7 +624,7 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
     let input = Input {
         settings_file: settings_file.unwrap_or_else(doctor::user_settings),
         home: home.to_path_buf(),
-        user_home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
+        user_home: bellwether_core::paths::user_home().unwrap_or_default(),
         env_token: std::env::var("BELLWETHER_HOOK_TOKEN").ok(),
         config,
         port,
@@ -604,6 +646,7 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
             let (status, detail) = signature(&bundle, session);
             add(&mut checks, status, "signature", detail);
         }
+        None if cfg!(windows) => add(&mut checks, "INFO", "identity", format!("a development or test build ({}), not an installed Bellwether: nothing starts at login", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())),
         None => add(&mut checks, "INFO", "identity", format!("a development binary ({}), not Bellwether.app: no login items, and macOS permissions belong to this exact file", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())),
     }
     add(&mut checks, "INFO", "app data", home.display().to_string());
@@ -719,7 +762,7 @@ fn agent_port() -> u16 {
     port.or_else(|| {
         let home = home.map(PathBuf::from).unwrap_or_else(|| {
             // The default home, whatever BELLWETHER_HOME this shell has.
-            std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Library").join("Application Support").join("Bellwether")
+            bellwether_core::paths::user_home().unwrap_or_default().join("Library").join("Application Support").join("Bellwether")
         });
         bellwether_brain::home::configured_port(&home).ok().flatten()
     })
@@ -802,6 +845,34 @@ mod tests {
     use super::*;
 
     use crate::identity::Session;
+
+    /// The Windows test folder's build (W2): never a real settings file, never at login,
+    /// never the live port. The rule is pure; the build calls it before every command.
+    #[test]
+    fn the_test_build_refuses_real_settings_login_items_and_the_live_port() {
+        let t = |args: &[&str]| args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let r = |command: &str, args: &[&str], config: Option<u16>| test_build_refusal(command, &t(args), config);
+        for (command, args) in [("hooks", &["install", "--write"][..]), ("hooks", &["uninstall"][..]), ("token", &["rotate", "--write"][..]), ("migrate", &["--write"][..])] {
+            let why = r(command, args, Some(47491)).unwrap_or_else(|| panic!("{command} {args:?} without --settings"));
+            assert!(why.contains("--settings <file>"), "{why}");
+            let mut with = args.to_vec();
+            with.extend(["--settings", "scratch.json"]);
+            assert_eq!(r(command, &with, Some(47491)), None, "{command} with --settings");
+            with.truncate(args.len());
+            with.push("--settings=scratch.json");
+            assert_eq!(r(command, &with, Some(47491)), None);
+        }
+        assert_eq!(r("hooks", &["print", "--out", "hooks.json"], Some(47491)), None, "print writes no settings file");
+        assert!(r("autostart", &["install", "--write"], Some(47491)).unwrap().contains("never starts at login"));
+        assert_eq!(r("autostart", &["status"], Some(47491)), None);
+        // The live port, from the config or --port, in either spelling; another --port wins.
+        assert!(r("status", &[], Some(47417)).unwrap().contains("never uses port 47417"));
+        assert!(r("serve", &["--port", "47417"], Some(47491)).is_some());
+        assert!(r("doctor", &["--port=47417"], Some(47491)).is_some());
+        assert_eq!(r("status", &["--port", "47491"], Some(47417)), None);
+        assert_eq!(r("version", &[], Some(47417)), None, "help and version always run");
+        assert_eq!(r("status", &[], None), None, "an unreadable config: the command itself says why");
+    }
 
     #[test]
     fn an_old_session_never_reads_as_never_registered() {
@@ -1044,7 +1115,13 @@ mod tests {
         let home = || Some(std::ffi::OsString::from("/x/data"));
         for c in ["doctor", "serve", "token", "hooks", "migrate", "shell", "autostart", "pets", "status", "__session"] {
             let m = home_refusal(c, false, None).unwrap_or_else(|| panic!("{c} wasn't refused"));
-            assert!(m.contains("BELLWETHER_HOME") && m.contains("export BELLWETHER_HOME=\"$PWD/data\"") && m.contains("docs/DEVELOPMENT.md"), "{m}");
+            assert!(m.contains("BELLWETHER_HOME") && m.contains("docs/DEVELOPMENT.md"), "{m}");
+            // Each OS's own way to set it (W2: the Windows test folder's cli.cmd).
+            if cfg!(windows) {
+                assert!(m.contains(&format!(".\\cli {c}")) && m.contains("%APPDATA%\\Bellwether") && !m.contains("export "), "{m}");
+            } else {
+                assert!(m.contains("export BELLWETHER_HOME=\"$PWD/data\""), "{m}");
+            }
             assert_eq!(home_refusal(c, false, Some(std::ffi::OsString::new())).is_some(), true, "{c}: an empty BELLWETHER_HOME counts as unset");
             assert_eq!(home_refusal(c, false, home()), None, "{c} with BELLWETHER_HOME");
             assert_eq!(home_refusal(c, true, None), None, "{c} inside a bundle");

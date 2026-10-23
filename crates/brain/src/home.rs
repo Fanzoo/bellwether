@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 
 use crate::{exit, BrainError};
 
+/// `%USERPROFILE%` on Windows, `$HOME` elsewhere (crates/core's paths).
 fn user_home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
+    bellwether_core::paths::user_home().unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// The app-data directory.

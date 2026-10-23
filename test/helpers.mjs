@@ -173,6 +173,12 @@ export function rustEnv(args, given, root = AGENT_DIR) {
   // preload's guard can't see inside it. A test that gives no HOME, or the real one, gets a
   // temp HOME instead (the guard test in isolation.test.mjs proves it).
   if (!env.HOME || isRealHome(env.HOME)) env.HOME = rustTempHome();
+  // Windows reads the home from USERPROFILE (crates/core's paths): the same one.
+  env.USERPROFILE = env.HOME;
+  // CLAUDE_CONFIG_DIR moves the Rust binary's default settings file (Windows plan W2): an
+  // inherited one (the developer's own Claude Code's) never reaches it. A test that sets
+  // its own keeps it.
+  if (env.CLAUDE_CONFIG_DIR && env.CLAUDE_CONFIG_DIR === process.env.CLAUDE_CONFIG_DIR) delete env.CLAUDE_CONFIG_DIR;
   // Every `--port` (the last one wins in the CLIs), read as a number whatever its spelling.
   const ports = args.flatMap((a, i) => (a === '--port' ? [args[i + 1]] : a.startsWith('--port=') ? [a.slice(7)] : [])).map(portValue);
   const argPort = ports.length ? ports.at(-1) : null;

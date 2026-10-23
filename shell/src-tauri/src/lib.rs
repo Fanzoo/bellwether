@@ -18,7 +18,9 @@ pub mod login_items;
 pub mod migration;
 pub mod onboarding;
 mod ax;
-mod desktop;
+/// Pure placement and on-top rules (Windows plan WD1, WD3, W1-15), public so the tester
+/// files in tests/ can reach them (W2-18).
+pub mod desktop;
 mod dock;
 mod dump;
 mod heartbeat;
@@ -598,6 +600,11 @@ pub fn run() {
         }
     };
     log::init(settings.log_file.clone());
+    // The Windows test folder's build never runs on the installed app's port (WD12 5).
+    if cfg!(feature = "test-build") && settings.port == bellwether_brain::DEFAULT_PORT {
+        log(&format!("refused: this test build never uses port {}, the installed app's; start it with the test folder's run-test.cmd", settings.port));
+        std::process::exit(3);
+    }
     match &settings.agent_dir {
         Some(dir) => log(&format!("starting: repository layout, agent dir {}, data {}, brain on 127.0.0.1:{}", dir.display(), settings.data_dir.display(), settings.port)),
         None => log(&format!("starting: Bellwether {}, app data {}, brain on 127.0.0.1:{}", bellwether_brain::VERSION, settings.data_dir.display(), settings.port)),
@@ -655,7 +662,8 @@ pub fn run() {
         port: settings.port,
         // Where bundled pets are: the app's Resources, or a repository's checkout (its pets/).
         resources: if app_layout { settings.resources.clone() } else { settings.agent_dir.clone() },
-        user_home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
+        user_home: bellwether_core::paths::user_home().unwrap_or_default(),
+        claude_dir: std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(PathBuf::from),
         env_config: std::env::var("BELLWETHER_CONFIG").ok().filter(|c| !c.is_empty()),
         env_token: std::env::var("BELLWETHER_HOOK_TOKEN").ok().filter(|t| !t.is_empty()),
     };
@@ -808,6 +816,19 @@ pub fn run() {
                     let index = app.state::<strips::Strips>().next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     strips::open(&handle, &other, strip_height, index, capture_exclusion, kept.hidden)?;
                 }
+            }
+            // Windows: every foreground change puts the strips back on top too, at once
+            // rather than within 2 s (deviation W1-15). Out-of-context, on this (the main)
+            // thread, which pumps the messages that deliver it.
+            #[cfg(windows)]
+            {
+                let h = handle.clone();
+                let hooked = win::on_foreground_change(Box::new(move || strips::keep_on_top(&h, "on a foreground change")));
+                log(if hooked {
+                    "strips: put back on top every 2 s and on every foreground change (HWND_TOPMOST, no activation)"
+                } else {
+                    "warning: strips: no foreground-change hook (SetWinEventHook failed); they are put back on top every 2 s only"
+                });
             }
             if flags.heartbeat {
                 log(&format!("--heartbeat: every strip's page logs a heartbeat every 10 s; a silence of {} s is logged (WebView2 throttling, WR1)", heartbeat::SILENCE.as_secs()));
@@ -998,7 +1019,11 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
                 dock = fresh;
                 last_follow = now;
                 let (h, height) = (app.clone(), strip_height);
-                let _ = app.run_on_main_thread(move || strips::follow_dock(&h, height, fresh));
+                let _ = app.run_on_main_thread(move || {
+                    strips::follow_dock(&h, height, fresh);
+                    // Windows: back on top, in case Windows dropped it (deviation W1-15).
+                    strips::keep_on_top(&h, "on the 2 s re-read");
+                });
             }
         }
         let kept = *app.state::<tray::Switches>().kept.lock().unwrap();
@@ -1076,8 +1101,8 @@ fn make_locator(config: &Value) -> locator::Locator {
     let herdr_path = if herdr_path.contains('/') {
         herdr_path
     } else {
-        std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join(".local/bin").join(&herdr_path))
+        bellwether_core::paths::user_home()
+            .map(|h| h.join(".local/bin").join(&herdr_path))
             .filter(|p| p.exists())
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or(herdr_path)

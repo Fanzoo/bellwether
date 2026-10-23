@@ -1,6 +1,6 @@
-//! Windows' own calls for the strip (Windows plan W1): the tool-window style (WD2) and
-//! the desktop dump's collection (WD12). Thin FFI only; the decisions are in desktop.rs
-//! and dump.rs, which the Mac tests.
+//! Windows' own calls for the strip (Windows plan W1): the tool-window style (WD2), keeping
+//! it on top (deviation W1-15) and the desktop dump's collection (WD12). Thin FFI only; the
+//! decisions are in desktop.rs and dump.rs, which the Mac tests.
 
 use std::ffi::c_void;
 use windows_sys::Win32::Foundation::{CloseHandle, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, RECT, WPARAM};
@@ -8,12 +8,15 @@ use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DW
 use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ};
+use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, STYLESTRUCT, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_STYLECHANGING, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    EVENT_SYSTEM_FOREGROUND, HWND_TOPMOST, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
+use crate::desktop::OnTop;
 use crate::dump;
 
 /// The subclass id of the tool-window keeper (any number unique to this window).
@@ -46,6 +49,43 @@ pub fn make_tool_window(hwnd: HWND) -> String {
             (false, _) => "warning: WS_EX_TOOLWINDOW didn't take; the strip may show in Alt-Tab".into(),
         }
     }
+}
+
+fn topmost(hwnd: HWND) -> bool {
+    unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0 }
+}
+
+/// Puts a strip back on top of the z-order's topmost band, and says whether it had to be
+/// (deviation W1-15; W2-17). `SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE`: the frame stays, and
+/// neither activation nor focus moves; the extended style's other bits (tool window,
+/// click-through, no-activate) are not touched. Main thread.
+pub fn keep_topmost(hwnd: HWND) -> OnTop {
+    let before = topmost(hwnd);
+    unsafe { SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    crate::desktop::on_top(before, topmost(hwnd))
+}
+
+/// What the foreground-change hook calls (set once).
+static ON_FOREGROUND: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+unsafe extern "system" fn foreground_changed(_hook: HWINEVENTHOOK, _event: u32, _hwnd: HWND, _object: i32, _child: i32, _thread: u32, _time: u32) {
+    if let Some(f) = ON_FOREGROUND.get() {
+        // A panic must not cross into Windows.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    }
+}
+
+/// Calls `f` whenever another process's window comes to the foreground
+/// (`EVENT_SYSTEM_FOREGROUND`, out of context, so `f` runs on this thread while it pumps
+/// messages: call from the main thread). Once per process; false if it couldn't be set.
+pub fn on_foreground_change(f: Box<dyn Fn() + Send + Sync>) -> bool {
+    if ON_FOREGROUND.set(f).is_err() {
+        return false;
+    }
+    let hook = unsafe {
+        SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, std::ptr::null_mut(), Some(foreground_changed), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS)
+    };
+    !hook.is_null()
 }
 
 fn wide(s: &str) -> Vec<u16> {

@@ -30,15 +30,38 @@ pub const REJECTION_RECENT_MS: f64 = 15.0 * 60.0 * 1000.0;
 /// The four LaunchAgent labels of the repository versions (plan D5).
 pub use crate::legacy::LABELS as LEGACY_LABELS;
 
-/// Where Claude Code reads managed (policy) settings on this OS.
+/// Where Claude Code reads managed (policy) settings on this OS. Windows: under Program
+/// Files (Windows plan W2); Claude Code no longer reads the old `C:\ProgramData\ClaudeCode`.
 pub fn managed_settings() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
         Some(PathBuf::from("/Library/Application Support/ClaudeCode/managed-settings.json"))
     } else if cfg!(windows) {
-        Some(PathBuf::from("C:\\ProgramData\\ClaudeCode\\managed-settings.json"))
+        Some(windows_managed_dir(std::env::var_os("ProgramFiles")).join("managed-settings.json"))
     } else {
         Some(PathBuf::from("/etc/claude-code/managed-settings.json"))
     }
+}
+
+/// `<Program Files>\ClaudeCode`, from `%ProgramFiles%` (else `C:\Program Files`).
+pub fn windows_managed_dir(program_files: Option<std::ffi::OsString>) -> PathBuf {
+    program_files.filter(|p| !p.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\Program Files")).join("ClaudeCode")
+}
+
+/// Windows: the managed drop-ins (`managed-settings.d\*.json` beside the managed file, in
+/// name order) and the registry policy values, which Claude Code reads too (W2). Nothing on
+/// other systems.
+fn more_managed(managed_file: Option<&Path>) -> (Vec<PathBuf>, Vec<(String, String)>) {
+    if !cfg!(windows) {
+        return (Vec::new(), Vec::new());
+    }
+    let dropins = managed_file.and_then(Path::parent).map(|d| d.join("managed-settings.d")).and_then(|d| std::fs::read_dir(d).ok());
+    let mut files: Vec<PathBuf> = dropins.into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("json"))).collect();
+    files.sort();
+    #[cfg(windows)]
+    let texts = crate::win::policy_settings();
+    #[cfg(not(windows))]
+    let texts = Vec::new();
+    (files, texts)
 }
 
 /// What doctor looks at.
@@ -131,7 +154,8 @@ pub fn checks(input: &Input) -> Vec<Check> {
     if installed && down {
         add(&mut out, "hook errors", "WARN", "hooks are installed but the brain is not answering: every Claude Code session prints a visible \"<Event> hook error … ECONNREFUSED\" line on each prompt and tool call until a brain runs (`bellwether autostart install --write` starts one at login; `bellwether serve` runs one now)".into(), OK);
     }
-    out.extend(settings_checks::check_other_levels(input.project_dir.as_deref(), input.managed_file.as_deref(), port, None));
+    let (dropins, policies) = more_managed(input.managed_file.as_deref());
+    out.extend(settings_checks::check_other_levels_with(input.project_dir.as_deref(), input.managed_file.as_deref(), &dropins, &policies, port, None));
 
     if let Some(c) = config {
         if c.palette_upgraded {
@@ -155,6 +179,11 @@ pub fn checks(input: &Input) -> Vec<Check> {
     }
     if let Some(c) = config {
         out.push(pets_check(&input.home, c));
+    }
+    // Windows has no earlier installs to find (no LaunchAgents, no repository versions; W2).
+    if cfg!(windows) {
+        add(&mut out, "legacy agents", "INFO", "none: there were no earlier Bellwether versions on Windows".into(), OK);
+        return out;
     }
     let (legacy, unsure) = crate::legacy::scan_here_reporting_unknown(&input.user_home);
     if let Some(c) = legacy_check(&legacy, &input.user_home) {
@@ -304,7 +333,24 @@ pub fn token_file_mode(file: &Path) -> Check {
             Err(e) => Check::new("token", "FAIL", format!("{}: {e}", file.display()), BAD_CONFIG),
         }
     }
-    #[cfg(not(unix))]
+    // Windows (W2): its DACL. Anyone besides the user (and SYSTEM and Administrators, who
+    // can read any file, as root can) is a WARN, with the fix.
+    #[cfg(windows)]
+    {
+        let user = bellwether_core::acl::current_user_sid().unwrap_or_default();
+        match bellwether_core::acl::read_dacl(file) {
+            Ok(dacl) => {
+                let others = bellwether_core::acl::others(dacl.as_ref(), &user);
+                if others.is_empty() {
+                    Check::new("token", "PASS", format!("{} (only you can read it)", file.display()), BAD_CONFIG)
+                } else {
+                    Check::new("token", "WARN", format!("{} can also be read by {}. `bellwether token init --force` won't change that; run `icacls \"{}\" /inheritance:r /grant:r \"%USERNAME%\":F`", file.display(), others.join(", "), file.display()), OK)
+                }
+            }
+            Err(e) => Check::new("token", "WARN", format!("{}: can't read its permissions ({e})", file.display()), OK),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     Check::new("token", "PASS", file.display().to_string(), BAD_CONFIG)
 }
 
@@ -366,11 +412,18 @@ pub fn probe_health(port: u16, timeout: Duration) -> Health {
     }
 }
 
-/// The pid and command name listening on the port, from `lsof` (read only).
+/// The pid and command name listening on the port, from `lsof` (read only). Windows: the
+/// TCP table and the process's path (W2).
+#[cfg(windows)]
 fn port_owner(port: u16) -> String {
-    if cfg!(windows) {
-        return String::new();
+    match crate::win::port_owner(port) {
+        Some((pid, exe)) => format!(" (pid {pid}, {})", exe.unwrap_or_else(|| "?".into())),
+        None => String::new(),
     }
+}
+
+#[cfg(not(windows))]
+fn port_owner(port: u16) -> String {
     let out = std::process::Command::new("lsof").args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpc"]).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output();
     let Ok(out) = out else { return String::new() };
     let text = String::from_utf8_lossy(&out.stdout);
@@ -383,8 +436,14 @@ fn port_owner(port: u16) -> String {
 }
 
 /// The executable of a process, from `ps` (read only), to say which brain answers.
+#[cfg(windows)]
 fn process_path(pid: u64) -> Option<String> {
-    if pid == 0 || cfg!(windows) {
+    (pid != 0).then(|| crate::win::process_path(pid as u32)).flatten()
+}
+
+#[cfg(not(windows))]
+fn process_path(pid: u64) -> Option<String> {
+    if pid == 0 {
         return None;
     }
     let out = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().ok()?;
@@ -394,6 +453,10 @@ fn process_path(pid: u64) -> Option<String> {
 
 fn local_time(ms: f64) -> String {
     // Seconds since midnight in the local zone, from libc where there is one.
+    #[cfg(windows)]
+    if let Some(t) = crate::win::local_hms(ms) {
+        return t;
+    }
     #[cfg(unix)]
     {
         let secs = (ms / 1000.0) as libc::time_t;

@@ -69,7 +69,7 @@ fn the_window_shows_exactly_the_diff_hooks_install_prints() {
         std::fs::write(app_home.join("config.json"), format!("{{\"port\": {port}}}\n")).unwrap();
         let file = home.join(".claude").join("settings.json");
         std::fs::copy(dir.join("settings.json"), &file).unwrap();
-        let ob = Onboarding::new(Ctx { layout: Layout::App, home: app_home.clone(), port, resources: None, user_home: home.clone(), env_config: None, env_token: Some(TOKEN.into()) });
+        let ob = Onboarding::new(Ctx { layout: Layout::App, home: app_home.clone(), port, resources: None, user_home: home.clone(), claude_dir: None, env_config: None, env_token: Some(TOKEN.into()) });
 
         let shown = ob.hooks_preview(Action::Install).unwrap();
         let printed = cli(&home, &app_home, "install");

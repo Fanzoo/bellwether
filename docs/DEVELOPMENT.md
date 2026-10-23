@@ -718,7 +718,10 @@ node scripts/build-pet.mjs review bellwether --out /tmp/review   # the review sh
 ## Windows (in progress)
 
 Windows is being built milestone by milestone (docs/WINDOWS-PLAN.md, W1–W10). Today
-(W1): the strip and its demo flock. There is no installer, brain or CLI on Windows yet.
+(W1, W2's first part): the strip and its demo flock, the brain, and the console CLI
+(`bin\bellwether.exe`, the `console-cli` feature) for real sessions through
+`claude --settings`. There is no installer yet, and sheep are not yet placed on their
+terminal's monitor (W3).
 
 - **Compiling for Windows on a Mac:** `rustup target add x86_64-pc-windows-msvc`, then
   `cargo install cargo-xwin` and `brew install llvm lld` (cargo-xwin downloads Microsoft's
@@ -731,10 +734,13 @@ Windows is being built milestone by milestone (docs/WINDOWS-PLAN.md, W1–W10). 
   It compiles and links; it can't run the tests or the exe. CI's `windows` job does.
 - **The test folder** (`shell/src-tauri/target-dev/windows-test/bellwether-windows-test/`,
   and CI's `bellwether-windows-test` artifact): an unsigned `Bellwether.exe` built with
-  `--features test-build`, `run-test.cmd`, `config.json` on port 47491, the bundled pets
-  and a README. `run-test.cmd` sets a scratch home beside itself and starts only the demo
-  (or `--dump-desktop`), so it never reads or writes `%APPDATA%\Bellwether`,
-  `%USERPROFILE%\.claude` or port 47417.
+  `--features test-build`, `bin\bellwether.exe` (`--features console-cli`), `run-test.cmd`
+  (the demo, `--sessions` for real sessions, `--dump-desktop`), `cli.cmd` (the CLI with the
+  folder's home and port), `config.json` on port 47491, the bundled pets and a README.
+  Both `.cmd` files set a scratch home beside themselves, and the test build refuses
+  `hooks install|uninstall` without `--settings`, `autostart install|uninstall` and port
+  47417 (W2-2), so it never writes `%APPDATA%\Bellwether`, `%USERPROFILE%\.claude` or uses
+  port 47417.
 - **The flags W1 added** (every OS): `--demo --demo-monitors` (the demo flock on a strip on
   every monitor), `--heartbeat` (each page logs a heartbeat every 10 s and the shell logs a
   silence of 25 s: the WebView2 throttling measure), and, in development and test builds

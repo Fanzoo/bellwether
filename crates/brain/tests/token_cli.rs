@@ -27,7 +27,11 @@ fn token_init_and_rotate() {
     let home = root.join("home");
     std::fs::create_dir_all(root.join("user").join(".claude")).unwrap();
     std::env::set_var("BELLWETHER_HOME", &home);
+    // The user's home on every OS (USERPROFILE on Windows; crates/core's paths), and no
+    // CLAUDE_CONFIG_DIR, which would move the settings file.
     std::env::set_var("HOME", root.join("user"));
+    std::env::set_var("USERPROFILE", root.join("user"));
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
     std::env::remove_var("BELLWETHER_HOOK_TOKEN");
     std::env::remove_var("BELLWETHER_CONFIG");
     let run = |args: &[&str]| bellwether_brain::cli::run(args[0], &args[1..].iter().map(|s| s.to_string()).collect::<Vec<_>>());

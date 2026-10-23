@@ -4,7 +4,7 @@
 //!   POST /hook     always an empty 204, or an empty 403 when a guard fails
 //!   GET  /health   {ok, name, version, pid, port, lastEventAt, mode, counters}; no token
 //!   GET  /state    the snapshot, long-polled (state.rs); token required
-//!   POST /control  mute, unmute, dismiss, placed, reload-token (state.rs); token required
+//!   POST /control  mute, unmute, dismiss, placed, reload-token, stop (state.rs); token required
 //!   OPTIONS *      an empty 405, with no CORS headers
 //!   anything else  an empty 404
 //!
@@ -25,6 +25,8 @@ pub mod pets;
 pub mod saver;
 pub mod toapp;
 mod state;
+#[cfg(windows)]
+mod win;
 
 pub use actor::Timings;
 pub use hook::{HookAnswer, DOCTOR_PING, EVENTS, MAX_BODY_BYTES};
@@ -301,6 +303,9 @@ pub(crate) struct Brain {
     pub request_timeout: Duration,
     pub inbox: tokio::sync::mpsc::Sender<actor::Msg>,
     pub snapshots: tokio::sync::watch::Receiver<Arc<Published>>,
+    /// `/control {"action": "stop"}` (Windows plan WD6): the tokened stop, where Windows
+    /// has no SIGTERM for a windowless process. Platform-neutral.
+    pub stop: Arc<tokio::sync::Notify>,
 }
 
 impl Brain {
@@ -344,7 +349,13 @@ pub struct Bound {
 
 /// Binds 127.0.0.1:<port>, and only that. Port 0 asks the OS for a free one (tests).
 pub fn bind(port: u16) -> Result<Bound, BrainError> {
-    let listener = std::net::TcpListener::bind(SocketAddr::from((BIND_HOST, port))).map_err(|e| {
+    let addr = SocketAddr::from((BIND_HOST, port));
+    // Windows: exclusively, or a second socket could share the port (WD6).
+    #[cfg(windows)]
+    let bound = win::bind_exclusive(addr);
+    #[cfg(not(windows))]
+    let bound = std::net::TcpListener::bind(addr);
+    let listener = bound.map_err(|e| {
         if e.kind() == std::io::ErrorKind::AddrInUse {
             BrainError::new(format!("port {port} on {BIND_HOST} is already in use. Run `bellwether doctor` to see what holds it."), exit::NOT_RUNNING)
         } else {
@@ -399,8 +410,10 @@ async fn run(bound: Bound, opts: Options, stop: Option<tokio::sync::oneshot::Rec
         request_timeout: opts.request_timeout,
         inbox,
         snapshots,
+        stop: Arc::new(tokio::sync::Notify::new()),
     });
     let log = brain.log.clone();
+    let asked_to_stop = brain.stop.clone();
     for line in &opts.announce {
         log.log(line);
     }
@@ -448,6 +461,7 @@ async fn run(bound: Bound, opts: Options, stop: Option<tokio::sync::oneshot::Rec
     tokio::select! {
         _ = stop_signal(stop, log.clone()) => {}
         _ = parent_watchdog(log.clone()) => {}
+        _ = asked_to_stop.notified() => {}
     }
     accepting.abort();
     let _ = actor_stop_tx.send(());
@@ -457,8 +471,31 @@ async fn run(bound: Bound, opts: Options, stop: Option<tokio::sync::oneshot::Rec
 
 /// A brain the app started carries BELLWETHER_PARENT_PID: when that process is gone (even
 /// by SIGKILL), this brain stops within a second (it looks every 250 ms). Never set for a
-/// brain started by launchd or by hand.
+/// brain started by launchd or by hand. On Windows (W2) it waits on the parent's process
+/// handle instead, so it stops as soon as the app has gone, even after `TerminateProcess`.
 async fn parent_watchdog(log: Logger) {
+    #[cfg(windows)]
+    {
+        let parent = std::env::var("BELLWETHER_PARENT_PID").ok().and_then(|p| p.parse::<u32>().ok()).filter(|p| *p > 0);
+        if let Some(parent) = parent {
+            let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+            match win::Parent::open(parent) {
+                Some(p) => {
+                    std::thread::spawn(move || {
+                        let _ = tx.send(p.wait());
+                    });
+                }
+                None => {
+                    let _ = tx.send(true);
+                }
+            }
+            if rx.await.unwrap_or(false) {
+                log.log(&format!("the app that started this brain (pid {parent}) is gone; stopping"));
+                return;
+            }
+            log.log(&format!("warning: can't watch the app that started this brain (pid {parent}); it keeps running if the app goes"));
+        }
+    }
     #[cfg(unix)]
     {
         let parent = std::env::var("BELLWETHER_PARENT_PID").ok().and_then(|p| p.parse::<i32>().ok()).filter(|p| *p > 1);

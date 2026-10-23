@@ -5,6 +5,8 @@ edition = "2021"
 description = "bellwether's overlay: a transparent click-through strip of sheep, one per Claude Code session"
 license = "MIT"
 publish = false
+# The app's executable; `bellwether` (below) is the Windows console CLI.
+default-run = "bellwether-shell"
 
 # The brain crates (crates/core, crates/brain) share this workspace and its Cargo.lock.
 [workspace]
@@ -13,6 +15,14 @@ members = [".", "../../crates/core", "../../crates/brain"]
 [lib]
 name = "bellwether_shell_lib"
 crate-type = ["rlib"]
+
+# The console CLI on Windows (Windows plan WD7): `bin\bellwether.exe`, a console program
+# beside the GUI `Bellwether.exe`. Only with the `console-cli` feature, which only the
+# Windows builds turn on, so macOS builds are unchanged.
+[[bin]]
+name = "bellwether"
+path = "src/bin/bellwether.rs"
+required-features = ["console-cli"]
 
 # `conformance`: the hidden `__` subcommands the conformance harness drives
 # (test/conformance.mjs, scripts/differential.mjs; distribution plan D2). Dev and CI
@@ -25,6 +35,8 @@ conformance = ["bellwether-brain/conformance"]
 # a release-profile binary that still answers `--dump-desktop`. Never on in a release:
 # neither `tauri build` nor scripts/build-app.mjs turns it on.
 test-build = []
+# `console-cli`: builds the `bellwether` console binary above (Windows: scripts/build-windows-test.mjs).
+console-cli = []
 
 [build-dependencies]
 tauri-build = { version = "=2.7.1", features = [] }
@@ -52,11 +64,11 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSPanel", "NSSavePanel", "NSOpenPanel", "NSApplication", "NSAlert", "NSButton", "NSControl", "NSView"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
-# Windows (Windows plan W1): the strip's tool-window style and the desktop dump
-# (--dump-desktop): window list, monitors, process list, the OS version. Already in the
+# Windows (Windows plan W1): the strip's tool-window style, keeping it on top (a foreground hook),
+# and the desktop dump (--dump-desktop): window list, monitors, process list, the OS version. Already in the
 # lockfile, through tao and others.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_HiDpi", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Registry", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Registry", "Win32_System_Threading"] }
 
 # Dev builds run the conformance suite and the differential: the regex engine, the
 # NFKC tables and the redaction scans are optimised even there, or 5 MB inputs would

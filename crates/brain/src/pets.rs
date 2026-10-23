@@ -51,13 +51,18 @@ pub fn bundled_sha(name: &str) -> Option<String> {
 
 /// Where this binary's bundled pet file is: the app's `Contents/Resources/pets/<name>/`,
 /// or, for a build that isn't in an app bundle (a repository's dev build), the checkout's
-/// `pets/<name>/`, as the strip finds them.
+/// `pets/<name>/`, as the strip finds them: `BELLWETHER_AGENT_DIR` when it is set (the
+/// Windows test folder's cli.cmd sets it to the folder, W2), else the checkout it was built
+/// from.
 pub fn bundled_file(name: &str) -> PathBuf {
     let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
     let contents = exe.as_ref().and_then(|e| e.parent()).filter(|d| d.file_name().is_some_and(|n| n == "MacOS")).and_then(Path::parent).filter(|c| c.file_name().is_some_and(|n| n == "Contents"));
     match contents {
         Some(c) => c.join("Resources").join("pets").join(name).join("animations.xml"),
-        None => Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("pets").join(name).join("animations.xml"),
+        None => {
+            let checkout = std::env::var_os("BELLWETHER_AGENT_DIR").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(".."));
+            checkout.join("pets").join(name).join("animations.xml")
+        }
     }
 }
 

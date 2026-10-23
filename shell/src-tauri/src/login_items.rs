@@ -116,7 +116,7 @@ pub fn preflight(services: &[Service], registering: bool, session: crate::identi
 pub fn agent_home(overrides: &(Option<u16>, Option<String>)) -> std::path::PathBuf {
     match &overrides.1 {
         Some(h) => std::path::PathBuf::from(h),
-        None => std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join("Library").join("Application Support").join("Bellwether"),
+        None => bellwether_core::paths::user_home().unwrap_or_default().join("Library").join("Application Support").join("Bellwether"),
     }
 }
 

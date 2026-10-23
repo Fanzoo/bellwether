@@ -75,11 +75,13 @@ pub struct Brain {
     pub child: Mutex<Option<Child>>,
     /// When the child was last started, so one that keeps dying isn't restarted in a loop.
     started_at: Mutex<Option<Instant>>,
+    /// The child's port and token, for its tokened stop (Windows; WD6).
+    child_control: Mutex<Option<(u16, String)>>,
 }
 
 impl Brain {
     pub fn new() -> Arc<Brain> {
-        Arc::new(Brain { state: Mutex::new(None), changed: Condvar::new(), view: Mutex::new(ShellView::default()), child: Mutex::new(None), started_at: Mutex::new(None) })
+        Arc::new(Brain { state: Mutex::new(None), changed: Condvar::new(), view: Mutex::new(ShellView::default()), child: Mutex::new(None), started_at: Mutex::new(None), child_control: Mutex::new(None) })
     }
 
     /// The current snapshot (with the shell's view as `shell`) as soon as its rev is
@@ -148,13 +150,23 @@ impl Brain {
     }
 
     /// Stops the brain this shell started (only that one, by its own handle): SIGTERM, so
-    /// it saves state.json, then SIGKILL after 2 s.
+    /// it saves state.json, then SIGKILL after 2 s. On Windows, which has no SIGTERM for a
+    /// windowless process, the tokened `POST /control {"action": "stop"}` (WD6), then
+    /// `TerminateProcess` after 2 s.
     pub fn stop_child(&self) {
         if let Some(mut child) = self.child.lock().unwrap().take() {
             log(&format!("stopping the brain the shell started (pid {})", child.id()));
             #[cfg(unix)]
             unsafe {
                 libc::kill(child.id() as i32, libc::SIGTERM);
+            }
+            // The token as it is now (a `token rotate` since the start replaced it, and the
+            // brain takes the old one for only a minute after), then the one it started with.
+            #[cfg(not(unix))]
+            if let Some((port, started_with)) = self.child_control.lock().unwrap().clone() {
+                if let Err(e) = send_stop(port, &stop_tokens(crate::settings::token_now(), &started_with)) {
+                    log(&format!("the brain didn't take the stop ({e}); it is ended in 2 s"));
+                }
             }
             let deadline = Instant::now() + Duration::from_secs(2);
             while Instant::now() < deadline {
@@ -167,6 +179,32 @@ impl Brain {
             let _ = child.wait();
         }
     }
+}
+
+/// The tokens a stop is tried with, in order (W2-14): the current one (`token_now`, read
+/// again from hook-token), then the one the brain was started with, once each.
+#[cfg_attr(unix, allow(dead_code))]
+pub fn stop_tokens(current: Option<String>, started_with: &str) -> Vec<String> {
+    let mut out: Vec<String> = current.into_iter().collect();
+    if !out.iter().any(|t| t == started_with) {
+        out.push(started_with.to_string());
+    }
+    out
+}
+
+/// `POST /control {"action": "stop"}` with each token until one is taken; the last error
+/// otherwise. A refusal (403) moves on to the next token; anything else (no brain) ends it.
+#[cfg_attr(unix, allow(dead_code))]
+pub fn send_stop(port: u16, tokens: &[String]) -> Result<(), String> {
+    let mut last = "no token".to_string();
+    for t in tokens {
+        match control(port, Some(t), "stop") {
+            Ok(()) => return Ok(()),
+            Err(e) if e.starts_with("HTTP 403") => last = e,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last)
 }
 
 fn with_view(snap: &Value, view: &ShellView) -> Value {
@@ -353,8 +391,14 @@ pub fn child_command(exe: &std::path::Path, cfg: &BrainConfig, token: &str, pare
     }
     // The brain writes its own log (brain.log); stdout and stderr would only repeat it.
     cmd.env("BELLWETHER_PARENT_PID", parent.to_string()).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // Windows: no console window for it (a development build is a console program).
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, CREATE_NO_WINDOW);
     cmd
 }
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn spawn(brain: &Brain, cfg: &BrainConfig, token: &str) {
     let exe = match std::env::current_exe() {
@@ -365,6 +409,7 @@ fn spawn(brain: &Brain, cfg: &BrainConfig, token: &str) {
         }
     };
     *brain.started_at.lock().unwrap() = Some(Instant::now());
+    *brain.child_control.lock().unwrap() = Some((cfg.port, token.to_string()));
     match child_command(&exe, cfg, token, std::process::id()).spawn() {
         Ok(child) => {
             log(&format!("started the brain: {} serve --port {} (pid {}); it stops when the strip does", exe.display(), cfg.port, child.id()));
@@ -475,6 +520,41 @@ mod tests {
         assert!(at < lib.find("std::thread::spawn(move || brain::run(b, cfg));").unwrap());
         let code = include_str!("brain.rs").split("#[cfg(test)]").next().unwrap();
         assert!(code.contains("let check = cfg.agent_check.take().unwrap_or_else(crate::agent::Check::here);"));
+    }
+
+    /// W2-14 (BR-3K's D1): after `token rotate`, a brain started with the old token takes it
+    /// for a minute only. The stop goes with the current token first, then the one it
+    /// started with; a refusal (403) tries the next, so the brain stops and saves either way.
+    #[test]
+    fn the_stop_uses_the_current_token_and_survives_a_stale_one() {
+        assert_eq!(stop_tokens(Some("newTokenNotReal_0123456789".into()), "oldTokenNotReal_0123456789"), ["newTokenNotReal_0123456789", "oldTokenNotReal_0123456789"]);
+        assert_eq!(stop_tokens(Some("sameTokenNotReal_012345678".into()), "sameTokenNotReal_012345678"), ["sameTokenNotReal_012345678"]);
+        assert_eq!(stop_tokens(None, "oldTokenNotReal_0123456789"), ["oldTokenNotReal_0123456789"]);
+
+        // A brain that takes only the new token (the old one's minute is over).
+        let home = std::env::temp_dir().join(format!("bw-stop-tokens-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let mut opts = bellwether_brain::Options::new("newTokenNotReal_0123456789".into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+        opts.home = Some(home.clone());
+        let bound = bellwether_brain::bind(0).unwrap();
+        let port = bound.port;
+        let (tx, done) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(bellwether_brain::serve(bound, opts, None).is_ok());
+        });
+        control(port, Some("newTokenNotReal_0123456789"), "mute").unwrap();
+        // Only the stale token: refused, and the brain keeps serving.
+        assert!(send_stop(port, &["oldTokenNotReal_0123456789".to_string()]).unwrap_err().starts_with("HTTP 403"));
+        assert!(done.recv_timeout(Duration::from_millis(300)).is_err(), "a refused stop doesn't stop it");
+        // What stop_child sends: a stale one first does no harm, the current one stops it.
+        assert_eq!(send_stop(port, &["oldTokenNotReal_0123456789".to_string(), "newTokenNotReal_0123456789".to_string()]), Ok(()));
+        assert_eq!(done.recv_timeout(Duration::from_secs(5)), Ok(true));
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(home.join("state.json")).unwrap()).unwrap();
+        assert_eq!(saved["muted"], true, "state.json saved: a clean stop, not a kill");
+        // No brain: an error, not a loop over the tokens.
+        assert!(send_stop(port, &["newTokenNotReal_0123456789".to_string()]).is_err());
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

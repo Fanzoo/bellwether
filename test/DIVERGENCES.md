@@ -374,6 +374,32 @@ file mentions, went with the Node brain). This file is history: no new entries.
   `shell/src-tauri/src/migration.rs` (which host, and the refusals), and onboarding.rs's
   step-1 test. Nothing to run against Node, so not a parity row.
 
+### 26. `/control` takes `stop` (Windows plan W2)
+
+- **Node:** an unknown action, 400.
+- **Rust:** with the token, the brain answers `{"ok": true}`, saves state.json and exits, as
+  on SIGTERM (WD6). It is how the app stops its own brain on Windows, which has no SIGTERM
+  for a windowless process. Without the token, 403 as for every `/control`.
+- **Pinned by:** `crates/brain/tests/http.rs`, `stop_answers_then_saves_and_returns`.
+
+### 27. A settings file with a UTF-8 BOM is installed into, and keeps its BOM (Windows plan W2)
+
+- **Node:** `JSON.parse` refuses a leading U+FEFF, so `hooks install` exited 3 and wrote
+  nothing (the Rust port kept that until W2).
+- **Rust:** the installer and doctor read past the BOM, and the installer writes it back
+  first, as it keeps CRLF and the indent. Notepad and PowerShell 5.1 write such files, and
+  Claude Code's CLI reads them.
+- **Pinned by:** `test/fixtures/installer-vectors/utf-8-bom-crlf` (both test suites),
+  `test/tester-m1.test.mjs` (the BOM install), `crates/core/src/settings_checks.rs`,
+  `a_bom_is_read_past`.
+
+### 28. A Windows `cwd` is named after its last folder (Windows plan W2)
+
+- **Node:** `path.posix.basename`, so `C:\Users\me\my-project` is the whole string.
+- **Rust:** a cwd that is a Windows path (`C:\…`, `C:/…`, `\\server\…`) is cut at `\` too,
+  so the sheep is `my-project`. A macOS or Linux cwd is cut at `/` only, as before.
+- **Pinned by:** `crates/core/src/normalise.rs`, `a_windows_cwd_is_named_after_its_last_folder`.
+
 ## Turned out not to differ
 
 - **Lone surrogates in hook payloads** (listed as expected for M3). The Rust brain keeps every

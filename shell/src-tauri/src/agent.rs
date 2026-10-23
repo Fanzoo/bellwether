@@ -153,7 +153,7 @@ pub fn choose(real_home: bool, launchctl: Option<&str>) -> Result<Option<PathBuf
 
 /// The launchd for this process.
 pub fn host() -> Box<dyn Launchd + Send> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = bellwether_core::paths::user_home().unwrap_or_default();
     match choose(bellwether_brain::migrate::is_real_home(&home), std::env::var("BELLWETHER_LAUNCHCTL").ok().as_deref()) {
         Ok(None) => Box::new(Real),
         Ok(Some(launchctl)) => {

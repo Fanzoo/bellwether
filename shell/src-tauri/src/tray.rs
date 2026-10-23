@@ -75,7 +75,7 @@ pub fn notices(legacy: &[bellwether_brain::legacy::Agent], waiting: &[crate::log
 /// HOME is the real home) and login items waiting for approval. Read only.
 pub fn startup_notices() -> Vec<Notice> {
     use crate::login_items::{self, Service, Status};
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+    let home = bellwether_core::paths::user_home().unwrap_or_default();
     let legacy = bellwether_brain::legacy::scan_here(&home);
     if legacy.is_empty() {
         log("legacy agents: none");

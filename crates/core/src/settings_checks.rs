@@ -61,10 +61,17 @@ pub fn check_settings_file(file: &Path, port: u16, token: Option<&str>) -> Vec<C
         }
     };
     let text = String::from_utf8_lossy(&bytes);
-    match lossless::parse(&text) {
+    let (bom, body) = lossless::split_bom(&text);
+    let mut out = match lossless::parse(body) {
         Ok(v) => check_settings(&v, port, token, &shown),
         Err(e) => vec![Check::new("hooks installed", "FAIL", format!("{shown} is not valid JSON ({e}); Claude Code will ignore it"), BAD_CONFIG)],
+    };
+    // Bellwether reads past a BOM and keeps it (W2-6), but whether Claude Code reads such a
+    // file isn't confirmed for every version (W2-19): said, not failed.
+    if !bom.is_empty() {
+        out.push(Check::new("settings BOM", "INFO", format!("{shown} starts with a byte order mark (UTF-8 with BOM, as Notepad and PowerShell 5.1 save it). Bellwether reads past it, but some Claude Code versions may ignore a settings file that has one: if no sheep appear, save it as UTF-8 without BOM"), OK));
     }
+    out
 }
 
 struct Handler<'a> {
@@ -262,6 +269,13 @@ pub fn glob_match(pattern: &str, value: &str) -> bool {
 /// writes them): `disableAllHooks`, `allowedHttpHookUrls` (a merged allowlist),
 /// `httpHookAllowedEnvVars`, and managed `allowManagedHooksOnly`.
 pub fn check_other_levels(project_dir: Option<&Path>, managed_file: Option<&Path>, port: u16, user_settings: Option<&Lj>) -> Vec<Check> {
+    check_other_levels_with(project_dir, managed_file, &[], &[], port, user_settings)
+}
+
+/// [`check_other_levels`], with more managed levels: files (Windows' `managed-settings.d\`
+/// drop-ins) and settings given as text with a name (Windows' registry policy values,
+/// `HKLM` and `HKCU\SOFTWARE\Policies\ClaudeCode` `Settings`; Windows plan W2).
+pub fn check_other_levels_with(project_dir: Option<&Path>, managed_file: Option<&Path>, managed_files: &[std::path::PathBuf], managed_texts: &[(String, String)], port: u16, user_settings: Option<&Lj>) -> Vec<Check> {
     let mut out = Vec::new();
     let mut levels: Vec<(&str, std::path::PathBuf)> = Vec::new();
     if let Some(p) = project_dir {
@@ -271,6 +285,10 @@ pub fn check_other_levels(project_dir: Option<&Path>, managed_file: Option<&Path
     if let Some(m) = managed_file {
         levels.push(("managed", m.to_path_buf()));
     }
+    levels.extend(managed_files.iter().map(|f| ("managed", f.clone())));
+    // Text levels are named by a path-like label (a registry value), read from `texts`.
+    let texts: std::collections::HashMap<std::path::PathBuf, &str> = managed_texts.iter().map(|(name, text)| (std::path::PathBuf::from(name), text.as_str())).collect();
+    levels.extend(managed_texts.iter().map(|(name, _)| ("managed", std::path::PathBuf::from(name))));
     let mut found: Vec<String> = Vec::new();
     let (mut allow, mut allow_defined): (Vec<String>, bool) = (Vec::new(), false);
     let (mut env_allow, mut env_defined): (Vec<String>, bool) = (Vec::new(), false);
@@ -279,8 +297,14 @@ pub fn check_other_levels(project_dir: Option<&Path>, managed_file: Option<&Path
         allow.extend(a.iter().map(js_string));
     }
     for (label, file) in &levels {
-        let Ok(bytes) = std::fs::read(file) else { continue };
-        let Ok(s) = lossless::parse(&String::from_utf8_lossy(&bytes)) else {
+        let bytes = match texts.get(file) {
+            Some(text) => text.as_bytes().to_vec(),
+            None => match std::fs::read(file) {
+                Ok(b) => b,
+                Err(_) => continue,
+            },
+        };
+        let Ok(s) = lossless::parse(lossless::split_bom(&String::from_utf8_lossy(&bytes)).1) else {
             out.push(Check::new(format!("{label} settings"), "WARN", format!("{} is not valid JSON; Claude Code ignores it, and doctor can't check it", file.display()), BAD_CONFIG));
             continue;
         };
@@ -361,6 +385,37 @@ mod tests {
         let c = checks.iter().find(|c| c.name == "hook onFailure").expect("an onFailure check");
         assert_eq!((c.status, c.exit_code), ("FAIL", BAD_CONFIG));
         assert!(c.detail.contains("SessionEnd") && c.detail.contains("block every tool call"), "{}", c.detail);
+    }
+
+    /// A settings file saved with a UTF-8 BOM (Notepad, W2) is read past it, not called
+    /// invalid JSON.
+    #[test]
+    fn a_bom_is_read_past() {
+        let f = std::env::temp_dir().join(format!("bw-bom-{}.json", std::process::id()));
+        std::fs::write(&f, format!("\u{feff}{}", lossless::stringify(&hook_block(47417, T), "  ").replace('\n', "\r\n"))).unwrap();
+        let checks = check_settings_file(&f, 47417, Some(T));
+        assert!(checks.iter().filter(|c| c.name != "settings BOM").all(|c| c.status == "PASS"), "{checks:?}");
+        let note = checks.iter().find(|c| c.name == "settings BOM").expect("the BOM is said");
+        assert_eq!(note.status, "INFO", "said, never failed");
+        assert!(note.detail.contains("without BOM"), "{}", note.detail);
+        std::fs::write(&f, lossless::stringify(&hook_block(47417, T), "  ")).unwrap();
+        assert!(!check_settings_file(&f, 47417, Some(T)).iter().any(|c| c.name == "settings BOM"), "no BOM, no line");
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// Windows' registry policy values (W2) are managed levels like the file: read from the
+    /// text given, named by the value, checked by the same rules.
+    #[test]
+    fn registry_policy_text_is_a_managed_level() {
+        let name = "HKLM\\SOFTWARE\\Policies\\ClaudeCode\\Settings".to_string();
+        let checks = check_other_levels_with(None, None, &[], &[(name.clone(), r#"{"allowManagedHooksOnly": true}"#.into())], 47417, None);
+        let c = checks.iter().find(|c| c.name == "managed settings").expect("the managed check");
+        assert_eq!(c.status, "FAIL");
+        assert!(c.detail.starts_with(&name), "{}", c.detail);
+        let info = checks.iter().find(|c| c.name == "other settings levels").unwrap();
+        assert!(info.detail.contains(&format!("managed ({name})")), "{}", info.detail);
+        let none = check_other_levels_with(None, None, &[], &[], 47417, None);
+        assert!(none.is_empty(), "no levels, no lines: {none:?}");
     }
 
     #[test]

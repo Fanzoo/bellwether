@@ -243,7 +243,9 @@ dependencies = [
  "libc",
  "serde_json",
  "sha2",
+ "socket2",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -256,6 +258,7 @@ dependencies = [
  "sha2",
  "unicode-normalization",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

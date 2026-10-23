@@ -549,7 +549,7 @@ pub fn command(args: &[String]) -> CmdResult {
     remember_token(&home);
     // A bad config is the user's to fix before anything moves.
     let _ = config(&home)?;
-    let user_home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let user_home = bellwether_core::paths::user_home().unwrap_or_default();
     let o = Options {
         from: a.value("from").map(user_path),
         env_from: a.value("env").map(user_path),

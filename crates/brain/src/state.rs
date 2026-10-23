@@ -5,10 +5,12 @@
 //!
 //!   GET  /state?after=<rev>[&wait=<ms>]  the snapshot as soon as rev > after, or the
 //!        current one after `wait` (default and maximum 25 s; 0 answers at once)
-//!   POST /control  {action: "mute" | "unmute" | "dismiss" | "placed" | "reload-token", ...}
+//!   POST /control  {action: "mute" | "unmute" | "dismiss" | "placed" | "reload-token" | "stop", ...}
 //!
 //! `reload-token` is new with the Rust brain (distribution plan D3, rotation): the brain
-//! reads the token file again and accepts the old token for one more minute.
+//! reads the token file again and accepts the old token for one more minute. `stop` too
+//! (Windows plan WD6): the brain answers, saves state.json and exits, as on SIGTERM; it is
+//! how the app stops its brain on Windows, which has no SIGTERM for it.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -27,6 +29,8 @@ use crate::{Body, Brain};
 
 const LONG_POLL_MS: f64 = 25_000.0;
 const MAX_CONTROL_BYTES: usize = 16 * 1024;
+/// How long `stop` waits after answering, so its 200 is on the wire before the brain goes.
+const STOP_AFTER: Duration = Duration::from_millis(100);
 
 fn empty(status: StatusCode) -> Response<Body> {
     Response::builder().status(status).header("Content-Length", "0").body(Empty::new().boxed()).unwrap()
@@ -150,6 +154,16 @@ pub(crate) async fn route(brain: &Arc<Brain>, conn: &Arc<Conn>, req: Request<Inc
         let Ok(msg) = json::parse(&String::from_utf8_lossy(&buf)) else {
             return Some(control_answer(StatusCode::BAD_REQUEST, false, Some("not JSON")));
         };
+        if msg.get("action").as_str() == Some("stop") {
+            brain.log.log("asked to stop (POST /control stop); stopping");
+            // After the answer is written: the connection task writes it when this returns.
+            let stop = brain.stop.clone();
+            tokio::task::spawn(async move {
+                tokio::time::sleep(STOP_AFTER).await;
+                stop.notify_one();
+            });
+            return Some(control_answer(StatusCode::OK, true, None));
+        }
         if msg.get("action").as_str() == Some("reload-token") {
             let (ok, error) = brain.reload_token();
             return Some(control_answer(if ok { StatusCode::OK } else { StatusCode::BAD_REQUEST }, ok, error.as_deref()));

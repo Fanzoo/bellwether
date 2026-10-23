@@ -77,6 +77,9 @@ pub struct Ctx {
     pub resources: Option<PathBuf>,
     /// The user's home: `~/.claude/settings.json`, `~/.local/bin`, `~/Library/LaunchAgents`.
     pub user_home: PathBuf,
+    /// CLAUDE_CONFIG_DIR, where Claude Code keeps its settings when it is set; None:
+    /// `<user_home>/.claude`.
+    pub claude_dir: Option<PathBuf>,
     /// BELLWETHER_CONFIG: a read-only config file in place of `<home>/config.json`.
     pub env_config: Option<String>,
     /// BELLWETHER_HOOK_TOKEN: a token from the environment (tests); never written anywhere.
@@ -86,7 +89,7 @@ pub struct Ctx {
 impl Ctx {
     /// The settings file the window edits: the user's, as `bellwether hooks install` edits it.
     pub fn settings_file(&self) -> PathBuf {
-        self.user_home.join(".claude").join("settings.json")
+        self.claude_dir.clone().unwrap_or_else(|| self.user_home.join(".claude")).join("settings.json")
     }
 }
 
@@ -1067,6 +1070,7 @@ mod tests {
             port: 47431,
             resources: None,
             user_home: base.join("user"),
+            claude_dir: None,
             env_config: None,
             env_token: env_token.map(str::to_string),
         }

@@ -30,6 +30,8 @@ pub struct Strips {
     pub ready: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Windows: the taskbar edge last logged per monitor (WD1).
     pub edges: std::sync::Mutex<HashMap<String, TaskbarEdge>>,
+    /// Windows: the on-top lines' rate limit (deviation W1-15).
+    pub on_top: std::sync::Mutex<crate::desktop::OnTopLog>,
 }
 
 impl Strips {
@@ -161,6 +163,37 @@ pub fn follow<R: Runtime>(app: &AppHandle<R>, height_px: f64, dock: crate::dock:
         let _ = window.set_position(LogicalPosition::new(r.x, r.y));
         log(&format!("{label}: moved for the Dock (autohide {}, {:?}): x {} y {} {}x{}", dock.autohide, dock.side, r.x, r.y, r.width, r.height));
     }
+}
+
+/// Windows: puts every strip back on top (`HWND_TOPMOST`, never activating it) and logs,
+/// at most once a minute per strip, when that was needed (deviation W1-15). Main thread:
+/// from the 2 s re-read and from the foreground-change hook. The locks are only tried: the
+/// hook can run while the main thread pumps messages, and the next pass catches up.
+/// Nothing on macOS (its window level isn't dropped this way).
+pub fn keep_on_top<R: Runtime>(app: &AppHandle<R>, why: &str) {
+    if Space::NATIVE != Space::Physical {
+        return;
+    }
+    let strips = app.state::<Strips>();
+    let Ok(by_monitor) = strips.by_monitor.try_lock().map(|m| m.values().cloned().collect::<Vec<_>>()) else { return };
+    for label in by_monitor {
+        let Some(window) = app.get_webview_window(&label) else { continue };
+        let Some(found) = put_on_top(&window) else { continue };
+        let line = strips.on_top.try_lock().ok().and_then(|mut l| l.note(&label, found, why, std::time::Instant::now()));
+        if let Some(line) = line {
+            log(&line);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn put_on_top<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Option<crate::desktop::OnTop> {
+    window.hwnd().ok().map(|h| crate::win::keep_topmost(h.0 as _))
+}
+
+#[cfg(not(windows))]
+fn put_on_top<R: Runtime>(_window: &tauri::WebviewWindow<R>) -> Option<crate::desktop::OnTop> {
+    None
 }
 
 /// Whether a window is a strip (`strip-<n>`), not the onboarding window: only strips are

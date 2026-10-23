@@ -5,8 +5,9 @@ one per Claude Code session, as they do along the Dock on macOS. Windows gets th
 app, brain, CLI and setup window, signed and updating itself.
 
 Status: proposal, with the maintainer's decisions of 2026-10-20 applied (see "Decisions
-(maintainer, 2026-10-20)" under Open questions). W1 is built, not yet run on Windows (its
-status, under W1); nothing else is built yet. Items marked
+(maintainer, 2026-10-20)" under Open questions). W1 is built and has had a first run on
+the maintainer's PC; W2's first part is built (their status sections); nothing else is
+built yet. Items marked
 **ASSUMPTION** are technical guesses that a milestone proves. Bracketed numbers such as
 [4] point to the Sources list at the end. Crate versions were read from `Cargo.lock` and
 crates.io on 2026-10-19 [21]. The Tauri, tao and wry behaviour quoted here was read from
@@ -1009,7 +1010,30 @@ Builds:
    exclusion is off by default on Windows).
 9. Run `run-test.cmd --dump-desktop desktop.json` and attach the file and both logs.
 
-#### W1 status (developer, 2026-10-19, updated 2026-10-20): built; the cargo suite green on Windows in a VM; the Windows CI job and the by-hand checks on the maintainer's PC not yet run
+#### W1 status (developer, 2026-10-19, updated 2026-10-21): built; the cargo suite green on Windows in a VM; CI green; first by-hand run on the maintainer's PC done, checks 2, 4, 13 and the new 14 open
+
+**Update, 2026-10-21: the maintainer's PC.** Windows 11 26H2, OS build 26300.9711, x64. Two
+monitors: the primary 5120x2160 at 150%, and a portrait 2160x3840 at 125% at x 5120, y
+-934 (above and right of the primary's top). `run-test.cmd` (port 47491): both strips came
+up on the taskbars' top edges (`strip-0 … x 0 y 1878 5120x210`, `strip-1 … x 5120 y 2671
+2160x175`, physical px), clicks, the drag between monitors and the heartbeat (every 10 s,
+no silence, over about 2 minutes) were right. One bug: at one point the sheep were behind
+ordinary windows, not reproduced with Win+D or a lock. Fixed by W1-15 (the strips are put
+back on top every 2 s and on every foreground change, and the log says when that was
+needed); its by-hand check is 14 below. Open from that run, for the next PC test with
+this fix: checks 2 (taskbar on all displays), 4 (scale change while running) and 13 (10
+minutes with Win+D and a lock). Not a bug: with `--demo-monitors` every monitor shows the
+whole demo flock, so dragging a sheep moves its copy on the other monitor too (W1-5; a
+note is under the by-hand list). Real sessions put each sheep on one monitor.
+
+W1-15 in the VM (2026-10-21, the rebuilt test folder): a probe script dropped the strip's
+topmost with `SetWindowPos(HWND_NOTOPMOST)`. Alone, the 2 s re-read put it back and logged
+`strip-0: was no longer on top (WS_EX_TOPMOST gone, seen on the 2 s re-read); put back on
+top`; together with a new Explorer window coming forward, it was back within about 160 ms,
+twice, logged `… seen on a foreground change …`. Before and after, the strip's extended
+style kept `WS_EX_TOOLWINDOW`, `WS_EX_TRANSPARENT`, `WS_EX_LAYERED` and `WS_EX_NOACTIVATE`,
+and the strip was never the foreground window. The cargo suite in the VM: see W2's status
+(the same run).
 
 **Update, 2026-10-20.** The maintainer ran the test folder in a Windows 11 ARM64 Parallels
 VM on this Mac (x64 build under emulation): placement, drag, clicks and the heartbeat
@@ -1176,8 +1200,23 @@ The rest of W1's Done-when, in the same run (start `.\run-test.cmd` again if it 
     strip, and no line says `silent`. If one does, the page was throttled: say so, with the
     log.
 
+14. **The sheep stay on top** (W1-15). While it runs, click the taskbar, open Start and close
+    it, open the notification centre (Win+N) and close it, and switch between a few windows
+    with Alt-Tab, each time with an ordinary window (Notepad, a browser) maximised on the
+    strip's monitor. The sheep stay in front of that window every time. If they ever go
+    behind it, note what you had just done, and whether they came back by themselves within
+    2 seconds. Then, in `home\shell.log`, look for `put back on top` or `could not be put
+    back on top` lines: send them with what you did just before. (At most one such line a
+    minute per strip; it says how many more there were.) Also, once, restart Windows
+    Explorer (Task Manager > Processes > Windows Explorer > Restart) while the demo runs:
+    the sheep are in front of ordinary windows again within 2 seconds.
+
+A note on `--demo-monitors`: every monitor shows the **whole** demo flock (the same demo
+sheep on each), so dragging a sheep on one monitor moves its copy on the other too. That is
+the demo, not a bug (W1-5). With real sessions (W2 on) each sheep is on one monitor only.
+
 Send back: the winver text, the screenshots (step 1, step 8), notes for steps 2–7 and
-10–13, `desktop.json` and `home\shell.log`. Afterwards you can delete the folder and
+10–14, `desktop.json` and `home\shell.log`. Afterwards you can delete the folder and
 `%LOCALAPPDATA%\local.bellwether.p47491` (WebView2's files for the test build).
 
 ### W2. The brain and the CLI on Windows: real sessions
@@ -1216,6 +1255,128 @@ Builds:
 the tray while a session runs, and the session shows no hook error (the brain kept
 answering); stop the test brain with `bellwether shell stop` and check `state.json` was
 saved (the session's colour comes back on restart).
+
+#### W2 status (developer, 2026-10-21, fix round 2026-10-22): first part built and verified by BR-3K (ship with fixes; fixed, W2-14 to W2-19); cargo suites green on the Mac and in the VM; full `npm test` on Windows, the CI run and the PC checks open
+
+Built:
+
+- **`user_home()` and `CLAUDE_CONFIG_DIR`** (WD8): `crates/core/src/paths.rs`. Every read of
+  the user's home goes through it (`USERPROFILE` on Windows, `HOME` elsewhere; W2-12), and
+  Claude Code's settings file is `$CLAUDE_CONFIG_DIR/settings.json` when that is set, on
+  every OS (the installer's default, doctor, the out-file guard, the setup window's
+  `Ctx::claude_dir`). The Node test helper drops an inherited `CLAUDE_CONFIG_DIR`, so a test
+  never reaches the developer's own Claude Code.
+- **The brain on Windows** (WD6): `POST /control {"action": "stop"}` (tokened, every OS;
+  the brain answers, saves state.json and exits; divergence 26); the parent watchdog by
+  process handle (`OpenProcess(SYNCHRONIZE)` and a wait, after checking the pid is still
+  this process's parent and older than it); `SO_EXCLUSIVEADDRUSE` on the listener
+  (`crates/brain/src/win.rs`). The strip stops its own brain with the tokened stop, then
+  `TerminateProcess` after 2 s, and starts it without a console window (W2-11).
+- **The protected DACL** (WD8): `crates/core/src/acl.rs` (W2-7). Doctor's token line reads
+  it back: PASS `… (only you can read it)`, or WARN naming who else can, with the `icacls`
+  fix.
+- **Rename retries** for up to 1 s on Windows' access-denied and sharing-violation errors
+  (W2-13). **CRLF was already kept**; **a UTF-8 BOM is now kept too**, with a new installer
+  vector, `utf-8-bom-crlf` (W2-6).
+- **Doctor on Windows**: the port's owner (`GetExtendedTcpTable`, the exe's path), the
+  answering brain's path, local time, the managed file under `%ProgramFiles%\ClaudeCode`
+  with its `managed-settings.d\` drop-ins and the `HKLM`/`HKCU` policy values (W2-9),
+  `legacy agents: none`, a Windows identity line; a closed port reads as "not running"
+  (W2-8); the bundled pets found in the test folder (W2-10).
+- **The console `bin\bellwether.exe`** (WD7; W2-1) and **the test folder for real
+  sessions**: `run-test.cmd --sessions` (token, `hooks.json`, the strip and its brain) and
+  `cli.cmd` (W2-3), with the test build's own refusals (W2-2).
+- **Labels**: a Windows `cwd` is named after its last folder (W2-4; divergence 28).
+- **CI** (`windows` job, not yet run): the cargo tests with the `conformance` feature, the
+  black-box hook suite against this build's `serve`, and the console CLI's output, exit
+  codes and refusals.
+
+Tested:
+
+- Mac: `npm run test:cargo` 317 passed, 0 failed (305 before); the xwin check of the whole
+  workspace for `x86_64-pc-windows-msvc` (`--locked`), no warnings. `npm test`: 1020 tests,
+  1018 pass, 0 fail, 1 skipped, and `test/brain-server.test.mjs` cancelled at the 120 s
+  per-file limit (its 22 tests uncounted; the run before, the same). That file is near the
+  limit without W2: run alone as `npm test` runs it, it passed in 106.6 s on the W1 commit's
+  own binary and in 107.4 s with W2 (22 of 22 each). Not a regression, but its margin is
+  thin on this Mac; raising its timeout or splitting it is for whoever touches it next.
+- The Windows 11 ARM64 VM (x64 build under emulation): `cargo test --workspace` **270
+  passed, 0 failed**, 24 targets (258 before), and with `--features
+  bellwether-shell/conformance` **272 passed, 0 failed**; among them the Windows-only DACL
+  round trip and the `/control stop` test. The black-box hook suite
+  (`test/hook-route-blackbox.test.mjs`) against the conformance build: 22 passed, 1
+  skipped (the 256-file-limit case), 0 failed. The test folder: `cli.cmd version` printed
+  `bellwether 1.1.1 (rust)` (exit 0); `hooks install --write` refused (exit 3);
+  `status --port 47417` refused (exit 3); `token init` and `hooks print --out hooks.json`
+  wrote their files (`only you can read it`); `status` with no brain exit 2. The strip
+  started its brain (`started the brain: …\Bellwether.exe serve --port 47491`), four hooks
+  posted as a Windows Terminal session in a herdr pane made one sheep with a permission
+  bubble (`status`: `1 sheep … ALERT`), a second `serve` on the port exited 2 (`port 47491
+  on 127.0.0.1 is already in use`), `SessionEnd` made it leave, and quitting the strip
+  logged `asked to stop (POST /control stop); stopping` in brain.log, the brain gone and
+  state.json written. The same run with the final build: the sheep labelled `my-project`
+  (W2-4); `doctor --settings <a hooks.json copy>` with the brain up: `All checks passed`,
+  `PASS token … (only you can read it)`, `PASS brain pid 5288, … last 12:43:57: the Rust
+  brain (C:\bellwether-test\w2\Bellwether.exe)` (local time, the exe's path); with no brain,
+  `FAIL brain  brain not running …` (W2-8); `icacls home\hook-token`: only the user, `(F)`,
+  no inherited entry. `run-test.cmd --sessions`, then the strip ended with
+  `Stop-Process -Force` (`TerminateProcess`): the brain was gone 98 ms later, logging `the
+  app that started this brain (pid 13000) is gone; stopping`. No real Claude Code ran in the
+  VM (its user's own `.claude` is off limits): sessions were hooks posted with the
+  Windows Terminal and herdr headers.
+- Still macOS wording on Windows, for W3 with the locator lines (BR-3K's W1 observation
+  3): doctor's `herdr CLI` (`… through iTerm2/Terminal only`), `accessibility` (System
+  Settings) and `next` (`… appears above the Dock`).
+
+**What W2 still needs (its second part):**
+
+- the full `npm test` on Windows with its pinned skip list (WD12 4): today only the
+  black-box hook suite runs there; `test/impl.mjs` drives the conformance session over
+  FIFOs (`mkfifo`), and other suites assume Unix programs;
+- the Windows CI job's first run with W2 (all of the above is unrun on `windows-2025`);
+- the macOS CI run;
+- the PC checks below.
+
+**By hand on the maintainer's PC (about 20 minutes), with the CI test folder.** Never the
+installed app or your own settings: the folder has its own home and port 47491, and
+`claude --settings <file>` adds the hooks for one session only.
+
+1. In the folder, in Windows Terminal: `.\cli version`, `.\cli doctor`, `.\cli status`.
+   Each prints in the terminal; note the exit codes (`echo $LASTEXITCODE`: version 0;
+   doctor 2 or 3 (no brain, hooks not in your settings); status 2 with no brain).
+2. `.\run-test.cmd --sessions`. It prints the `claude --settings …\hooks.json` line and
+   starts the strip; `home\logs\brain.log` says `listening on http://127.0.0.1:47491`.
+3. `icacls home\hook-token`: only your user, no `(I)` (inherited) entries. `.\cli doctor`
+   now has `PASS token … (only you can read it)` and `PASS brain`.
+4. In a new Windows Terminal tab (no herdr): `claude --settings <folder>\hooks.json`. A
+   sheep walks on (on the primary monitor: placing it on the terminal's monitor is W3),
+   labelled with the project folder's name. Ask for something that needs a permission: the
+   sheep turns to face you with a bubble. `/exit`: it leaves.
+5. The same inside herdr in Windows Terminal, twice in the same project folder (two herdr
+   panes): two sheep, labelled `<project> · p<n>` with each herdr pane. (One sheep alone
+   in its project keeps the plain name.)
+6. Real use puts each session's sheep on **one** monitor (not on every monitor as the demo
+   does).
+7. Quit the strip from the tray (Quit Bellwether): the brain stops with it
+   (`asked to stop (POST /control stop)` in brain.log). Start `.\run-test.cmd --sessions`
+   again: a session's sheep keeps its colour (state.json was saved).
+8. A brain that outlives the strip: in one tab `.\cli serve` (it stays in the foreground),
+   then `.\run-test.cmd --sessions` in another (the strip uses that brain and starts none),
+   and a `claude --settings …` session in a third. Quit the strip from the tray: the session
+   shows no hook error (the brain kept answering). Ctrl-C in the `serve` tab: it logs
+   `Ctrl-C, stopping` and saves state.json.
+9. The strip ended hard: with `--sessions` running, end `Bellwether.exe` (the one without
+   `serve`) in Task Manager: the `Bellwether.exe serve` process is gone within a second.
+10. The installer, on a scratch copy: `copy %USERPROFILE%\.claude\settings.json scratch.json`
+    (or any settings file), then `.\cli hooks install --settings scratch.json`: the diff;
+    `… --write`: `home\backups\settings-….json` written, the file has Bellwether's hooks,
+    and if the copy had CRLF line endings or a BOM (open it in Notepad: the status bar says
+    `Windows (CRLF)` and `UTF-8 with BOM`) it still has them. `.\cli hooks uninstall
+    --settings scratch.json --write` gives back the bytes. `.\cli hooks install --write`
+    without `--settings` is refused (exit 3).
+
+Send back: the outputs of steps 1 and 3, notes for 4–10, `home\shell.log` and
+`home\logs\brain.log`.
 
 ### W3. Which monitor, and clicking a sheep
 
@@ -1768,6 +1929,27 @@ the plan said, what is true, and what was done.
   an attached log held old runs too. Each `run-test.cmd` demo run now moves the old log to
   `home\shell.previous.log` first; the folder's README says so. A dump adds its lines to
   the current log.
+- **W1-15, the strips are put back on top, not set once** (the maintainer's PC run,
+  2026-10-21). WD2 relied on `always_on_top(true)` (`HWND_TOPMOST`) at creation. On his PC
+  the sheep were once behind ordinary windows; he couldn't reproduce it with Win+D or a
+  lock. Windows can drop a window's topmost state or put ordinary windows over it when the
+  taskbar or Start is activated, a full-screen app runs or explorer restarts, and nothing
+  put it back. Now `strips::keep_on_top` puts every strip back with `SetWindowPos(HWND_TOPMOST,
+  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)` (never activating it or moving focus; the
+  other extended-style bits are untouched) on the 2 s re-read and on every foreground
+  change (`SetWinEventHook(EVENT_SYSTEM_FOREGROUND)`, out of context, skipping our own
+  process, on the main thread: `win::on_foreground_change`). Before it does, `win::keep_topmost`
+  reads whether `WS_EX_TOPMOST` was gone; the verdict is pure (`desktop::on_top`, tested on
+  the Mac). (A z-order walk for an ordinary window over the strip was dropped in W2-17.) When the put-back was needed, shell.log gets one
+  line naming the strip and the trigger (`strip-0: was no longer on top (WS_EX_TOPMOST
+  gone, seen on a foreground change); put back on top`, or `… could not be put back on
+  top …`), at most one a minute per strip, the next
+  line counting the ones not logged (`desktop::OnTopLog`, tested). The start-up log says
+  `strips: put back on top every 2 s and on every foreground change …` (or a warning if the
+  hook couldn't be set). Windows only; macOS unchanged. A strip put back on top also goes
+  above other topmost windows (another app's always-on-top overlay); it is click-through
+  except over a sheep. Proven in the VM by dropping topmost by hand (W1 status); whether it
+  cures what the maintainer saw is by-hand check 14.
 - **W1-10, capture exclusion off by default on Windows, brought forward from W5**
   (maintainer's run, 2026-10-20). The plan put the per-OS default of
   `privacy.captureExclusion` in W5, but W1's by-hand step 8 expects the sheep in
@@ -1786,3 +1968,131 @@ the plan said, what is true, and what was done.
   `WDA_EXCLUDEFROMCAPTURE` on Windows. W5 keeps the doctor line and the affinity read-back.
   The W1 run was in a VM on ARM64, not on the planned x64 PC with two monitors, so the
   by-hand list still stands for that PC.
+
+2. **Deviations in building milestone W2** (developer, 2026-10-21). Numbered W2-n.
+
+- **W2-1, the console CLI is a feature-gated `[[bin]]`.** WD7 says a `[[bin]]` in the shell
+  crate. It is `bellwether` (`src/bin/bellwether.rs`) with `required-features =
+  ["console-cli"]`, and the package has `default-run = "bellwether-shell"`, so macOS builds
+  and `cargo test` are unchanged; only `scripts/build-windows-test.mjs` turns the feature
+  on (W8's build script will too). With no subcommand it prints the usage; it never starts
+  the strip.
+- **W2-2, the test folder keeps the repository layout; the test build refuses in code.**
+  WD12 5 and W1-3 planned a compile-time test port and home. The folder's `.cmd` files set
+  `BELLWETHER_AGENT_DIR`, `BELLWETHER_HOME` and (for the CLI) `BELLWETHER_CONFIG`, as in
+  W1, and an exe started any other way refuses every command without `BELLWETHER_HOME`
+  (M11-a). What a compiled-in home was for is enforced by the `test-build` feature instead
+  (`cli::test_build_refusal`, tested): `hooks install|uninstall`, `token rotate` and
+  `migrate` need `--settings <file>`; `autostart install|uninstall` is refused; port 47417
+  is refused from `--port` or the config, in the CLI, in `serve` and in the strip.
+- **W2-3, `cli.cmd`, not `bellwether.cmd`.** In the folder `.\bellwether` runs
+  `Bellwether.exe`: cmd tries `.EXE` before `.CMD`, and NTFS ignores case (found in the
+  VM). The wrapper is `cli.cmd`: `.\cli doctor`.
+- **W2-4, a Windows `cwd` is cut at `\`** (found in the VM). The label was `basename`,
+  which cuts at `/` only, so a Windows session was labelled `C:\Users\…\my-project`.
+  `normalise::cwd_basename` also cuts a Windows path (`C:\…`, `C:/…`, `\\server\…`) at `\`;
+  a macOS path as before (divergence 28).
+- **W2-5, the one flake of the first VM run.** `crates/brain/tests/http.rs` sent the head
+  and the body of a request in two writes. A guard answers 403 before reading the body, and
+  Windows closes a socket with unread data with a reset, which could lose the 403
+  (`request(…).unwrap()` on None, once in a full run; five runs of the target alone
+  passed). The test client sends one buffer, as HTTP clients do. The brain is unchanged:
+  a real hook with a wrong token fails either way.
+- **W2-6, a BOM was refused; now it is kept.** WD8 says the installer keeps a BOM, but
+  since M1 a settings file starting with U+FEFF was refused with exit 3 (Node's
+  `JSON.parse`), pinned by `test/tester-m1.test.mjs`. Reports on Claude Code's tracker say
+  its CLI reads a settings file with a BOM (its desktop app and plugin manifests don't),
+  and Notepad and PowerShell 5.1 write them. So, on every OS, the installer and doctor read
+  past it and the installer writes it back (`lossless::split_bom`); the M1 test now pins
+  that (divergence 27). Not verified here with a real Claude Code: step 10 of the by-hand
+  list uses such a file only as a scratch copy.
+- **W2-7, where the DACL goes.** WD8 names the token and `backups\`. The rule is "0600 is
+  a protected DACL for the user only": every write through `persist::write_atomic_sync`
+  with mode 0600 (the token, state.json, `migrate`'s config.json), set on the temporary
+  file before any text goes in; a directory `create_private_dir` creates (one that was
+  there keeps its ACL, as DirBuilder's mode on Unix); `backups\` when it is created, and
+  each backup; `hooks.json` from `hooks print --out`. The user's settings.json keeps its
+  inherited ACL. Setting it is best effort (a FAT32 stick has no ACLs), and doctor says
+  what the token's DACL is: SYSTEM and Administrators count as "only you" (they can read
+  any file, as root can). Messages say `only you can read it` on Windows, not `mode 0600`.
+- **W2-8, a closed loopback port reads as "not running" on Windows.** Windows retries a
+  connect to a closed localhost port for about 2 s before refusing it, so doctor's 1 s
+  probe timed out and said something "accepted the connection but didn't answer /health"
+  (seen in the VM with no brain). A loopback listener accepts at once, so on Windows a
+  timed-out connect to 127.0.0.1 counts as refused (`client::connect_failure`, tested).
+  Checked in the VM with the rebuilt folder (W2 status).
+- **W2-9, more managed settings, on Windows only.** WD8 names the Program Files file and
+  both registry values. Doctor also reads `managed-settings.d\*.json` beside it, and treats
+  each registry value as a managed level with the same checks
+  (`settings_checks::check_other_levels_with`). macOS's managed checks are unchanged.
+- **W2-10, the bundled pets in the test folder.** Doctor looked for them in the checkout
+  the exe was built from (CI's path), and said `reinstall Bellwether`. `pets::bundled_file`
+  honours `BELLWETHER_AGENT_DIR`, as the strip does.
+- **W2-11, the child brain has no console window.** A development build is a console
+  program; the strip starts its brain with `CREATE_NO_WINDOW`.
+- **W2-12, `user_home` falls back to `HOME` on Windows.** Without `USERPROFILE` (a test that
+  clears the environment), `HOME` is read if that is all there is. The Node test helper
+  sets `USERPROFILE` to the test's `HOME`, and the two brain tests that set `HOME` set
+  `USERPROFILE` too.
+- **W2-13, the rename retry.** Every 50 ms for up to 1 s, on Windows errors 5 and 32 only
+  (`persist::replace_file`), for `write_atomic_sync` (the token, state.json) and the
+  settings file's install. `config.json`'s edit (M13) and `installs.json` don't rename.
+
+Fix round after BR-3K's W2 verdict (2026-10-22, "ship with fixes"; the maintainer approved
+D1 to D4, the doctor note and the optional `Below` removal):
+
+- **W2-14, the strip's stop uses the current token** (D1). `stop_child` sent the token the
+  brain was started with; after `bellwether token rotate` the brain takes that one for a
+  minute only, so a later quit was refused (403), the brain was ended by `TerminateProcess`
+  and state.json lost what changed since its last write. Now the stop is tried with the
+  token as it is now (`settings::token_now`, hook-token read again), then the one it started
+  with; a 403 moves to the next, any other error ends it (`brain::stop_tokens`,
+  `send_stop`). Test: `the_stop_uses_the_current_token_and_survives_a_stale_one` (a brain
+  that takes only the new token: the stale token alone is refused and the brain serves on;
+  stale then current stops it and state.json has the change). BR-3K's brain-half repro in
+  `test/tester-w2.test.mjs` is unchanged (the brain's grace is the same).
+- **W2-15, a settings file in use says so** (D2). When Windows still refuses the rename
+  after W2-13's second of retries, `hooks install|uninstall` said `cannot write
+  \\?\C:\…: EACCES` and exited 1. Now: `<the path as given> is in use by another program (an
+  editor, or a virus scan), so it wasn't changed. Close it there and run the command again`,
+  exit 3, as the other "nothing was written" refusals (`hooks::write_failure`, tested).
+  Every write-failure message names the path as given, never the `\\?\` form. (A backup of
+  the untouched file is still made first, as designed.)
+- **W2-16, a token file with a BOM is read past it** (D3). Notepad and PowerShell 5.1 save
+  `hook-token` with a BOM, which made the token fail the format check (`must be at least 16
+  characters …`). `token::read_file`, which every reader goes through (the brain, the
+  strip, doctor, the CLI), drops a leading BOM before taking the first line and trimming it
+  (CRLF and trailing spaces were already trimmed). Chosen over naming the BOM in the
+  message: the token is the same token, and the settings installer accepts a BOM too
+  (W2-6). `token init|rotate` still write the file without one. Tested.
+- **W2-17, the on-top check reads the style only.** W1-15 also walked the z-order above the
+  strip for an ordinary window over it (`OnTop::Below`). Windows keeps every topmost window
+  above every ordinary one, so for a strip still marked `WS_EX_TOPMOST` that could only
+  catch a race (BR-3K's observation). The walk and `Below` are gone: `desktop::on_top(before,
+  after)` is `Kept`, `StyleLost` or `Refused`, and the put-back itself is unchanged
+  (every 2 s and on every foreground change).
+- **W2-18, `desktop` is a public module** (D4), so `tests/tester_*` files can reach
+  `on_top` and `OnTopLog` (`bellwether_shell_lib::desktop`). It holds only pure rules.
+- **W2-19, doctor says when Claude Code's settings file has a BOM.** Since W2-6 doctor
+  passes such a file, but nobody has confirmed every Claude Code version reads one. Doctor
+  adds `INFO settings BOM <file> starts with a byte order mark … some Claude Code versions
+  may ignore a settings file that has one: if no sheep appear, save it as UTF-8 without
+  BOM`. INFO only: the exit code and the `next` line are unchanged. This changes one
+  assertion in BR-3K's `test/tester-w2.test.mjs` (it pinned that doctor says nothing about
+  a BOM); it now expects the INFO line.
+- Tested after the fix round: Mac `npm run test:cargo` 325 passed, 0 failed (25 targets,
+  BR-3K's `tester_w2.rs` included); `npm test` 1049 tests, 1048 pass, 0 fail, 0 cancelled,
+  1 skipped; BR-3K's gated rotation test (`BELLWETHER_SLOW=1 … --test-name-pattern="after a
+  rotation" test/tester-w2.test.mjs`) 1 of 1; the xwin check (`--locked`) clean. VM:
+  `cargo test --workspace` 279 passed, 0 failed (25 targets); with `conformance` 281
+  passed, 0 failed; `test/hook-route-blackbox.test.mjs` and `test/tester-w2.test.mjs`
+  against the conformance exe, scratch profile: 30 tests, 29 pass, 1 skipped, 0 fail (the
+  gated ones stay gated). By hand in the VM, scratch profile: `scratch.json` held open for
+  5 s by another process: `… is in use by another program …`, exit 3, the file unchanged;
+  closed, the install went through (exit 0). A `hook-token` written by `Set-Content
+  -Encoding UTF8` (`EF BB BF` first): doctor took the token, and warned only that the file
+  (inherited ACL) is readable by Users and Authenticated Users.
+- Not done: splitting `test/brain-server.test.mjs`'s fixture loop. With
+  `--test-concurrency=1` Node's `--test-timeout` covers the whole file, so one test per
+  fixture would not shorten it (it would add a brain per fixture); BR-3K found CI far from
+  the limit.

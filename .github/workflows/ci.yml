@@ -197,8 +197,39 @@ jobs:
       # Every failure in one run, not just the first crate's.
       - name: npm run test:cargo
         run: npm run test:cargo -- --no-fail-fast
-      - name: The test folder (unsigned; --features test-build; Windows plan WD12)
+      # W2: the cargo tests again with the conformance feature (the hidden `__` commands).
+      - name: cargo test with the conformance feature
+        run: npm run test:cargo -- --no-fail-fast --features bellwether-shell/conformance
+      # W2: the black-box hook suite against this build's `serve` (the full npm test on
+      # Windows, with its pinned skip list, is still to come).
+      - name: The black-box hook suite against Bellwether serve
+        run: |
+          npm run build:dev
+          node --import ./test/setup.mjs --test --test-concurrency=1 --test-timeout=120000 test/hook-route-blackbox.test.mjs
+      - name: The test folder (unsigned; --features test-build,console-cli; Windows plan WD12)
         run: node scripts/build-windows-test.mjs
+      # W2: the console CLI prints in the terminal with its exit codes, and the test build
+      # refuses what would reach the live install.
+      - name: The console CLI (bin\bellwether.exe through cli.cmd)
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $dir = (Resolve-Path "shell/src-tauri/target-dev/windows-test/bellwether-windows-test").Path
+          $v = & cmd /c "$dir\cli.cmd version"
+          if ($LASTEXITCODE -ne 0 -or $v -notmatch '^bellwether \d+\.\d+\.\d+.* \(rust\)$') { Write-Output "::error::cli.cmd version: exit $LASTEXITCODE, '$v'"; exit 1 }
+          Write-Output $v
+          $r = & cmd /c "$dir\cli.cmd hooks install --write 2>&1"
+          if ($LASTEXITCODE -ne 3 -or "$r" -notmatch 'never edits your own Claude Code settings') { Write-Output "::error::hooks install without --settings: exit $LASTEXITCODE, '$r'"; exit 1 }
+          $r = & cmd /c "$dir\cli.cmd status --port 47417 2>&1"
+          if ($LASTEXITCODE -ne 3) { Write-Output "::error::status on port 47417: exit $LASTEXITCODE, '$r'"; exit 1 }
+          & cmd /c "$dir\cli.cmd token init"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & cmd /c "$dir\cli.cmd hooks print --out $dir\hooks.json"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$dir\hooks.json")) { exit 1 }
+          & cmd /c "$dir\cli.cmd status"
+          if ($LASTEXITCODE -ne 2) { Write-Output "::error::status with no brain should exit 2, got $LASTEXITCODE"; exit 1 }
+          # The folder ships without a home or a token: the next steps' smoke runs, and the artifact, start clean.
+          Remove-Item -Recurse -Force "$dir\home", "$dir\hooks.json"
       # The demo flock with a scratch home on the test port, for 25 s. A runner without an
       # interactive desktop opens no strip: then this says so as a warning and is skipped,
       # never passed (WD12 4).

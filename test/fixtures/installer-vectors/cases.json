@@ -19,6 +19,13 @@
       "roundTrip": true
     },
     {
+      "name": "a UTF-8 BOM and CRLF (Notepad), Windows plan W2",
+      "group": "layout",
+      "dir": "utf-8-bom-crlf",
+      "layoutKept": true,
+      "roundTrip": true
+    },
+    {
       "name": "no trailing newline",
       "group": "layout",
       "dir": "no-trailing-newline",

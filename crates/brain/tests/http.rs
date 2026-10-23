@@ -61,8 +61,13 @@ fn request(port: u16, method: &str, path: &str, headers: &[(&str, String)], body
         head.push_str(&format!("{k}: {v}\r\n"));
     }
     head.push_str("\r\n");
-    s.write_all(head.as_bytes()).unwrap();
-    let _ = s.write_all(body);
+    // Head and body in one write, as an HTTP client sends them. Two writes can reach the
+    // brain as two segments: a guard answers 403 before reading the body, and Windows
+    // closes a socket with unread data with a reset, which can lose the 403 here (the
+    // VM run's one flake, W2).
+    let mut all = head.into_bytes();
+    all.extend_from_slice(body);
+    s.write_all(&all).unwrap();
     let mut raw = Vec::new();
     if s.read_to_end(&mut raw).is_err() && raw.is_empty() {
         return None;
@@ -255,6 +260,38 @@ fn reload_token_keeps_the_old_token_for_a_minute() {
     let r = request(q, "POST", "/control", &with(state_headers(q, TOKEN), "Content-Type", Some("application/json")), br#"{"action":"reload-token"}"#).unwrap();
     assert_eq!(r.status, 400);
     assert!(json_body(&r)["error"].as_str().unwrap().contains("BELLWETHER_HOOK_TOKEN"));
+}
+
+/// `/control {"action":"stop"}` (Windows plan WD6, W2): the tokened stop the app uses on
+/// Windows. Refused without the token; with it, the brain answers 200, saves state.json and
+/// its serve returns, as on SIGTERM.
+#[test]
+fn stop_answers_then_saves_and_returns() {
+    let home = std::env::temp_dir().join(format!("bw-stop-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let mut opts = bellwether_brain::Options::new(TOKEN.into(), bellwether_brain::Mode::Normal, bellwether_brain::Logger::stderr_only());
+    opts.home = Some(home.clone());
+    opts.timings.persist = Duration::from_secs(3600);
+    let bound = bellwether_brain::bind(0).unwrap();
+    let p = bound.port;
+    let (done_tx, done) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let r = bellwether_brain::serve(bound, opts, None);
+        let _ = done_tx.send(r.is_ok());
+    });
+    mute(p, "mute");
+    let ctl = |token: &str| request(p, "POST", "/control", &with(state_headers(p, token), "Content-Type", Some("application/json")), br#"{"action":"stop"}"#).unwrap();
+    assert_eq!(ctl("wrongTokenNotReal_0123456789").status, 403, "the token is required");
+    assert_eq!(health(p)["ok"], true, "still serving after a refused stop");
+    let r = ctl(TOKEN);
+    assert_eq!((r.status, json_body(&r)), (200, serde_json::json!({ "ok": true })));
+    assert_eq!(done.recv_timeout(Duration::from_secs(5)), Ok(true), "serve returned after stop");
+    thread.join().unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join("state.json")).expect("state.json saved on the way out")).unwrap();
+    assert_eq!(saved["muted"], true);
+    assert!(TcpStream::connect(("127.0.0.1", p)).is_err(), "the port is free again");
+    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// The connection cap (milestone 3, from the M1 review): past `max_connections` the brain

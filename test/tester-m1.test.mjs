@@ -295,8 +295,8 @@ describe('installer ownership and unusual settings shapes', () => {
     assert.equal(sh(r.f), text);
   });
 
-  test('comments, trailing commas, a BOM and a top-level array are refused with exit 3 and nothing written', () => {
-    const cases = { comment: '{\n // hi\n "hooks": {}\n}\n', trailing: '{"hooks": {},}', bom: '﻿{"hooks":{}}', array: '[]', empty: '' };
+  test('comments, trailing commas and a top-level array are refused with exit 3 and nothing written', () => {
+    const cases = { comment: '{\n // hi\n "hooks": {}\n}\n', trailing: '{"hooks": {},}', array: '[]', empty: '' };
     const backups = () => (fs.existsSync(path.join(root, 'data', 'backups')) ? fs.readdirSync(path.join(root, 'data', 'backups')).length : 0);
     const n0 = backups();
     for (const [k, text] of Object.entries(cases)) {
@@ -306,6 +306,21 @@ describe('installer ownership and unusual settings shapes', () => {
       assert.doesNotMatch(r.err, /at .*\.mjs:\d+/);
     }
     assert.equal(backups(), n0, 'a refused file must not leave a backup');
+  });
+
+  // Windows plan W2 (deviation W2-6): a UTF-8 BOM (Notepad, PowerShell 5.1) was refused
+  // here until W2; Claude Code's CLI reads such a file, so the installer now reads past the
+  // BOM and keeps it, on every OS.
+  test('a settings file with a UTF-8 BOM is installed into and keeps its BOM, and uninstall gives the bytes back', () => {
+    const text = '\ufeff{"hooks":{}}';
+    const r = run('bom', null, ['hooks', 'install', '--write'], { text });
+    assert.equal(r.code, 0, r.err);
+    const after = sh(r.f);
+    assert.ok(after.startsWith('\ufeff{'), 'the BOM is still first');
+    assert.ok(JSON.parse(after.slice(1)).hooks.Stop, 'the hooks are in');
+    cli(['hooks', 'uninstall', '--write', '--settings', r.f]);
+    assert.ok(sh(r.f).startsWith('\ufeff'), 'still a BOM after uninstall');
+    assert.deepEqual(JSON.parse(sh(r.f).slice(1)), { hooks: {} });
   });
 
   test('other hooks on the same events: untouched, same order, bellwether group appended last', () => {

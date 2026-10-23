@@ -581,7 +581,7 @@ fn rotate(home: &Path, args: &[String]) -> CmdResult {
             ));
         }
     };
-    let mut text = format!("wrote a new hook token to {} (mode 0600; the value isn't shown); {brain}\n", file.display());
+    let mut text = format!("wrote a new hook token to {} ({}; the value isn't shown); {brain}\n", file.display(), bellwether_core::acl::PRIVATE);
     if let Some(plan) = plan.as_mut() {
         match installer::apply_plan(plan, &home.join("backups"), Some(home), &file_stamp(crate::now_ms())) {
             Ok(backup) => {
@@ -699,7 +699,10 @@ fn hooks(args: &[String]) -> CmdResult {
         }
         installer::write_replace(&target, text.as_bytes(), 0o600).map_err(fail)?;
         installer::set_mode(&target, 0o600).map_err(fail)?;
-        err_line(&format!("wrote {} (mode 0600). Try it with: claude --settings {}", target.display(), target.display()));
+        // Windows (W2): the user's only, as 0600 is on Unix (best effort).
+        #[cfg(windows)]
+        let _ = bellwether_core::acl::make_private(&target, false);
+        err_line(&format!("wrote {} ({}). Try it with: claude --settings {}", target.display(), bellwether_core::acl::PRIVATE, target.display()));
         return Ok(exit::OK);
     }
     let action = match sub {

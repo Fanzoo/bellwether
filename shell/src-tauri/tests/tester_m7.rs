@@ -20,7 +20,7 @@ fn temp(name: &str) -> PathBuf {
 }
 
 fn ob(base: &Path) -> Onboarding {
-    Onboarding::new(Ctx { layout: Layout::App, home: base.join("app"), port: 47481, resources: None, user_home: base.join("user"), env_config: None, env_token: None })
+    Onboarding::new(Ctx { layout: Layout::App, home: base.join("app"), port: 47481, resources: None, user_home: base.join("user"), claude_dir: None, env_config: None, env_token: None })
 }
 
 fn settings(o: &Onboarding) -> PathBuf {
@@ -185,7 +185,7 @@ fn a_symlinked_pet_source_or_unreadable_one_is_a_message_not_a_panic() {
 #[test]
 fn a_repository_layout_never_makes_a_token_or_writes_config() {
     let base = temp("repo");
-    let mut c = Ctx { layout: Layout::Repository, home: base.join("data"), port: 47481, resources: None, user_home: base.join("user"), env_config: None, env_token: None };
+    let mut c = Ctx { layout: Layout::Repository, home: base.join("data"), port: 47481, resources: None, user_home: base.join("user"), claude_dir: None, env_config: None, env_token: None };
     c.layout = Layout::Repository;
     let o = Onboarding::new(c);
     assert!(o.login_items_set(true).is_err());

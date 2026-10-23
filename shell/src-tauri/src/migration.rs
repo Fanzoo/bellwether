@@ -418,7 +418,7 @@ pub fn command(args: &[String]) -> Result<i32, (String, i32)> {
     if a.has("undo") && (a.has("from") || a.has("env") || a.has("force")) {
         return Err((format!("--undo takes only --write (and --settings)\n{USAGE}"), exit::BAD_CONFIG));
     }
-    let user_home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let user_home = bellwether_core::paths::user_home().unwrap_or_default();
     // First of all, before any file is read: which host, and whether this run may act.
     let mut host = host_for(&user_home).map_err(|e| (e, exit::BAD_CONFIG))?;
     let real = bellwether_brain::migrate::is_real_home(&user_home);

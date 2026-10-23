@@ -213,6 +213,20 @@ pub fn basename(p: &str) -> String {
     }
 }
 
+/// The project's name from a session's `cwd`: `basename`, and for a Windows path
+/// (`C:\…`, `C:/…`, `\\server\share\…`) after its last `\` as well, so a session on
+/// Windows is `my-project`, not its whole path (Windows plan W2). A macOS or Linux path is
+/// cut at `/` only, as before (a `\` is a legal character in a folder name there).
+pub fn cwd_basename(cwd: &str) -> String {
+    let b = cwd.as_bytes();
+    let drive = b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/');
+    if drive || cwd.starts_with("\\\\") {
+        basename(&cwd.replace('\\', "/"))
+    } else {
+        basename(cwd)
+    }
+}
+
 pub fn normalise(payload: &Js, headers: &Obj, received_at: f64, clean: Option<&Cleaner>) -> HookEvent {
     let mut ev = HookEvent { received_at, ..HookEvent::default() };
     // The event name is written to logs and recordings, so it gets the identifier check too.
@@ -239,7 +253,7 @@ pub fn normalise(payload: &Js, headers: &Obj, received_at: f64, clean: Option<&C
     }
     if let Some(cwd) = str_of(payload.get("cwd"), 4096) {
         // A folder name is free text too: control, bidi and zero-width characters out.
-        ev.project_label = redact::clean_label(&basename(&cwd), 200);
+        ev.project_label = redact::clean_label(&cwd_basename(&cwd), 200);
         ev.cwd = Some(cwd);
     }
     // StopFailure carries an error enum; PostToolUseFailure's `error` is free text and is dropped.
@@ -413,6 +427,22 @@ mod tests {
     fn basenames_like_node() {
         for (p, want) in [("/a/b", "b"), ("/a/b/", "b"), ("/", ""), ("", ""), ("a", "a"), ("//x//", "x")] {
             assert_eq!(basename(p), want, "{p}");
+        }
+    }
+
+    #[test]
+    fn a_windows_cwd_is_named_after_its_last_folder() {
+        for (cwd, want) in [
+            ("C:\\Users\\jeff\\my-project", "my-project"),
+            ("C:\\Users\\jeff\\my-project\\", "my-project"),
+            ("d:/work/my-project", "my-project"),
+            ("\\\\server\\share\\my-project", "my-project"),
+            ("C:\\", "C:"),
+            // macOS and Linux paths as before: a backslash is part of a folder's name there.
+            ("/Users/jeff/my-project", "my-project"),
+            ("/Users/jeff/odd\\name", "odd\\name"),
+        ] {
+            assert_eq!(cwd_basename(cwd), want, "{cwd}");
         }
     }
 

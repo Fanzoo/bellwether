@@ -144,6 +144,69 @@ impl Space {
     }
 }
 
+/// What a strip's on-top check found (Windows; deviation W1-15). The strip is made
+/// topmost when it is built, and Windows can drop that later (the taskbar or Start
+/// activated, a full-screen app, explorer restarting); so it is put back every 2 s and on
+/// every foreground change, and this says whether that put-back was needed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub enum OnTop {
+    /// Topmost, and no ordinary window above it.
+    Kept,
+    /// `WS_EX_TOPMOST` was gone; it is back.
+    StyleLost,
+    /// Still not topmost after `SetWindowPos(HWND_TOPMOST)`.
+    Refused,
+}
+
+/// The check's verdict: whether the strip was topmost before the put-back (`before`) and
+/// is after it (`after`). Only the style is read: Windows keeps every topmost window above
+/// every ordinary one, so a strip still marked topmost has no ordinary window over it
+/// (W2-17; a z-order walk for one, in W1-15, could only catch a race).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn on_top(before: bool, after: bool) -> OnTop {
+    if !after {
+        OnTop::Refused
+    } else if !before {
+        OnTop::StyleLost
+    } else {
+        OnTop::Kept
+    }
+}
+
+/// At most one on-top line per strip in this long; the put-backs in between are counted
+/// and the next line says how many, so a flapping case can't fill the log.
+pub const ON_TOP_LOG_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The on-top lines' rate limit, per strip.
+#[derive(Default)]
+pub struct OnTopLog {
+    /// label -> (when its last line was written, put-backs since, not logged)
+    per: std::collections::HashMap<String, (std::time::Instant, u32)>,
+}
+
+impl OnTopLog {
+    /// The line to log for a check, if any. `why`: what set the check off ("on the 2 s
+    /// re-read", "on a foreground change").
+    pub fn note(&mut self, label: &str, found: OnTop, why: &str, now: std::time::Instant) -> Option<String> {
+        if found == OnTop::Kept {
+            return None;
+        }
+        if let Some((last, quiet)) = self.per.get_mut(label) {
+            if now.duration_since(*last) < ON_TOP_LOG_EVERY {
+                *quiet += 1;
+                return None;
+            }
+        }
+        let quiet = self.per.insert(label.to_string(), (now, 0)).map(|(_, q)| q).unwrap_or(0);
+        let more = if quiet > 0 { format!(" ({quiet} more since the last line, not logged)") } else { String::new() };
+        Some(match found {
+            OnTop::StyleLost => format!("{label}: was no longer on top (WS_EX_TOPMOST gone, seen {why}); put back on top{more}"),
+            _ => format!("{label}: could not be put back on top (still not topmost after SetWindowPos, seen {why}); ordinary windows may cover it{more}"),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +285,36 @@ mod tests {
         assert_eq!(s.rect((1920.0, 0.0), (3840.0, 2160.0), 1.5), f(1920.0, 0.0, 3840.0, 2160.0));
         assert_eq!(s.per_logical(1.5), 1.5);
         assert_eq!(s.per_logical(-1.0), 1.0);
+    }
+
+    #[test]
+    fn on_top_is_lost_when_the_style_goes() {
+        assert_eq!(on_top(true, true), OnTop::Kept);
+        assert_eq!(on_top(false, true), OnTop::StyleLost);
+        assert_eq!(on_top(false, false), OnTop::Refused, "still not topmost after the put-back");
+        assert_eq!(on_top(true, false), OnTop::Refused);
+    }
+
+    #[test]
+    fn on_top_lines_are_one_a_minute_per_strip_and_count_the_rest() {
+        let t0 = std::time::Instant::now();
+        let s = std::time::Duration::from_secs;
+        let mut log = OnTopLog::default();
+        assert_eq!(log.note("strip-0", OnTop::Kept, "on the 2 s re-read", t0), None, "kept: nothing to say");
+        let first = log.note("strip-0", OnTop::StyleLost, "on a foreground change", t0).unwrap();
+        assert_eq!(first, "strip-0: was no longer on top (WS_EX_TOPMOST gone, seen on a foreground change); put back on top");
+        // Flapping: quiet for a minute, counted.
+        for i in 1..=5 {
+            assert_eq!(log.note("strip-0", OnTop::StyleLost, "on the 2 s re-read", t0 + s(i * 2)), None);
+        }
+        // Another strip has its own limit.
+        assert!(log.note("strip-1", OnTop::StyleLost, "on the 2 s re-read", t0 + s(3)).unwrap().starts_with("strip-1: was no longer on top"));
+        // Kept checks don't count, and don't reset the limit.
+        assert_eq!(log.note("strip-0", OnTop::Kept, "on the 2 s re-read", t0 + s(30)), None);
+        let next = log.note("strip-0", OnTop::StyleLost, "on the 2 s re-read", t0 + ON_TOP_LOG_EVERY).unwrap();
+        assert!(next.ends_with("put back on top (5 more since the last line, not logged)"), "{next}");
+        let refused = log.note("strip-0", OnTop::Refused, "on the 2 s re-read", t0 + ON_TOP_LOG_EVERY * 2).unwrap();
+        assert!(refused.starts_with("strip-0: could not be put back on top") && !refused.contains("more since"), "{refused}");
     }
 
     /// WD3's example: dividing a 150% monitor right of a 100% primary by its own scale puts

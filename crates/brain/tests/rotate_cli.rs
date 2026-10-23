@@ -80,7 +80,11 @@ fn rotate_changes_the_entries_only_with_a_brain_that_switched_or_none() {
     let root = std::env::temp_dir().join(format!("bw-rotate-cli-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("user")).unwrap();
+    // The user's home on every OS (USERPROFILE on Windows; crates/core's paths), and no
+    // CLAUDE_CONFIG_DIR, which would move the settings file.
     std::env::set_var("HOME", root.join("user"));
+    std::env::set_var("USERPROFILE", root.join("user"));
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
     std::env::remove_var("BELLWETHER_HOOK_TOKEN");
     std::env::remove_var("BELLWETHER_CONFIG");
     let run = |settings: &Path| bellwether_brain::cli::run("token", &["rotate".into(), "--write".into(), "--settings".into(), settings.display().to_string()]);
