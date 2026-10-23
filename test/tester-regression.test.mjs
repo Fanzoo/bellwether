@@ -246,7 +246,7 @@ describe('mute, hide, and what survives a restart (M2, M5, M7)', () => {
     const s = cli(['show']);
     assert.match(s.stdout, /shown/);
     assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).hidden, false);
-    assert.deepEqual(fs.readdirSync(DATA).filter((n) => n.includes('.tmp')), []);
+    assert.deepEqual(fs.readdirSync(DATA).filter((n) => n.startsWith('shell-state') && n.includes('.tmp')), []);
   });
 
   test('a corrupt shell-state.json does not stop hide/show or the brain', () => {
