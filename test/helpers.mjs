@@ -23,7 +23,7 @@ export function tempDir(prefix = 'bellwether-test-') {
 // `npm test` builds first (`npm run build:dev`). The Node brain it was once compared with
 // was deleted in milestone 11 (its last version is tag v0.2.0-rc.3).
 
-const DEFAULT_RUST_BIN = path.join(AGENT_DIR, 'shell', 'src-tauri', 'target-dev', 'debug', 'bellwether-shell');
+const DEFAULT_RUST_BIN = path.join(AGENT_DIR, 'shell', 'src-tauri', 'target-dev', 'debug', process.platform === 'win32' ? 'bellwether-shell.exe' : 'bellwether-shell');
 export const RUST_BIN = process.env.BELLWETHER_BIN ? path.resolve(process.env.BELLWETHER_BIN) : DEFAULT_RUST_BIN;
 const LIVE_PORT = 47417;
 
