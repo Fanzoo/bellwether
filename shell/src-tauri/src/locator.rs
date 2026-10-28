@@ -32,6 +32,8 @@ pub struct Terminal {
     pub herdr_socket: Option<String>,
     pub tmux_pane: Option<String>,
     pub wt_session: Option<String>,
+    /// CLAUDE_CODE_ENTRYPOINT: "claude-desktop" when the Claude desktop app runs the session.
+    pub entrypoint: Option<String>,
 }
 
 impl Terminal {
@@ -45,6 +47,7 @@ impl Terminal {
             herdr_socket: s("herdrSocket"),
             tmux_pane: s("tmuxPane"),
             wt_session: s("wtSession"),
+            entrypoint: s("entrypoint"),
         }
     }
 
@@ -645,9 +648,14 @@ impl Locator {
 
     // ------------------------------------------------------- app-activate
 
-    fn app_names(program: &str) -> Option<(&'static str, &'static str)> {
+    /// The app a session lives in: (window owner name, `open` arguments). A session the
+    /// Claude desktop app started has no terminal, so its entrypoint decides first.
+    fn app_names(t: &Terminal) -> Option<(&'static str, [&'static str; 2])> {
+        if matches!(t.entrypoint.as_deref(), Some("claude-desktop" | "claude-desktop-3p")) {
+            return Some(("Claude", ["-b", "com.anthropic.claudefordesktop"]));
+        }
         // TERM_PROGRAM -> (window owner name, app for `open -a`)
-        Some(match program {
+        let (owner, app) = match t.program.as_deref()? {
             "iTerm.app" => ("iTerm2", "iTerm"),
             "Apple_Terminal" => ("Terminal", "Terminal"),
             "vscode" => ("Code", "Visual Studio Code"),
@@ -655,18 +663,19 @@ impl Locator {
             "WezTerm" => ("wezterm-gui", "WezTerm"),
             "WarpTerminal" => ("Warp", "Warp"),
             _ => return None,
-        })
+        };
+        Some((owner, ["-a", app]))
     }
 
     fn app_locate(&self, t: &Terminal) -> Option<Found> {
-        let (owner, _) = Self::app_names(t.program.as_deref()?)?;
+        let (owner, _) = Self::app_names(t)?;
         let w = self.windows.list().into_iter().find(|w| w.owner == owner)?;
         Some(Found { bounds: Some(w.bounds), confidence: Confidence::App })
     }
 
     fn app_focus(&self, t: &Terminal) -> Option<Focus> {
-        let (_, app) = Self::app_names(t.program.as_deref()?)?;
-        self.runner.run("/usr/bin/open", &["-a", app], &[]).ok().map(|_| Focus::AppActivated("app-activate".into()))
+        let (_, args) = Self::app_names(t)?;
+        self.runner.run("/usr/bin/open", &args, &[]).ok().map(|_| Focus::AppActivated("app-activate".into()))
     }
 }
 
@@ -1106,6 +1115,31 @@ pub mod tests {
         let l = loc.locate(&t);
         assert_eq!((l.strategy.as_str(), l.confidence), ("vscode", Confidence::App));
         assert_eq!(loc.focus(&t), Focus::AppActivated("app-activate".into()));
+    }
+
+    #[test]
+    fn a_claude_desktop_session_is_placed_on_and_focuses_the_claude_app() {
+        // No terminal at all: only the entrypoint the desktop app sets.
+        let t = Terminal { entrypoint: Some("claude-desktop".into()), ..Default::default() };
+        let r = FakeRunner::default().on("/usr/bin/open -b com.anthropic.claudefordesktop", "");
+        let (loc, runner, _) = locator(r, vec![win(900, "iTerm2", 0.0), win(901, "Claude", 2000.0)], &ALL, false);
+        let l = loc.locate(&t);
+        assert_eq!((l.strategy.as_str(), l.confidence, l.bounds.unwrap().x), ("app-activate", Confidence::App, 2000.0));
+        assert_eq!(loc.focus(&t), Focus::AppActivated("app-activate".into()));
+        assert!(!runner.calls().iter().any(|c| c.contains("/bin/ps") || c.starts_with("osascript")), "nothing terminal-specific is tried: {:?}", runner.calls());
+    }
+
+    #[test]
+    fn a_terminal_session_with_the_cli_entrypoint_is_unchanged() {
+        let t = Terminal { program: Some("ghostty".into()), entrypoint: Some("cli".into()), ..Default::default() };
+        let r = FakeRunner::default().on("/usr/bin/open -a Ghostty", "");
+        let (loc, _, _) = locator(r, vec![win(901, "Claude", 0.0), win(902, "Ghostty", 2000.0)], &ALL, false);
+        assert_eq!(loc.locate(&t).bounds.unwrap().x, 2000.0);
+        assert_eq!(loc.focus(&t), Focus::AppActivated("app-activate".into()));
+        // An entrypoint alone that isn't the desktop app's reaches nothing, as before.
+        let only = Terminal { entrypoint: Some("cli".into()), ..Default::default() };
+        let (loc, _, _) = locator(FakeRunner::default(), vec![win(901, "Claude", 0.0)], &ALL, false);
+        assert_eq!(loc.locate(&only).confidence, Confidence::None);
     }
 
     #[test]
