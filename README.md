@@ -10,6 +10,9 @@ wants, and clicking the sheep takes you to that terminal.
 You need [Claude Code](https://claude.com/claude-code) and a Mac (macOS 13 Ventura or
 newer). Windows and Linux are planned.
 
+Sessions in a terminal and Claude Code sessions in the Claude desktop app both get a sheep.
+Cloud sessions don't: they run on Anthropic's servers, not your Mac.
+
 ## Install
 
 With [Homebrew](https://brew.sh):
@@ -77,6 +80,7 @@ To come back to the window later: menu-bar sheep > *Set up Bellwether…*.
 - **Hover** over a sheep to see its project; **click** it to bring its terminal forward
   (the click counts when you let go). Bubbles and the space between sheep let clicks
   through to whatever is underneath, and a sheep fades while the cursor is near it.
+  A desktop-app session's sheep brings the Claude app forward (not the exact session).
 - **Move a sheep** by dragging it: press and move, and it dangles from the cursor; let go
   and it lands there, on the strip of whichever monitor you dropped it on, and carries on
   around that spot. It never lands on another sheep: it walks to the nearest clear spot.

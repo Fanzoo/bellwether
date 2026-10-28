@@ -214,6 +214,16 @@ pub fn check_settings(settings: &Lj, port: u16, token: Option<&str>, file: &str)
         if !matchers.is_empty() {
             add(&mut out, "hook matcher", "WARN", format!("matcher set on {}; bellwether expects every event unfiltered", matchers.join(", ")));
         }
+        // Entries written before a header was added (X-Bellwether-Entrypoint, say) still
+        // work, but those sessions can't be placed or focused.
+        let old: Vec<&str> = handlers
+            .iter()
+            .filter(|x| !is_legacy_handler(x.h, port) && !ENV_HEADERS.iter().all(|(name, _)| x.h.get("headers").is_some_and(|hs| hs.get(name).is_some())))
+            .map(|x| x.event.as_str())
+            .collect();
+        if !old.is_empty() {
+            add(&mut out, "hook headers", "WARN", format!("bellwether entries on {} were written by an older version and miss some terminal headers, so a click on a sheep can't always find its window (sessions in the Claude desktop app, for one). Re-run `bellwether hooks install --write`", if old.len() == EVENTS.len() { "every event".to_string() } else { old.join(", ") }));
+        }
         if let Some(token) = token {
             let stale = handlers.iter().filter(|x| handler_token(x.h).and_then(Lj::as_str) != Some(token)).count();
             if stale > 0 {
@@ -385,6 +395,18 @@ mod tests {
         let c = checks.iter().find(|c| c.name == "hook onFailure").expect("an onFailure check");
         assert_eq!((c.status, c.exit_code), ("FAIL", BAD_CONFIG));
         assert!(c.detail.contains("SessionEnd") && c.detail.contains("block every tool call"), "{}", c.detail);
+    }
+
+    /// Entries from before X-Bellwether-Entrypoint still work: a warning, not a failure.
+    #[test]
+    fn entries_missing_a_header_are_a_warning_to_reinstall() {
+        let text = lossless::stringify(&hook_block(47417, T), "  ").replace("X-Bellwether-Entrypoint", "X-Some-Other-Header");
+        assert!(!text.contains("X-Bellwether-Entrypoint"), "the header was taken out");
+        let checks = check_settings(&lossless::parse(&text).unwrap(), 47417, Some(T), "s");
+        let c = checks.iter().find(|c| c.name == "hook headers").expect("a hook headers check");
+        assert_eq!((c.status, c.exit_code), ("WARN", OK));
+        assert!(c.detail.contains("every event") && c.detail.contains("hooks install --write"), "{}", c.detail);
+        assert!(checks.iter().all(|c| c.status != "FAIL"), "{checks:?}");
     }
 
     /// A settings file saved with a UTF-8 BOM (Notepad, W2) is read past it, not called

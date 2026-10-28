@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Sessions in the Claude desktop app.** They already got a sheep; now it stands on the
+  monitor where the Claude app's window is, and clicking it brings the Claude app forward
+  (the app, not the exact session). The hooks carry one more header for this
+  (`X-Bellwether-Entrypoint`), so re-run Install in the setup window, or
+  `bellwether hooks install --write`; `bellwether doctor` says when it's needed.
+
 ## 1.1.1
 
 Two fixes: the setup window keeps your config.json's layout, and a slow disk can no

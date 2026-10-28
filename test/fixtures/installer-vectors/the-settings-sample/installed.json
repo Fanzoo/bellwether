@@ -43,7 +43,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -52,7 +53,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -103,7 +105,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -112,7 +115,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -142,7 +146,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -151,7 +156,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -181,7 +187,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -190,7 +197,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -211,7 +219,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -220,7 +229,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -241,7 +251,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -250,7 +261,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -271,7 +283,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -280,7 +293,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -301,7 +315,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -310,7 +325,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -331,7 +347,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -340,7 +357,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -361,7 +379,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -370,7 +389,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -391,7 +411,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -400,7 +421,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -421,7 +443,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -430,7 +453,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -451,7 +475,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -460,7 +485,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -481,7 +507,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -490,7 +517,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -511,7 +539,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -520,7 +549,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]
@@ -541,7 +571,8 @@
               "X-Bellwether-Wt-Session": "$WT_SESSION",
               "X-Bellwether-Tmux-Pane": "$TMUX_PANE",
               "X-Bellwether-Herdr-Pane": "$HERDR_PANE_ID",
-              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH"
+              "X-Bellwether-Herdr-Socket": "$HERDR_SOCKET_PATH",
+              "X-Bellwether-Entrypoint": "$CLAUDE_CODE_ENTRYPOINT"
             },
             "allowedEnvVars": [
               "TERM_PROGRAM",
@@ -550,7 +581,8 @@
               "WT_SESSION",
               "TMUX_PANE",
               "HERDR_PANE_ID",
-              "HERDR_SOCKET_PATH"
+              "HERDR_SOCKET_PATH",
+              "CLAUDE_CODE_ENTRYPOINT"
             ]
           }
         ]

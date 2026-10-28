@@ -46,7 +46,7 @@ pub const EVENTS: [&str; 16] = [
 pub const HTTP_UNSUPPORTED_EVENTS: [&str; 2] = ["SessionStart", "Setup"];
 
 /// Header name and the environment variable Claude Code interpolates into it, in order.
-pub const ENV_HEADERS: [(&str, &str); 7] = [
+pub const ENV_HEADERS: [(&str, &str); 8] = [
     ("X-Bellwether-Term-Program", "TERM_PROGRAM"),
     ("X-Bellwether-Iterm-Session", "ITERM_SESSION_ID"),
     ("X-Bellwether-Term-Session", "TERM_SESSION_ID"),
@@ -54,6 +54,8 @@ pub const ENV_HEADERS: [(&str, &str); 7] = [
     ("X-Bellwether-Tmux-Pane", "TMUX_PANE"),
     ("X-Bellwether-Herdr-Pane", "HERDR_PANE_ID"),
     ("X-Bellwether-Herdr-Socket", "HERDR_SOCKET_PATH"),
+    // "claude-desktop" in a session the Claude desktop app started (no terminal).
+    ("X-Bellwether-Entrypoint", "CLAUDE_CODE_ENTRYPOINT"),
 ];
 
 /// Above this, a hung brain would stall tool calls noticeably. Doctor enforces it.

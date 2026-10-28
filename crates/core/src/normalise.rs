@@ -17,7 +17,7 @@ use crate::jsstr;
 use crate::redact::{self, Cleaner};
 
 /// Terminal identity headers set by bellwether's own hook block: (HookEvent field, header).
-pub const TERMINAL_HEADERS: [(&str, &str); 7] = [
+pub const TERMINAL_HEADERS: [(&str, &str); 8] = [
     ("program", "x-bellwether-term-program"),
     ("itermSession", "x-bellwether-iterm-session"),
     ("termSession", "x-bellwether-term-session"),
@@ -25,6 +25,7 @@ pub const TERMINAL_HEADERS: [(&str, &str); 7] = [
     ("tmuxPane", "x-bellwether-tmux-pane"),
     ("herdrPane", "x-bellwether-herdr-pane"),
     ("herdrSocket", "x-bellwether-herdr-socket"),
+    ("entrypoint", "x-bellwether-entrypoint"),
 ];
 
 /// Payload field -> HookEvent field. Every value must be a short identifier or enum.
