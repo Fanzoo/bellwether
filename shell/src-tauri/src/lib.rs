@@ -36,6 +36,8 @@ mod tray;
 mod updater;
 #[cfg(windows)]
 mod win;
+#[cfg(windows)]
+mod winlocate;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -936,7 +938,9 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
     // Dock-width confinement: only with Accessibility already granted (never prompted
     // from here). Re-checked every 10 s, so a grant made while running is picked up.
     let mut trusted = ax::trusted();
-    log(&if trusted {
+    log(&if cfg!(windows) {
+        "dock: none on Windows: each strip stands on its monitor's taskbar (the work area's bottom edge)".to_string()
+    } else if trusted {
         "dock: Accessibility granted to this binary: sheep stand on the Dock's top edge, within its width".to_string()
     } else {
         "dock: Accessibility not granted to this binary: the full-width strip is used (`bellwether shell dock-permission` asks for it)".to_string()
@@ -1141,32 +1145,69 @@ fn sheep_palette(configured: Option<&Value>) -> Value {
 
 /// The locator from config: `locator.strategies`, `locator.herdrPath`,
 /// `locator.appleScript` (false: never send AppleScript, so never ask for Automation).
+/// On Windows the default chain has no AppleScript strategies, and processes and raising
+/// go through `winlocate` (plan WD4).
 fn make_locator(config: &Value) -> locator::Locator {
+    let default: &[&str] = if cfg!(windows) { &["herdr", "vscode", "process-tree", "app-activate"] } else { &["herdr", "iterm2", "terminal-app", "vscode", "process-tree", "app-activate"] };
     let strategies: Vec<String> = config
         .pointer("/locator/strategies")
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
-        .unwrap_or_else(|| ["herdr", "iterm2", "terminal-app", "vscode", "process-tree", "app-activate"].iter().map(|s| s.to_string()).collect());
+        .unwrap_or_else(|| default.iter().map(|s| s.to_string()).collect());
     let herdr_path = config.pointer("/locator/herdrPath").and_then(Value::as_str).unwrap_or("herdr").to_string();
-    // A bare name is looked up where the CLI installs by default too: the shell may be
-    // started without the user's PATH (a login item, Finder).
-    let herdr_path = if herdr_path.contains('/') {
-        herdr_path
-    } else {
-        bellwether_core::paths::user_home()
-            .map(|h| h.join(".local/bin").join(&herdr_path))
-            .filter(|p| p.exists())
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or(herdr_path)
-    };
+    let herdr_path = herdr_where(herdr_path);
     let apple_script = config.pointer("/locator/appleScript").and_then(Value::as_bool).unwrap_or(true);
-    log(&format!("locator: {} (herdr at {herdr_path}; AppleScript {})", strategies.join(" > "), if apple_script { "on: iTerm2 and Terminal may ask for Automation permission" } else { "off" }));
-    locator::Locator::new(
+    let loc = locator::Locator::new(
         Arc::new(locator::RealRunner),
-        Arc::new(locator::RealWindows),
-        locator::Settings { strategies, herdr_path, apple_script, uid: sys::uid() },
+        real_windows(),
+        locator::Settings { strategies, herdr_path: herdr_path.clone(), apple_script, uid: sys::uid() },
         Box::new(|m| log(m)),
-    )
+    );
+    #[cfg(windows)]
+    let loc = loc.with_native(Arc::new(winlocate::WinNative));
+    let chain = loc.strategies().join(" > ");
+    if cfg!(windows) {
+        log(&format!("locator: {chain} (herdr at {herdr_path}; no permission needed)"));
+    } else {
+        log(&format!("locator: {chain} (herdr at {herdr_path}; AppleScript {})", if apple_script { "on: iTerm2 and Terminal may ask for Automation permission" } else { "off" }));
+    }
+    loc
+}
+
+#[cfg(windows)]
+fn real_windows() -> Arc<dyn locator::Windows> {
+    Arc::new(winlocate::WinWindows)
+}
+
+#[cfg(not(windows))]
+fn real_windows() -> Arc<dyn locator::Windows> {
+    Arc::new(locator::RealWindows)
+}
+
+/// A bare herdr name is also looked for where herdr installs by default: the shell may be
+/// started without the user's PATH (a login item, Finder). Windows: on PATH (`herdr.exe`),
+/// then herdr's documented alias, `%LOCALAPPDATA%\Programs\Herdr\bin\herdr.exe`.
+fn herdr_where(herdr_path: String) -> String {
+    if herdr_path.contains(['/', '\\']) {
+        return herdr_path;
+    }
+    if cfg!(windows) {
+        let exe = if herdr_path.to_ascii_lowercase().ends_with(".exe") { herdr_path.clone() } else { format!("{herdr_path}.exe") };
+        let on_path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).any(|d| d.join(&exe).is_file())).unwrap_or(false);
+        if on_path {
+            return herdr_path;
+        }
+        return std::env::var_os("LOCALAPPDATA")
+            .map(|d| std::path::PathBuf::from(d).join("Programs").join("Herdr").join("bin").join(&exe))
+            .filter(|p| p.is_file())
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or(herdr_path);
+    }
+    bellwether_core::paths::user_home()
+        .map(|h| h.join(".local/bin").join(&herdr_path))
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(herdr_path)
 }
 
 /// At most this many terminals are looked up at once (scoped threads, per pass).

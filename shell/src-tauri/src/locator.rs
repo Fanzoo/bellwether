@@ -5,10 +5,12 @@
 //! terminal headers; the chain skips a strategy whose headers are missing, stops at the
 //! first `exact` result, and keeps the first `app` result in case nothing does better.
 //!
-//! Everything outside this process goes through two seams, so tests never run
+//! Everything outside this process goes through seams, so tests never run
 //! AppleScript, herdr or `ps`:
 //! - `Runner`: every command (`herdr`, `ps`, `osascript`, `open`);
-//! - `Windows`: the on-screen window list (CoreGraphics; needs no permission).
+//! - `Windows`: the on-screen window list (CoreGraphics; on Windows `EnumWindows`);
+//! - `Native` (Windows only, plan WD4): the process list, the marker variables of a
+//!   process's environment, and raising a window. Without it the macOS ways are used.
 //!
 //! Permissions. Placement works without any: `ps` finds the window-owning process, and
 //! the window list gives its windows' bounds. AppleScript (`locator.appleScript`) only
@@ -142,6 +144,35 @@ pub struct Win {
     pub pid: i32,
     pub owner: String,
     pub bounds: Rect,
+    /// The window's handle on Windows (what `Native::raise` takes); 0 on macOS.
+    pub hwnd: u64,
+    /// Minimised (Windows): it can be raised, but its bounds say nothing about a monitor.
+    pub minimized: bool,
+}
+
+impl Win {
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn new(pid: i32, owner: impl Into<String>, bounds: Rect) -> Win {
+        Win { pid, owner: owner.into(), bounds, hwnd: 0, minimized: false }
+    }
+}
+
+/// What Windows needs that macOS gets from `ps` and `open` (plan WD4). Real: `win.rs`;
+/// tests: a fake built from a `desktop.json`-shaped table.
+pub trait Native: Send + Sync {
+    /// Every process: pid, parent pid and exe name (`comm`). `uid` is 0 for this user's
+    /// processes and `u32::MAX` for others' (only checked for the processes the locator
+    /// filters by user: `claude.exe`, `node.exe` and `herdr.exe`). `tty` is empty.
+    fn processes(&self) -> HashMap<i32, Proc>;
+    /// The values of `keys` in this process's environment (this user's processes only).
+    /// Nothing else from the environment is kept.
+    fn environment(&self, pid: i32, keys: &[&str]) -> Option<Vec<(String, String)>>;
+    /// Whether the process's command line contains `needle` (to recognise Claude Code run
+    /// by `node.exe`). The command line itself is never kept or logged.
+    fn command_line_has(&self, pid: i32, needle: &str) -> bool;
+    /// Restores the window if minimised and brings it forward. `Err` says why not (the
+    /// foreground was refused: its taskbar button flashes instead).
+    fn raise(&self, hwnd: u64) -> Result<(), String>;
 }
 
 pub trait Windows: Send + Sync {
@@ -201,7 +232,50 @@ pub fn parse_ps(text: &str) -> HashMap<i32, Proc> {
 }
 
 fn basename(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+/// The values of `keys` (any case) in a Windows environment block (`K=V` strings, each
+/// ending in a NUL, the block in two). Everything else in the block is dropped here.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn env_values(block: &[u16], keys: &[&str]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for entry in block.split(|&c| c == 0) {
+        if entry.is_empty() {
+            break; // the block's end
+        }
+        let Some(eq) = entry.iter().skip(1).position(|&c| c == u16::from(b'=')).map(|i| i + 1) else { continue };
+        let name = String::from_utf16_lossy(&entry[..eq]);
+        if let Some(k) = keys.iter().find(|k| k.eq_ignore_ascii_case(&name)) {
+            out.push((k.to_string(), String::from_utf16_lossy(&entry[eq + 1..])));
+        }
+    }
+    out
+}
+
+/// The windows the locator considers on Windows, front to back, from `EnumWindows` as
+/// `win.rs` lists it: not cloaked (another virtual desktop, a suspended app), not a tool
+/// window (the strips are), not this process's, and at least 50 px each way unless
+/// minimised. Owner is the exe name; bounds are DWM's, in physical pixels.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+pub fn usable_windows(list: Vec<crate::dump::Window>, own_pid: u32, minimized: impl Fn(u64) -> bool) -> Vec<Win> {
+    list.into_iter()
+        .filter(|w| !w.cloaked && !w.tool && w.pid != own_pid)
+        .filter_map(|w| {
+            let min = minimized(w.hwnd);
+            let [l, t, r, b] = w.bounds;
+            let bounds = Rect { x: l as f64, y: t as f64, w: (r - l) as f64, h: (b - t) as f64 };
+            (min || (bounds.w >= 50.0 && bounds.h >= 50.0)).then(|| Win { pid: w.pid as i32, owner: w.exe, bounds, hwnd: w.hwnd, minimized: min })
+        })
+        .collect()
+}
+
+/// Whether a process's `comm` is the program `name`: `claude` matches `/x/claude` on macOS
+/// and `claude.exe` (any case) on Windows.
+fn is_program(comm: &str, name: &str) -> bool {
+    let b = basename(comm);
+    let b = if b.len() > 4 && b[b.len() - 4..].eq_ignore_ascii_case(".exe") { &b[..b.len() - 4] } else { b };
+    b.eq_ignore_ascii_case(name)
 }
 
 /// The `.app` bundle a process's executable lives in, for `open -a`.
@@ -231,6 +305,8 @@ pub struct Locator {
     /// Checks a HERDR_SOCKET_PATH header (real: `check_socket`; tests: a fake).
     pub socket_check: Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
     log: Box<dyn Fn(&str) + Send + Sync>,
+    /// Windows' processes and raising (`with_native`); `None` on macOS.
+    native: Option<Arc<dyn Native>>,
 }
 
 /// What one strategy found: where, how sure, and what a click should use.
@@ -251,9 +327,32 @@ pub fn valid_pane_id(id: &str) -> bool {
     (1..=64).contains(&id.len()) && !id.starts_with('-') && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-'))
 }
 
+/// HERDR_SOCKET_PATH on Windows (plan WD4): a named pipe `\\.\pipe\<name>` (the name 1 to
+/// 256 of `A-Z a-z 0-9 _ . - \\`, no ".."), or an absolute drive path of at most 1024
+/// bytes with no ".." to an existing file (an AF_UNIX socket shows as one). The pipe's
+/// server isn't asked who it is: connecting to it would take one of herdr's pipe instances.
+pub fn check_socket_windows(path: &str, exists: impl Fn(&str) -> bool) -> Result<(), String> {
+    if let Some(name) = path.strip_prefix(r"\\.\pipe\") {
+        let ok = (1..=256).contains(&name.len()) && !name.split('\\').any(|c| c == ".." || c.is_empty()) && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | '\\'));
+        return if ok { Ok(()) } else { Err("not a plain pipe name".into()) };
+    }
+    let b = path.as_bytes();
+    let drive = b.len() > 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\';
+    if !drive || path.len() > 1024 || path.split(['\\', '/']).any(|c| c == "..") || path.chars().any(|c| c.is_control()) {
+        return Err("not a pipe name or an absolute path of at most 1024 bytes".into());
+    }
+    if !exists(path) {
+        return Err("doesn't exist".into());
+    }
+    Ok(())
+}
+
 /// HERDR_SOCKET_PATH must be an absolute path of at most 1024 bytes, with no "..",
 /// to an existing unix socket owned by this user, itself not a symlink (lstat).
 pub fn check_socket(path: &str) -> Result<(), String> {
+    if cfg!(windows) {
+        return check_socket_windows(path, |p| std::path::Path::new(p).is_file());
+    }
     if !path.starts_with('/') || path.len() > 1024 || path.split('/').any(|c| c == "..") || path.chars().any(|c| c.is_control()) {
         return Err("not an absolute path of at most 1024 bytes".into());
     }
@@ -278,7 +377,7 @@ const KNOWN: [&str; 6] = ["herdr", "iterm2", "terminal-app", "vscode", "process-
 
 impl Locator {
     pub fn new(runner: Arc<dyn Runner>, windows: Arc<dyn Windows>, cfg: Settings, log: Box<dyn Fn(&str) + Send + Sync>) -> Locator {
-        let l = Locator { runner, windows, cfg, denied: Mutex::default(), logged: Mutex::default(), backoff: Mutex::default(), socket_check: Box::new(check_socket), log };
+        let l = Locator { runner, windows, cfg, denied: Mutex::default(), logged: Mutex::default(), backoff: Mutex::default(), socket_check: Box::new(check_socket), log, native: None };
         // Strategies for other systems (or later milestones) are skipped quietly here.
         const ELSEWHERE: [&str; 4] = ["windows-terminal", "tmux", "hyprland", "x11-window"];
         for s in &l.cfg.strategies {
@@ -287,6 +386,24 @@ impl Locator {
             }
         }
         l
+    }
+
+    /// Windows: processes, environments and raising go through `native` (plan WD4), and
+    /// the AppleScript strategies (`iterm2`, `terminal-app`) are skipped with one line.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn with_native(mut self, native: Arc<dyn Native>) -> Locator {
+        let apple: Vec<String> = self.cfg.strategies.iter().filter(|s| matches!(s.as_str(), "iterm2" | "terminal-app")).cloned().collect();
+        for s in &apple {
+            self.once(&format!("locator: strategy {s:?} isn't built on this OS (it is AppleScript, macOS only); skipped"));
+        }
+        self.cfg.strategies.retain(|s| !apple.contains(s));
+        self.native = Some(native);
+        self
+    }
+
+    /// The chain in use, in order (after `with_native` dropped what isn't built here).
+    pub fn strategies(&self) -> &[String] {
+        &self.cfg.strategies
     }
 
     fn once(&self, msg: &str) {
@@ -347,6 +464,9 @@ impl Locator {
     // ---------------------------------------------------------- helpers
 
     fn ps(&self) -> HashMap<i32, Proc> {
+        if let Some(n) = &self.native {
+            return n.processes();
+        }
         match self.runner.run("/bin/ps", &["-axo", "pid=,ppid=,uid=,tty=,comm="], &[]) {
             Ok(text) => parse_ps(&text),
             Err(e) => {
@@ -356,9 +476,12 @@ impl Locator {
         }
     }
 
-    /// Walks up from `pid` to the first process that owns an on-screen window.
+    /// Walks up from `pid` to the first process that owns an on-screen window. On Windows
+    /// the shell (`explorer.exe`, which owns File Explorer's windows and starts most apps)
+    /// never counts: a walk that reaches it found no terminal.
     fn window_owner(&self, procs: &HashMap<i32, Proc>, wins: &[Win], pid: i32) -> Option<i32> {
-        let owners: HashSet<i32> = wins.iter().map(|w| w.pid).collect();
+        let shell = |w: &&Win| self.native.is_some() && is_program(&w.owner, "explorer");
+        let owners: HashSet<i32> = wins.iter().filter(|w| !shell(w)).map(|w| w.pid).collect();
         let mut p = pid;
         for _ in 0..32 {
             if owners.contains(&p) {
@@ -374,14 +497,29 @@ impl Locator {
 
     /// The owner's frontmost window, and `exact` only if it has just one.
     fn owner_window(wins: &[Win], pid: i32) -> Option<Found> {
-        let mine: Vec<&Win> = wins.iter().filter(|w| w.pid == pid).collect();
+        // A minimised window says nothing about where the terminal is.
+        let mine: Vec<&Win> = wins.iter().filter(|w| w.pid == pid && !w.minimized).collect();
         let front = mine.first()?;
         Some(Found { bounds: Some(front.bounds), confidence: if mine.len() == 1 { Confidence::Exact } else { Confidence::App } })
     }
 
     fn activate(&self, procs: &HashMap<i32, Proc>, pid: i32) -> bool {
+        if let Some(n) = &self.native {
+            // The owner's frontmost window, minimised or not.
+            let Some(w) = self.windows.list().into_iter().find(|w| w.pid == pid) else { return false };
+            return self.raise(n.as_ref(), &w);
+        }
         let Some(app) = procs.get(&pid).and_then(|p| app_bundle(&p.comm)) else { return false };
         self.runner.run("/usr/bin/open", &["-a", &app], &[]).is_ok()
+    }
+
+    /// Windows: raises `w`. A refused foreground is logged; the taskbar button flashing
+    /// is then the answer to the click (so the chain doesn't try again).
+    fn raise(&self, n: &dyn Native, w: &Win) -> bool {
+        if let Err(why) = n.raise(w.hwnd) {
+            (self.log)(&format!("locator: foreground refused for {} ({why}); its taskbar button flashes instead", w.owner));
+        }
+        true
     }
 
     /// AppleScript to `app` (only if allowed, the app is running, and it wasn't refused).
@@ -481,7 +619,24 @@ impl Locator {
         let procs = self.ps();
         let wins = self.windows.list();
         let mut hosts: Vec<(usize, i32, String)> = Vec::new();
-        for p in procs.values().filter(|p| basename(&p.comm) == "herdr" && p.uid == self.cfg.uid && p.tty != "??" && !p.tty.is_empty()) {
+        // A client is told from the server by its terminal on macOS (the server has none).
+        // Windows has no tty: there a client is a herdr.exe with no herdr.exe above it (the
+        // server is started by a client, or outlives it with no window above it at all).
+        let client = |p: &&Proc| {
+            if self.native.is_none() {
+                return p.tty != "??" && !p.tty.is_empty();
+            }
+            let mut q = p.ppid;
+            for _ in 0..32 {
+                match procs.get(&q) {
+                    Some(up) if is_program(&up.comm, "herdr") => return false,
+                    Some(up) if up.ppid != q && q > 4 => q = up.ppid,
+                    _ => return true,
+                }
+            }
+            true
+        };
+        for p in procs.values().filter(|p| is_program(&p.comm, "herdr") && p.uid == self.cfg.uid).filter(client) {
             if let Some(owner) = self.window_owner(&procs, &wins, p.pid) {
                 let front = wins.iter().position(|w| w.pid == owner).unwrap_or(usize::MAX);
                 hosts.push((front, owner, p.tty.clone()));
@@ -536,6 +691,8 @@ impl Locator {
             if !raised {
                 self.activate(&procs, owner);
             }
+        } else {
+            (self.log)("locator: herdr: no attached herdr client has a window (detached?); the pane is selected in herdr, no window raised");
         }
         Some(Focus::Focused(format!("herdr ({tab}{})", if pane_focused { format!(", pane {pane}") } else { String::new() })))
     }
@@ -595,6 +752,9 @@ impl Locator {
     /// environment matches. Only the marker variables are read; nothing else from
     /// another process's environment is kept or logged.
     fn claude_process(&self, t: &Terminal) -> Option<(HashMap<i32, Proc>, Vec<Win>, i32)> {
+        if let Some(n) = &self.native {
+            return self.claude_process_native(n.as_ref(), t);
+        }
         let markers = t.markers();
         if markers.is_empty() {
             return None;
@@ -622,6 +782,43 @@ impl Locator {
         Some((procs, wins, matches[0]))
     }
 
+    /// Windows: `claude.exe` (or `node.exe` running Claude Code) of this user whose
+    /// environment has every marker. Inside herdr the markers are herdr's server's (its
+    /// `WT_SESSION` is whichever tab started the server), so a herdr session never matches
+    /// here: the `herdr` strategy, or `app-activate`, answers for it (plan WD4).
+    fn claude_process_native(&self, n: &dyn Native, t: &Terminal) -> Option<(HashMap<i32, Proc>, Vec<Win>, i32)> {
+        if t.herdr_pane.is_some() {
+            return None;
+        }
+        let mut markers: Vec<(&str, &str)> = Vec::new();
+        if let Some(v) = &t.wt_session {
+            markers.push(("WT_SESSION", v.as_str()));
+        }
+        if let Some(v) = &t.tmux_pane {
+            markers.push(("TMUX_PANE", v.as_str()));
+        }
+        if markers.is_empty() {
+            return None;
+        }
+        let keys: Vec<&str> = markers.iter().map(|(k, _)| *k).collect();
+        let procs = self.ps();
+        let matches: Vec<i32> = procs
+            .values()
+            .filter(|p| p.uid == self.cfg.uid)
+            .filter(|p| is_program(&p.comm, "claude") || (is_program(&p.comm, "node") && n.command_line_has(p.pid, "claude-code")))
+            .filter(|p| {
+                let Some(env) = n.environment(p.pid, &keys) else { return false };
+                markers.iter().all(|(k, v)| env.iter().any(|(ek, ev)| ek.eq_ignore_ascii_case(k) && ev == v))
+            })
+            .map(|p| p.pid)
+            .collect();
+        if matches.len() != 1 {
+            return None; // none, or several sessions look alike: not sure enough
+        }
+        let wins = self.windows.list();
+        Some((procs, wins, matches[0]))
+    }
+
     fn tree_locate(&self, t: &Terminal) -> Option<Found> {
         let (procs, wins, claude) = self.claude_process(t)?;
         let owner = self.window_owner(&procs, &wins, claude)?;
@@ -634,6 +831,10 @@ impl Locator {
         }
         let (procs, wins, claude) = self.claude_process(t)?;
         let owner = self.window_owner(&procs, &wins, claude)?;
+        if self.native.is_some() {
+            // Windows raises the owner's own frontmost window (exact with one window).
+            return self.activate(&procs, owner).then(|| Focus::Focused(name.to_string()));
+        }
         self.activate(&procs, owner).then(|| Focus::AppActivated(name.to_string()))
     }
 
@@ -667,13 +868,36 @@ impl Locator {
         Some((owner, ["-a", app]))
     }
 
+    /// Windows: the exe whose most recent window a session lives in (plan WD4's table).
+    fn app_exe(t: &Terminal) -> Option<&'static str> {
+        if matches!(t.entrypoint.as_deref(), Some("claude-desktop" | "claude-desktop-3p")) {
+            return Some("claude.exe");
+        }
+        match t.program.as_deref() {
+            Some("vscode") => return Some("Code.exe"),
+            Some("WezTerm") => return Some("wezterm-gui.exe"),
+            _ => {}
+        }
+        t.wt_session.as_ref().map(|_| "WindowsTerminal.exe")
+    }
+
     fn app_locate(&self, t: &Terminal) -> Option<Found> {
+        if self.native.is_some() {
+            let exe = Self::app_exe(t)?;
+            let w = self.windows.list().into_iter().find(|w| !w.minimized && w.owner.eq_ignore_ascii_case(exe))?;
+            return Some(Found { bounds: Some(w.bounds), confidence: Confidence::App });
+        }
         let (owner, _) = Self::app_names(t)?;
         let w = self.windows.list().into_iter().find(|w| w.owner == owner)?;
         Some(Found { bounds: Some(w.bounds), confidence: Confidence::App })
     }
 
     fn app_focus(&self, t: &Terminal) -> Option<Focus> {
+        if let Some(n) = &self.native {
+            let exe = Self::app_exe(t)?;
+            let w = self.windows.list().into_iter().find(|w| w.owner.eq_ignore_ascii_case(exe))?;
+            return self.raise(n.as_ref(), &w).then(|| Focus::AppActivated("app-activate".into()));
+        }
         let (_, args) = Self::app_names(t)?;
         self.runner.run("/usr/bin/open", &args, &[]).ok().map(|_| Focus::AppActivated("app-activate".into()))
     }
@@ -775,7 +999,8 @@ impl Runner for RealRunner {
 }
 
 /// The window list from CoreGraphics. Owner, pid and bounds need no permission
-/// (window titles would, and are not read).
+/// (window titles would, and are not read). Windows has its own: `winlocate::WinWindows`.
+#[cfg(not(windows))]
 pub struct RealWindows;
 
 #[cfg(target_os = "macos")]
@@ -797,7 +1022,7 @@ pub fn layered_windows() -> Vec<(i32, Win)> {
     Vec::new()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 impl Windows for RealWindows {
     fn list(&self) -> Vec<Win> {
         Vec::new()
@@ -879,7 +1104,7 @@ mod cg {
                 } else {
                     String::new()
                 };
-                out.push((num(kCGWindowLayer), Win { pid: num(kCGWindowOwnerPID), owner, bounds: Rect { x: r.x, y: r.y, w: r.w, h: r.h } }));
+                out.push((num(kCGWindowLayer), Win::new(num(kCGWindowOwnerPID), owner, Rect { x: r.x, y: r.y, w: r.w, h: r.h })));
             }
             CFRelease(list);
         }
@@ -951,7 +1176,7 @@ pub mod tests {
     }
 
     fn win(pid: i32, owner: &str, x: f64) -> Win {
-        Win { pid, owner: owner.into(), bounds: Rect { x, y: 40.0, w: 1200.0, h: 800.0 } }
+        Win::new(pid, owner, Rect { x, y: 40.0, w: 1200.0, h: 800.0 })
     }
 
     fn locator(runner: FakeRunner, windows: Vec<Win>, strategies: &[&str], apple: bool) -> (Locator, Arc<FakeRunner>, Arc<Mutex<Vec<String>>>) {
@@ -1243,6 +1468,269 @@ pub mod tests {
         assert!(check_socket(&format!("/{}", "a".repeat(1100))).is_err());
         assert!(check_socket(dir.join("missing").to_str().unwrap()).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ------------------------------------------------ Windows (plan WD4, milestone W3)
+
+    /// The PC's fixture (W1's dump, trimmed): herdr attached in Windows Terminal, the
+    /// server under the client, five `claude.exe` under the server.
+    const PC: &str = include_str!("../../../test/fixtures/windows/desktop-pc-herdr.json");
+    const WT_HWND: u64 = 132162;
+
+    struct FakeNative {
+        procs: HashMap<i32, Proc>,
+        env: HashMap<i32, Vec<(String, String)>>,
+        node_claude: HashSet<i32>,
+        refuse: bool,
+        raised: Mutex<Vec<u64>>,
+    }
+
+    impl Native for FakeNative {
+        fn processes(&self) -> HashMap<i32, Proc> {
+            self.procs.clone()
+        }
+        fn environment(&self, pid: i32, keys: &[&str]) -> Option<Vec<(String, String)>> {
+            let all = self.env.get(&pid)?;
+            Some(all.iter().filter(|(k, _)| keys.iter().any(|w| w.eq_ignore_ascii_case(k))).cloned().collect())
+        }
+        fn command_line_has(&self, pid: i32, needle: &str) -> bool {
+            needle == "claude-code" && self.node_claude.contains(&pid)
+        }
+        fn raise(&self, hwnd: u64) -> Result<(), String> {
+            self.raised.lock().unwrap().push(hwnd);
+            if self.refuse { Err("SetForegroundWindow".into()) } else { Ok(()) }
+        }
+    }
+
+    /// The fixture's processes and windows, the windows through the real filter.
+    fn pc(edit: impl FnOnce(&mut HashMap<i32, Proc>, &mut Vec<crate::dump::Window>)) -> (HashMap<i32, Proc>, Vec<Win>) {
+        let v: Value = serde_json::from_str(PC).unwrap();
+        let mut procs: HashMap<i32, Proc> = v["processes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| {
+                let pid = p["pid"].as_i64().unwrap() as i32;
+                (pid, Proc { pid, ppid: p["ppid"].as_i64().unwrap() as i32, uid: 0, tty: String::new(), comm: p["exe"].as_str().unwrap().to_string() })
+            })
+            .collect();
+        let mut wins: Vec<crate::dump::Window> = v["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| {
+                let b: Vec<i32> = w["bounds"].as_array().unwrap().iter().map(|x| x.as_i64().unwrap() as i32).collect();
+                crate::dump::Window {
+                    hwnd: w["hwnd"].as_u64().unwrap(),
+                    pid: w["pid"].as_u64().unwrap() as u32,
+                    exe: w["exe"].as_str().unwrap().into(),
+                    class: w["class"].as_str().unwrap().into(),
+                    bounds: [b[0], b[1], b[2], b[3]],
+                    cloaked: w["cloaked"].as_bool().unwrap(),
+                    tool: w["tool"].as_bool().unwrap(),
+                    topmost: w["topmost"].as_bool().unwrap(),
+                }
+            })
+            .collect();
+        edit(&mut procs, &mut wins);
+        let minimized: HashSet<u64> = wins.iter().filter(|w| w.bounds[0] <= -32000).map(|w| w.hwnd).collect();
+        (procs, usable_windows(wins, 99999, |h| minimized.contains(&h)))
+    }
+
+    fn windows_locator(runner: FakeRunner, procs: HashMap<i32, Proc>, wins: Vec<Win>, env: &[(i32, &str, &str)], refuse: bool) -> (Locator, Arc<FakeRunner>, Arc<FakeNative>, Arc<Mutex<Vec<String>>>) {
+        let runner = Arc::new(runner);
+        let logs = Arc::new(Mutex::new(Vec::new()));
+        let l2 = logs.clone();
+        let mut envs: HashMap<i32, Vec<(String, String)>> = HashMap::new();
+        for (pid, k, v) in env {
+            envs.entry(*pid).or_default().push((k.to_string(), v.to_string()));
+        }
+        let native = Arc::new(FakeNative { procs, env: envs, node_claude: HashSet::new(), refuse, raised: Mutex::default() });
+        let mut loc = Locator::new(
+            runner.clone(),
+            Arc::new(FakeWindows(wins)),
+            Settings { strategies: ALL.iter().map(|s| s.to_string()).collect(), herdr_path: "herdr".into(), apple_script: true, uid: 0 },
+            Box::new(move |m| l2.lock().unwrap().push(m.to_string())),
+        )
+        .with_native(native.clone());
+        loc.socket_check = Box::new(|p| check_socket_windows(p, |_| false));
+        (loc, runner, native, logs)
+    }
+
+    const WIN_PANE: &str = r#"{"result":{"pane":{"pane_id":"wH:p5","tab_id":"wH:t5","workspace_id":"wH"},"type":"pane_get"}}"#;
+
+    fn win_herdr_term() -> Terminal {
+        // As the PC's hooks sent it: herdr's pane, and a WT_SESSION inherited from the server.
+        Terminal { herdr_pane: Some("wH:p5".into()), wt_session: Some("11111111-2222-3333-4444-555555555555".into()), ..Default::default() }
+    }
+
+    fn herdr_runner() -> FakeRunner {
+        FakeRunner::default().on("herdr pane get wH:p5", WIN_PANE).on("herdr workspace focus wH", "").on("herdr tab focus wH:t5", "").on("herdr agent focus wH:p5", "")
+    }
+
+    #[test]
+    fn windows_herdr_places_on_the_terminal_of_the_attached_client_and_a_click_raises_it() {
+        let (procs, wins) = pc(|_, _| {});
+        assert!(wins.iter().all(|w| !w.owner.eq_ignore_ascii_case("pwsh.exe")), "tool and empty windows are filtered");
+        let (loc, runner, native, logs) = windows_locator(herdr_runner(), procs, wins, &[], false);
+        let l = loc.locate(&win_herdr_term());
+        assert_eq!((l.strategy.as_str(), l.confidence), ("herdr", Confidence::Exact), "{:?}", logs.lock().unwrap());
+        assert_eq!(l.bounds, Some(Rect { x: 578.0, y: 432.0, w: 2041.0, h: 1547.0 }), "Windows Terminal's window, physical px");
+        assert_eq!(loc.focus(&win_herdr_term()), Focus::Focused("herdr (wH:t5, pane wH:p5)".into()));
+        assert_eq!(*native.raised.lock().unwrap(), vec![WT_HWND], "the click raises Windows Terminal");
+        let calls = runner.calls();
+        assert!(calls.iter().any(|c| c == "herdr agent focus wH:p5"), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("/bin/ps") || c.contains("osascript") || c.starts_with("/usr/bin/open")), "no macOS command on Windows: {calls:?}");
+        assert!(logs.lock().unwrap().iter().any(|m| m.contains("\"iterm2\" isn't built on this OS")));
+        assert_eq!(loc.strategies(), ["herdr", "vscode", "process-tree", "app-activate"]);
+    }
+
+    #[test]
+    fn windows_herdr_detached_finds_no_window_and_says_so_on_a_click() {
+        // The client (14628) is gone; the server's parent no longer exists.
+        let (procs, wins) = pc(|p, _| {
+            p.remove(&14628);
+        });
+        let (loc, _, native, logs) = windows_locator(herdr_runner(), procs, wins, &[], false);
+        let l = loc.locate(&win_herdr_term());
+        assert_ne!(l.strategy, "herdr", "no host window");
+        assert_ne!(l.strategy, "process-tree", "a herdr session never matches by its inherited WT_SESSION");
+        assert_eq!(l.strategy, "app-activate", "Windows Terminal's window, app confidence");
+        assert_eq!(l.confidence, Confidence::App);
+        assert_eq!(loc.focus(&win_herdr_term()), Focus::Focused("herdr (wH:t5, pane wH:p5)".into()));
+        assert!(native.raised.lock().unwrap().is_empty());
+        assert!(logs.lock().unwrap().iter().any(|m| m.contains("no attached herdr client has a window")), "{:?}", logs.lock().unwrap());
+    }
+
+    #[test]
+    fn windows_two_attached_herdr_clients_are_app_confidence() {
+        let (procs, wins) = pc(|p, _| {
+            p.insert(70000, Proc { pid: 70000, ppid: 38664, uid: 0, tty: String::new(), comm: "herdr.exe".into() });
+        });
+        let (loc, _, _, _) = windows_locator(herdr_runner(), procs, wins, &[], false);
+        let l = loc.locate(&win_herdr_term());
+        assert_eq!((l.strategy.as_str(), l.confidence), ("herdr", Confidence::App));
+    }
+
+    /// A plain session: claude.exe under pwsh under Windows Terminal, outside herdr.
+    fn plain(p: &mut HashMap<i32, Proc>, w: &mut Vec<crate::dump::Window>, second_window: bool) {
+        p.insert(80001, Proc { pid: 80001, ppid: 38664, uid: 0, tty: String::new(), comm: "claude.exe".into() });
+        if second_window {
+            let mut other = w.iter().find(|x| x.hwnd == WT_HWND).unwrap().clone();
+            other.hwnd = 555;
+            other.bounds = [5200, -900, 7200, 1000];
+            w.insert(0, other); // in front
+        }
+    }
+
+    const WT: &str = "aaaaaaaa-0000-0000-0000-000000000001";
+
+    #[test]
+    fn windows_process_tree_matches_wt_session_and_raises_the_terminal() {
+        let (procs, wins) = pc(|p, w| plain(p, w, false));
+        let (loc, _, native, _) = windows_locator(FakeRunner::default(), procs, wins, &[(80001, "WT_SESSION", WT), (28568, "WT_SESSION", "something-else")], false);
+        let t = Terminal { wt_session: Some(WT.into()), ..Default::default() };
+        let l = loc.locate(&t);
+        assert_eq!((l.strategy.as_str(), l.confidence), ("process-tree", Confidence::Exact));
+        assert_eq!(loc.focus(&t), Focus::Focused("process-tree".into()));
+        assert_eq!(*native.raised.lock().unwrap(), vec![WT_HWND]);
+    }
+
+    #[test]
+    fn windows_terminal_with_two_windows_is_app_confidence_and_two_lookalikes_are_not_guessed() {
+        let (procs, wins) = pc(|p, w| plain(p, w, true));
+        let (loc, _, _, _) = windows_locator(FakeRunner::default(), procs.clone(), wins.clone(), &[(80001, "WT_SESSION", WT)], false);
+        let t = Terminal { wt_session: Some(WT.into()), ..Default::default() };
+        let l = loc.locate(&t);
+        assert_eq!((l.strategy.as_str(), l.confidence), ("process-tree", Confidence::App), "one WindowsTerminal.exe owns both windows");
+        let (loc, _, _, _) = windows_locator(FakeRunner::default(), procs, wins, &[(80001, "WT_SESSION", WT), (28568, "WT_SESSION", WT)], false);
+        assert_eq!(loc.locate(&t).strategy, "app-activate", "two processes match: process-tree doesn't guess");
+    }
+
+    #[test]
+    fn windows_a_session_whose_walk_reaches_explorer_falls_back_to_app_activate() {
+        // Started from a shortcut and handed to Windows Terminal (defterm): pwsh's parent is
+        // explorer.exe, whose File Explorer windows never count.
+        let (procs, wins) = pc(|p, _| {
+            p.insert(81000, Proc { pid: 81000, ppid: 7428, uid: 0, tty: String::new(), comm: "pwsh.exe".into() });
+            p.insert(81001, Proc { pid: 81001, ppid: 81000, uid: 0, tty: String::new(), comm: "claude.exe".into() });
+        });
+        let (loc, _, native, _) = windows_locator(FakeRunner::default(), procs, wins, &[(81001, "WT_SESSION", WT)], false);
+        let t = Terminal { wt_session: Some(WT.into()), ..Default::default() };
+        let l = loc.locate(&t);
+        assert_eq!((l.strategy.as_str(), l.confidence), ("app-activate", Confidence::App));
+        assert_eq!(loc.focus(&t), Focus::AppActivated("app-activate".into()));
+        assert_eq!(*native.raised.lock().unwrap(), vec![WT_HWND]);
+    }
+
+    #[test]
+    fn windows_a_minimised_terminal_is_raised_but_not_used_for_placement_and_a_refusal_is_logged() {
+        let (procs, wins) = pc(|p, w| {
+            plain(p, w, false);
+            w.iter_mut().find(|x| x.hwnd == WT_HWND).unwrap().bounds = [-32000, -32000, -31840, -31972];
+        });
+        let (loc, _, native, logs) = windows_locator(FakeRunner::default(), procs, wins, &[(80001, "WT_SESSION", WT)], true);
+        let t = Terminal { wt_session: Some(WT.into()), ..Default::default() };
+        assert_eq!(loc.locate(&t).bounds, None, "a minimised window says nothing about a monitor");
+        assert_eq!(loc.focus(&t), Focus::Focused("process-tree".into()));
+        assert_eq!(*native.raised.lock().unwrap(), vec![WT_HWND], "raised once (it restores a minimised window); no second try");
+        assert!(logs.lock().unwrap().iter().any(|m| m.contains("foreground refused for WindowsTerminal.exe")), "{:?}", logs.lock().unwrap());
+    }
+
+    #[test]
+    fn windows_claude_run_by_node_counts_and_another_users_process_doesnt() {
+        let t = Terminal { wt_session: Some(WT.into()), ..Default::default() };
+        let (procs, wins) = pc(|p, _| {
+            p.insert(82001, Proc { pid: 82001, ppid: 38664, uid: 0, tty: String::new(), comm: "node.exe".into() });
+            p.insert(82002, Proc { pid: 82002, ppid: 38664, uid: u32::MAX, tty: String::new(), comm: "claude.exe".into() });
+        });
+        let env = [(82001, "WT_SESSION", WT), (82002, "WT_SESSION", WT)];
+        let (loc, _, _, _) = windows_locator(FakeRunner::default(), procs.clone(), wins.clone(), &env, false);
+        assert_eq!(loc.locate(&t).strategy, "app-activate", "neither: node.exe without Claude Code, and another user's claude.exe");
+        let (loc, _, native, _) = windows_locator(FakeRunner::default(), procs, wins, &env, false);
+        let native = Arc::new(FakeNative { node_claude: [82001].into_iter().collect(), procs: native.procs.clone(), env: native.env.clone(), refuse: false, raised: Mutex::default() });
+        let loc = loc.with_native(native);
+        assert_eq!(loc.locate(&t).strategy, "process-tree", "node.exe running Claude Code's cli.js is the session");
+    }
+
+    #[test]
+    fn windows_app_activate_knows_the_claude_app_vscode_and_windows_terminal() {
+        let t = |program: Option<&str>, wt: bool, entry: Option<&str>| Terminal { program: program.map(Into::into), wt_session: wt.then(|| WT.to_string()), entrypoint: entry.map(Into::into), ..Default::default() };
+        assert_eq!(Locator::app_exe(&t(None, false, Some("claude-desktop"))), Some("claude.exe"));
+        assert_eq!(Locator::app_exe(&t(Some("vscode"), true, None)), Some("Code.exe"));
+        assert_eq!(Locator::app_exe(&t(Some("WezTerm"), false, None)), Some("wezterm-gui.exe"));
+        assert_eq!(Locator::app_exe(&t(None, true, None)), Some("WindowsTerminal.exe"));
+        assert_eq!(Locator::app_exe(&t(Some("herdr"), false, None)), None);
+    }
+
+    #[test]
+    fn windows_environment_blocks_keep_only_the_marker_variables() {
+        let block: Vec<u16> = "=C:=C:\\work\0PATH=C:\\bin\0wt_session=abc\0HERDR_PANE_ID=w1:p2\0SECRET=x\0\0junk=1\0".encode_utf16().collect();
+        assert_eq!(env_values(&block, &["WT_SESSION", "HERDR_PANE_ID"]), vec![("WT_SESSION".to_string(), "abc".to_string()), ("HERDR_PANE_ID".to_string(), "w1:p2".to_string())]);
+        assert!(env_values(&block, &["SECRET_NOT_ASKED"]).is_empty());
+        assert!(env_values(&[], &["WT_SESSION"]).is_empty());
+    }
+
+    #[test]
+    fn windows_herdr_sockets_are_pipe_names_or_existing_absolute_files() {
+        let none = |_: &str| false;
+        assert!(check_socket_windows(r"\\.\pipe\herdr-1000", none).is_ok());
+        assert!(check_socket_windows(r"\\.\pipe\herdr\sock.v1", none).is_ok());
+        for bad in [r"\\.\pipe\", r"\\.\pipe\..\x", r"\\.\pipe\a b", r"\\server\pipe\herdr", "herdr.sock", r"C:\x\..\y", r"\\?\C:\h"] {
+            assert!(check_socket_windows(bad, |_| true).is_err(), "{bad}");
+        }
+        assert!(check_socket_windows(r"C:\Users\me\.herdr\herdr.sock", |_| true).is_ok());
+        assert!(check_socket_windows(r"C:\Users\me\.herdr\herdr.sock", none).is_err(), "must exist");
+    }
+
+    #[test]
+    fn program_names_match_with_or_without_exe_in_any_case() {
+        assert!(is_program("claude", "claude"));
+        assert!(is_program("/Users/x/.local/bin/herdr", "herdr"));
+        assert!(is_program("CLAUDE.EXE", "claude"));
+        assert!(is_program(r"C:\x\herdr.exe", "herdr"));
+        assert!(!is_program("claude-helper.exe", "claude"));
+        assert!(!is_program(".exe", "claude"));
     }
 
     #[test]

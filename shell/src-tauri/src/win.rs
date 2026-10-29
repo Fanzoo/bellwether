@@ -12,7 +12,7 @@ use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, STYLESTRUCT, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_STYLECHANGING, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, STYLESTRUCT, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_STYLECHANGING, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     EVENT_SYSTEM_FOREGROUND, HWND_TOPMOST, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
@@ -29,9 +29,18 @@ const KEEP_TOOL: usize = 0xB311;
 unsafe extern "system" fn keep_tool(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
     if msg == WM_STYLECHANGING && wparam as i32 == GWL_EXSTYLE && lparam != 0 {
         let s = lparam as *mut STYLESTRUCT;
-        (*s).styleNew = ((*s).styleNew | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
+        (*s).styleNew = kept_style((*s).styleNew);
     }
     DefSubclassProc(hwnd, msg, wparam, lparam)
+}
+
+/// The extended style a strip may take. Besides the tool-window bits, `WS_EX_LAYERED` stays
+/// on for good: tao drops it with `WS_EX_TRANSPARENT` when the cursor reaches a sheep, and a
+/// see-through window that stops being layered repaints black for a moment (the strip's
+/// black flash on the first hover, PC test 2026-10-29). The strip starts layered, so this
+/// keeps the state it is shown in; only `WS_EX_TRANSPARENT` toggles click-through.
+fn kept_style(new: u32) -> u32 {
+    (new | WS_EX_TOOLWINDOW | WS_EX_LAYERED) & !WS_EX_APPWINDOW
 }
 
 /// Makes a strip a tool window, for good: in neither the taskbar nor Alt-Tab nor Task
@@ -40,7 +49,7 @@ pub fn make_tool_window(hwnd: HWND) -> String {
     unsafe {
         let kept = SetWindowSubclass(hwnd, Some(keep_tool), KEEP_TOOL, 0) != 0;
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ((ex | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW) as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, kept_style(ex) as isize);
         SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         let now = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW != 0;
         match (now, kept) {
@@ -92,7 +101,7 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn from_wide(buf: &[u16]) -> String {
+pub(crate) fn from_wide(buf: &[u16]) -> String {
     let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     String::from_utf16_lossy(&buf[..end])
 }
@@ -152,7 +161,7 @@ fn monitors(strip_height_px: f64) -> Vec<dump::MonitorInfo> {
         .collect()
 }
 
-fn processes() -> Vec<dump::Process> {
+pub(crate) fn processes() -> Vec<dump::Process> {
     let mut out = Vec::new();
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -179,7 +188,7 @@ unsafe extern "system" fn each_window(hwnd: HWND, data: LPARAM) -> i32 {
     1
 }
 
-fn windows(procs: &[dump::Process]) -> Vec<dump::Window> {
+pub(crate) fn windows(procs: &[dump::Process]) -> Vec<dump::Window> {
     let mut handles: Vec<HWND> = Vec::new();
     unsafe { EnumWindows(Some(each_window), &mut handles as *mut _ as LPARAM) };
     handles
@@ -222,5 +231,23 @@ pub fn desktop(strip_height_px: f64) -> dump::Desktop {
         foreground: unsafe { GetForegroundWindow() } as usize as u64,
         windows: windows(&procs),
         processes: procs,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::UI::WindowsAndMessaging::WS_EX_TRANSPARENT;
+
+    #[test]
+    fn a_strip_stays_layered_when_it_stops_being_click_through() {
+        // tao's "accept clicks": both bits dropped. Only the click-through one may go.
+        let accepting = kept_style(WS_EX_TOPMOST | WS_EX_APPWINDOW);
+        assert_ne!(accepting & WS_EX_LAYERED, 0, "no black repaint: still layered");
+        assert_eq!(accepting & WS_EX_TRANSPARENT, 0, "takes the click");
+        assert_ne!(accepting & WS_EX_TOOLWINDOW, 0);
+        assert_eq!(accepting & WS_EX_APPWINDOW, 0);
+        let through = kept_style(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED);
+        assert_ne!(through & WS_EX_TRANSPARENT, 0, "click-through still toggles on");
     }
 }

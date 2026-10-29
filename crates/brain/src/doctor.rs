@@ -304,6 +304,9 @@ pub fn next_step(checks: &[Check], installed: bool) -> String {
     if checks.iter().any(|c| c.status == "FAIL") {
         return "fix the FAIL lines above first".into();
     }
+    if cfg!(windows) {
+        return "all set: open a Claude Code session and its sheep appears above the taskbar".into();
+    }
     "all set: open a Claude Code session and its sheep appears above the Dock".into()
 }
 
@@ -581,7 +584,8 @@ pub fn check_locator_log(text: Option<&str>) -> Vec<Check> {
         None => {}
     }
     if let Some(path) = herdr {
-        out.push(Check::new("herdr CLI", "WARN", format!("the overlay couldn't run herdr at {path} (locator.herdrPath), so sheep in herdr panes are placed and focused through iTerm2/Terminal only"), OK));
+        let fallback = if cfg!(windows) { "by their terminal app's window only, and a click doesn't select the herdr pane" } else { "through iTerm2/Terminal only" };
+        out.push(Check::new("herdr CLI", "WARN", format!("the overlay couldn't run herdr at {path} (locator.herdrPath), so sheep in herdr panes are placed and focused {fallback}"), OK));
     }
     out
 }
