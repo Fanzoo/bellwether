@@ -8,8 +8,13 @@
 //! It hides at once and shows again only after the reason has been gone for 2 s, so a
 //! share that stops and starts again doesn't flash the strip.
 //!
-//! Full-screen apps need no detector on macOS: the strip isn't `fullScreenAuxiliary`,
-//! so macOS keeps it off full-screen Spaces (M3-10, measured in Milestone 7).
+//! A full-screen app on a macOS full-screen Space needs no detector: the strip isn't
+//! `fullScreenAuxiliary`, so macOS keeps it off those Spaces (M3-10, measured in
+//! Milestone 7). Some apps do their own full screen instead, on an ordinary Space with the
+//! Dock and menu bar hidden (Parallels' "Optimize full screen for games"); the strip
+//! stayed over them, on the screen's bottom edge. `covered_monitors` finds those, and
+//! with `privacy.hideWhenFullscreen` on (the default) that monitor's strip hides, with
+//! the same 2 s debounce on the way back.
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -19,6 +24,37 @@ use std::time::{Duration, Instant};
 pub const SHOW_DEBOUNCE: Duration = Duration::from_secs(2);
 /// How often the process list is read.
 pub const SHARING_POLL: Duration = Duration::from_millis(500);
+
+/// How often the window list is read for the full-screen check.
+pub const FULLSCREEN_POLL: Duration = Duration::from_millis(500);
+
+/// The monitors (by name) an app covers with its own full screen. Both must hold:
+/// - the Dock has no window on screen although its settings say it shows (not auto-hidden):
+///   an app has hidden it. This is what tells a full screen from a maximised window;
+/// - the frontmost ordinary window on the monitor spans its full width, from at most the
+///   menu bar's height down to its bottom edge.
+///
+/// Measured with Parallels (2026-10-28): its window is 0,33 1728x1084 on a 1728x1117
+/// screen, and the Dock's window (layer 20, the whole screen) is gone. During the swipe
+/// onto its Space the Dock is still there, so nothing is covered until it settles.
+pub fn covered_monitors(windows: &[(i32, crate::locator::Win)], monitors: &[(String, crate::locator::Rect)], dock_autohide: bool) -> Vec<String> {
+    if dock_autohide || windows.iter().any(|(_, w)| w.owner == "Dock") {
+        return Vec::new();
+    }
+    const MENU_BAR: f64 = 40.0;
+    monitors
+        .iter()
+        .filter(|(_, m)| {
+            let front = windows.iter().filter(|(layer, _)| *layer == 0).map(|(_, w)| w.bounds).find(|b| {
+                let w = (b.x + b.w).min(m.x + m.w) - b.x.max(m.x);
+                let h = (b.y + b.h).min(m.y + m.h) - b.y.max(m.y);
+                w >= 50.0 && h >= 50.0
+            });
+            front.is_some_and(|b| b.x <= m.x + 1.0 && b.x + b.w >= m.x + m.w - 1.0 && b.y <= m.y + MENU_BAR && b.y + b.h >= m.y + m.h - 1.0)
+        })
+        .map(|(name, _)| name.clone())
+        .collect()
+}
 
 /// The first running process whose name is in `wanted` (case-insensitive, whole name).
 pub fn sharing_match(running: &[String], wanted: &[String]) -> Option<String> {
@@ -223,6 +259,57 @@ impl ProcessNames {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locator::{Rect, Win};
+
+    fn w(layer: i32, owner: &str, x: f64, y: f64, wd: f64, h: f64) -> (i32, Win) {
+        (layer, Win { pid: 1, owner: owner.into(), bounds: Rect { x, y, w: wd, h } })
+    }
+    const MAIN: (f64, f64, f64, f64) = (0.0, 0.0, 1728.0, 1117.0);
+    fn monitors() -> Vec<(String, Rect)> {
+        vec![("main".into(), Rect { x: MAIN.0, y: MAIN.1, w: MAIN.2, h: MAIN.3 }), ("side".into(), Rect { x: 1728.0, y: 0.0, w: 1920.0, h: 1080.0 })]
+    }
+
+    #[test]
+    fn parallels_games_full_screen_covers_its_monitor() {
+        // Recorded with Parallels' "Optimize full screen for games", once settled.
+        let wins = [
+            w(26, "Parallels Desktop", 0.0, 0.0, 1728.0, 33.0),
+            w(24, "Window Server", 0.0, 0.0, 1728.0, 33.0),
+            w(5, "Bellwether", 0.0, 911.0, 1728.0, 140.0),
+            w(0, "Parallels Desktop", 0.0, -5.0, 1728.0, 54.0),
+            w(0, "Parallels Desktop", 0.0, 33.0, 1728.0, 1084.0),
+        ];
+        assert_eq!(covered_monitors(&wins, &monitors(), false), ["main"]);
+        assert!(covered_monitors(&wins, &monitors(), true).is_empty(), "an auto-hidden Dock proves nothing");
+    }
+
+    #[test]
+    fn ordinary_desktops_and_the_swipe_onto_parallels_cover_nothing() {
+        // Recorded: the normal desktop (the Dock's window is there).
+        let desktop = [w(20, "Dock", 0.0, 0.0, 1728.0, 1117.0), w(5, "Bellwether", 0.0, 911.0, 1728.0, 140.0), w(0, "iTerm2", 10.0, 43.0, 1708.0, 997.0)];
+        assert!(covered_monitors(&desktop, &monitors(), false).is_empty());
+        // Recorded: mid-swipe, Parallels already covers everything but the Dock is still up.
+        let swipe = [w(0, "Parallels Desktop", 0.0, 0.0, 1728.0, 1117.0), w(27, "Dock", 0.0, 0.0, 1728.0, 1117.0), w(0, "iTerm2", 154.0, 1019.0, 1708.0, 997.0)];
+        assert!(covered_monitors(&swipe, &monitors(), false).is_empty());
+        // A maximised window with the Dock shown: the Dock proves it isn't full screen.
+        let zoomed = [w(20, "Dock", 0.0, 0.0, 1728.0, 1117.0), w(0, "Safari", 0.0, 33.0, 1728.0, 1084.0)];
+        assert!(covered_monitors(&zoomed, &monitors(), false).is_empty());
+    }
+
+    #[test]
+    fn only_the_monitor_whose_front_window_covers_it_is_covered() {
+        let wins = [
+            w(0, "Parallels Desktop", 0.0, 33.0, 1728.0, 1084.0),
+            w(0, "Notes", 1800.0, 100.0, 800.0, 600.0),
+            w(0, "Safari", 1728.0, 25.0, 1920.0, 1055.0),
+        ];
+        assert_eq!(covered_monitors(&wins, &monitors(), false), ["main"], "Notes is in front on the side monitor");
+        // A window short of the bottom, or narrower than the monitor, covers nothing.
+        let short = [w(0, "Parallels Desktop", 0.0, 33.0, 1728.0, 1000.0)];
+        assert!(covered_monitors(&short, &monitors(), false).is_empty());
+        let narrow = [w(0, "Parallels Desktop", 100.0, 33.0, 1600.0, 1084.0)];
+        assert!(covered_monitors(&narrow, &monitors(), false).is_empty());
+    }
 
     #[test]
     fn capture_exclusion_defaults_off_on_windows_only_and_config_wins_everywhere() {

@@ -641,6 +641,7 @@ pub fn run() {
     let (capture_exclusion, capture_why) = privacy::capture_exclusion(&settings.config, privacy::os_name());
     let hide_when_sharing = settings.config.pointer("/privacy/hideWhenSharing").and_then(Value::as_bool).unwrap_or(true);
     let sharing_names = if hide_when_sharing { privacy::wanted_names(&settings.config) } else { Vec::new() };
+    let hide_when_fullscreen = settings.config.pointer("/privacy/hideWhenFullscreen").and_then(Value::as_bool).unwrap_or(true);
     log(&format!(
         "privacy: capture exclusion {} ({capture_why}), hide while sharing {} ({})",
         if capture_exclusion { "on" } else { "off" },
@@ -848,7 +849,7 @@ pub fn run() {
                 std::thread::spawn(move || placement_loop(h, b, l, relocate, strip_height, capture_exclusion, port, token_for_places));
             }
             let (h, b) = (handle.clone(), brain_for_setup.clone());
-            std::thread::spawn(move || privacy_loop(h, b, sharing_names, strip_height));
+            std::thread::spawn(move || privacy_loop(h, b, sharing_names, hide_when_fullscreen, strip_height));
 
             if flags.demo {
                 // Debug: one sheep per behaviour, without a brain, to check the
@@ -913,9 +914,11 @@ pub fn run() {
 /**
  * Every 250 ms: whether the strip should be hidden (the tray's Hide everything; a sharing process,
  * read every 500 ms, debounced 2 s on the way back), applied to every strip window,
- * and the tray's Quiet check kept in step with the brain.
+ * and the tray's Quiet check kept in step with the brain. With `privacy.hideWhenFullscreen`,
+ * a monitor an app covers with its own full screen (privacy::covered_monitors, read every
+ * 500 ms, debounced the same way) hides that monitor's strip only.
  */
-fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<String>, strip_height: f64) {
+fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<String>, hide_when_fullscreen: bool, strip_height: f64) {
     use std::time::Instant;
     let mut debounce = privacy::Debounce::new();
     let mut sharing: Option<String> = None;
@@ -952,6 +955,22 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
         });
     }
     let mut last_stamp_check = Instant::now();
+    // Full screen: each monitor's debounce, the strips hidden for it, and the monitors'
+    // rectangles in points (re-read with the Dock, every 2 s).
+    let mut cover_debounce: std::collections::HashMap<String, privacy::Debounce> = Default::default();
+    let mut covered_labels: std::collections::HashSet<String> = Default::default();
+    let mut last_cover_poll = Instant::now() - privacy::FULLSCREEN_POLL;
+    let monitor_rects = |app: &tauri::AppHandle| -> Vec<(String, locator::Rect)> {
+        app.available_monitors()
+            .unwrap_or_default()
+            .iter()
+            .map(|m| {
+                let (p, s, sc) = (m.position(), m.size(), m.scale_factor());
+                (strips::monitor_name(m), locator::Rect { x: p.x as f64 / sc, y: p.y as f64 / sc, w: s.width as f64 / sc, h: s.height as f64 / sc })
+            })
+            .collect()
+    };
+    let mut monitors = if hide_when_fullscreen && cfg!(target_os = "macos") { monitor_rects(&app) } else { Vec::new() };
     loop {
         let now = Instant::now();
         // `bellwether show` / `bellwether hide` (or the file edited by hand) while running.
@@ -1008,6 +1027,9 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
                 log(&format!("dock: {}", if extents.is_empty() { "sheep use the full strip".to_string() } else { format!("sheep stand on the Dock: {:?}", extents) }));
                 brain.update_view(|v| v.dock = extents);
             }
+            if hide_when_fullscreen && cfg!(target_os = "macos") {
+                monitors = monitor_rects(&app);
+            }
             let fresh = dock::read_prefs();
             // Windows: no Dock settings to watch; the work areas are re-read every 2 s, so a
             // taskbar that moves, auto-hides or changes size is followed (WD1).
@@ -1026,13 +1048,43 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
                 });
             }
         }
+        // Full screen (macOS): which monitors an app covers now, each debounced.
+        let mut now_covered = covered_labels.clone();
+        if !monitors.is_empty() && now.duration_since(last_cover_poll) >= privacy::FULLSCREEN_POLL {
+            last_cover_poll = now;
+            let covered = privacy::covered_monitors(&locator::layered_windows(), &monitors, dock.autohide);
+            let by_monitor = app.state::<strips::Strips>().by_monitor.lock().unwrap().clone();
+            now_covered.clear();
+            for (name, _) in &monitors {
+                let d = cover_debounce.entry(name.clone()).or_insert_with(privacy::Debounce::new);
+                if d.update(covered.contains(name), now) {
+                    if let Some(label) = by_monitor.get(name) {
+                        now_covered.insert(label.clone());
+                    }
+                }
+            }
+        }
         let kept = *app.state::<tray::Switches>().kept.lock().unwrap();
         let hidden = debounce.update(sharing.is_some(), now) || kept.hidden;
+        if now_covered != covered_labels {
+            for label in now_covered.symmetric_difference(&covered_labels) {
+                let cover = now_covered.contains(label);
+                // While everything is hidden, the change waits for the strips to show again.
+                if !hidden {
+                    if let Some(w) = app.get_webview_window(label) {
+                        let _ = if cover { w.hide() } else { w.show() };
+                    }
+                }
+                log(&format!("{label} {}", if cover { "hidden: an app covers its monitor (full screen)" } else { "shown: the full-screen app has gone" }));
+            }
+            covered_labels = now_covered;
+        }
         if shown != Some(!hidden) {
             for (label, w) in tauri::Manager::webview_windows(&app) {
-                // The strips only: the onboarding window isn't hidden while sharing.
+                // The strips only: the onboarding window isn't hidden while sharing. A strip
+                // over a full-screen app stays hidden.
                 if strips::is_strip(&label) {
-                    let _ = if hidden { w.hide() } else { w.show() };
+                    let _ = if hidden || covered_labels.contains(&label) { w.hide() } else { w.show() };
                 }
             }
             log(&format!(

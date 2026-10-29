@@ -781,6 +781,18 @@ impl Windows for RealWindows {
     }
 }
 
+/// Every on-screen window with its layer (macOS; empty elsewhere): what the full-screen
+/// check in privacy.rs reads.
+#[cfg(target_os = "macos")]
+pub fn layered_windows() -> Vec<(i32, Win)> {
+    cg::layered()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn layered_windows() -> Vec<(i32, Win)> {
+    Vec::new()
+}
+
 #[cfg(not(target_os = "macos"))]
 impl Windows for RealWindows {
     fn list(&self) -> Vec<Win> {
@@ -826,7 +838,14 @@ mod cg {
     const SINT32: isize = 3; // kCFNumberSInt32Type
     const UTF8: u32 = 0x0800_0100;
 
+    /// Ordinary windows (layer 0, at least 50 points each way), front to back.
     pub fn windows() -> Vec<Win> {
+        layered().into_iter().filter(|(layer, w)| *layer == 0 && w.bounds.w >= 50.0 && w.bounds.h >= 50.0).map(|(_, w)| w).collect()
+    }
+
+    /// Every on-screen window with its layer, front to back (the Dock's, menus and
+    /// overlays included).
+    pub fn layered() -> Vec<(i32, Win)> {
         let mut out = Vec::new();
         unsafe {
             let list = CGWindowListCopyWindowInfo(ON_SCREEN_ONLY | EXCLUDE_DESKTOP, 0);
@@ -843,12 +862,9 @@ mod cg {
                     }
                     n
                 };
-                if num(kCGWindowLayer) != 0 {
-                    continue; // menus, the Dock, overlays like the strip itself
-                }
                 let mut r = CGRect::default();
                 let b = CFDictionaryGetValue(d, kCGWindowBounds);
-                if b.is_null() || !CGRectMakeWithDictionaryRepresentation(b, &mut r) || r.w < 50.0 || r.h < 50.0 {
+                if b.is_null() || !CGRectMakeWithDictionaryRepresentation(b, &mut r) {
                     continue;
                 }
                 let mut buf = [0u8; 256];
@@ -859,7 +875,7 @@ mod cg {
                 } else {
                     String::new()
                 };
-                out.push(Win { pid: num(kCGWindowOwnerPID), owner, bounds: Rect { x: r.x, y: r.y, w: r.w, h: r.h } });
+                out.push((num(kCGWindowLayer), Win { pid: num(kCGWindowOwnerPID), owner, bounds: Rect { x: r.x, y: r.y, w: r.w, h: r.h } }));
             }
             CFRelease(list);
         }

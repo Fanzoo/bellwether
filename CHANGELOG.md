@@ -7,6 +7,11 @@
   (the app, not the exact session). The hooks carry one more header for this
   (`X-Bellwether-Entrypoint`), so re-run Install in the setup window, or
   `bellwether hooks install --write`; `bellwether doctor` says when it's needed.
+- **The sheep no longer show over Parallels in full screen.** With "Optimize full screen
+  for games", Parallels does its own full screen and hides the Dock, so the strip stayed
+  on top and dropped onto the Windows taskbar. Now an app that covers a monitor that way
+  hides that monitor's strip (it comes back 2 s after the app leaves full screen).
+  `privacy.hideWhenFullscreen: false` turns this off.
 
 ## 1.1.1
 
