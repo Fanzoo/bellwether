@@ -200,7 +200,26 @@ pub fn mouse_down() -> bool {
     (0..3).any(|b| unsafe { CGEventSourceButtonState(0, b) })
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Whether any mouse button is down (WD11): `GetAsyncKeyState` for left, right and middle.
+/// It reads the physical buttons (a swapped mouse doesn't matter: any button counts), from
+/// any thread, with no permission. A touchpad's tap-and-drag should set the left button
+/// too (W4's by-hand touchpad check proves it).
+#[cfg(windows)]
+pub fn mouse_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
+    [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON].iter().any(|&k| key_held(unsafe { GetAsyncKeyState(k as i32) }))
+}
+
+/// `GetAsyncKeyState`'s answer: the high bit is "down now"; the low bit ("pressed since the
+/// last call") is not, so a click that ended between two looks doesn't count.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn key_held(state: i16) -> bool {
+    state < 0
+}
+
+/// Elsewhere (Linux) there is no button read yet: the fail-safe never fires, and the
+/// 2-minute ceiling ends a lost hold.
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn mouse_down() -> bool {
     true
 }
@@ -502,6 +521,14 @@ mod tests {
         assert_eq!((at.label.as_str(), at.x, at.y), ("strip-1", 900.0, 80.0));
         let at = locate_cursor((500.0, 1000.0), &monitors, &strips).unwrap();
         assert_eq!((at.label.as_str(), at.x, at.y), ("strip-0", 500.0, 23.0));
+    }
+
+    #[test]
+    fn a_windows_button_counts_as_down_only_while_it_is_held() {
+        assert!(key_held(i16::MIN), "high bit: down now");
+        assert!(key_held(i16::MIN | 1), "down, and pressed since the last look");
+        assert!(!key_held(1), "only pressed since the last look: up now");
+        assert!(!key_held(0));
     }
 
     #[test]
