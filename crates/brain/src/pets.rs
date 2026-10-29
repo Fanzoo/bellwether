@@ -23,7 +23,7 @@ pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// Bellwether's own pets (plan D8), in the order the setup window lists them. Their names
 /// are reserved: `pets import` refuses them, so an imported file is never shadowed by a
 /// bundled pet or mistaken for one.
-pub const BUNDLED: [&str; 2] = ["bellwether", "brah"];
+pub const BUNDLED: [&str; 3] = ["bellwether", "brah", "bryan"];
 
 /// The pet the strip draws when config.json has no `pets.default`.
 pub const DEFAULT_PET: &str = "bellwether";

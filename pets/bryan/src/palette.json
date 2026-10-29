@@ -1,0 +1,125 @@
+{
+  "comment": "Every colour Bryan uses (pets/SPEC.md). '.' is transparent. The helmet is drawn only in the three mask tones, which the strip recolours to the session colour. No colour sits in the tinter's purple window, so no bruise or rot purples.",
+  "colours": [
+    {
+      "char": "1",
+      "hex": "#730073",
+      "role": "mask-dark"
+    },
+    {
+      "char": "2",
+      "hex": "#b300b3",
+      "role": "mask-mid"
+    },
+    {
+      "char": "3",
+      "hex": "#ff7aff",
+      "role": "mask-light"
+    },
+    {
+      "char": "o",
+      "hex": "#1e2620",
+      "role": "outline"
+    },
+    {
+      "char": "k",
+      "hex": "#b8d6a2",
+      "role": "skin"
+    },
+    {
+      "char": "K",
+      "hex": "#c9e8b0",
+      "role": "skin-light"
+    },
+    {
+      "char": "j",
+      "hex": "#8fa596",
+      "role": "skin-shade"
+    },
+    {
+      "char": "u",
+      "hex": "#62786a",
+      "role": "skin-deep"
+    },
+    {
+      "char": "e",
+      "hex": "#ffffff",
+      "role": "eye"
+    },
+    {
+      "char": "m",
+      "hex": "#4a2a2a",
+      "role": "mouth"
+    },
+    {
+      "char": "T",
+      "hex": "#fff6d6",
+      "role": "tooth"
+    },
+    {
+      "char": "c",
+      "hex": "#a5734b",
+      "role": "jacket"
+    },
+    {
+      "char": "C",
+      "hex": "#c49268",
+      "role": "jacket-light"
+    },
+    {
+      "char": "d",
+      "hex": "#5e3c27",
+      "role": "jacket-dark"
+    },
+    {
+      "char": "w",
+      "hex": "#eee2c6",
+      "role": "fur-collar"
+    },
+    {
+      "char": "n",
+      "hex": "#58677a",
+      "role": "trousers"
+    },
+    {
+      "char": "N",
+      "hex": "#424e5e",
+      "role": "trousers-dark"
+    },
+    {
+      "char": "h",
+      "hex": "#57463b",
+      "role": "shoe"
+    },
+    {
+      "char": "g",
+      "hex": "#8e9096",
+      "role": "goggle-frame"
+    },
+    {
+      "char": "l",
+      "hex": "#cfe3ee",
+      "role": "goggle-lens"
+    },
+    {
+      "char": "t",
+      "hex": "#4a3b33",
+      "role": "strap"
+    },
+    {
+      "char": "b",
+      "hex": "#7a5a3c",
+      "role": "dirt"
+    },
+    {
+      "char": "B",
+      "hex": "#9a7e5e",
+      "role": "dirt-light"
+    },
+    {
+      "char": "y",
+      "hex": "#ffd75e",
+      "role": "star"
+    }
+  ]
+}

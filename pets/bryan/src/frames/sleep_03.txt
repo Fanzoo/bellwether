@@ -1,0 +1,5 @@
+# sleep 3 of 4: the head nodding forward.
+part legs_sit 6 35
+part body 14 29
+part head_blink 9 15
+part arm_down 16 30

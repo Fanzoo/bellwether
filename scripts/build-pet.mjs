@@ -37,7 +37,7 @@ export const PETS_DIR = path.join(AGENT, 'pets');
 export const LOCK_FILE = path.join(AGENT, 'pets.lock.json');
 
 /** The bundled pets, in the order the setup window lists them (D8). Reserved as names. */
-export const BUNDLED = ['bellwether', 'brah'];
+export const BUNDLED = ['bellwether', 'brah', 'bryan'];
 /** The tile, the sheet's width in tiles, and the tinter's three mask tones (D8). */
 export const TILE = 40;
 export const SHEET_COLS = 16;

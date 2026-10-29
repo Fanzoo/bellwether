@@ -1,0 +1,5 @@
+# sit 2 of 3: sitting on the ground, legs out in front, arms hanging limp at his sides.
+part legs_sit 6 35
+part body 14 29
+part head 10 13
+part arm_down 16 30

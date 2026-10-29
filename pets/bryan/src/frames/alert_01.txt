@@ -1,0 +1,5 @@
+# alert 1 of 5: facing you, hands out.
+part leg_front 15 34
+part leg_front 21 34
+part body_front 12 23
+part head_front 10 7

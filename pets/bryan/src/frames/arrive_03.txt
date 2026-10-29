@@ -1,0 +1,6 @@
+# arrive 3 of 4: out to the waist, arms out, the dirt still round his legs.
+part arm_far 3 31
+part body 14 29
+part head 10 13
+part arm 5 32
+part mound 8 35

@@ -1,0 +1,7 @@
+# run 1 of 4: leaning in, a long stride, arms out.
+part arm_far 1 26
+part leg_far 22 33
+part leg 9 33
+part body 13 24
+part head 8 9
+part arm 3 27

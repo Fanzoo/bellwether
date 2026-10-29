@@ -1,0 +1,5 @@
+# sleep loop 2 of 3: breathing out, the head sinking a pixel.
+part legs_sit 6 35
+part body 14 29
+part head_blink 8 17
+part arm_down 16 30

@@ -702,15 +702,15 @@ see is in the README):
 
 ### Bellwether's own pets
 
-The app has two pets of its own, each in a flight helmet that takes the session
-colour: the sheep `bellwether`, the default, and the aviator goose `brah` (milestone
-M10b). Their art is committed under CC0-1.0 in `pets/`, as text sources that
+The app has three pets of its own, each in a flight helmet that takes the session
+colour: the sheep `bellwether`, the default, the aviator goose `brah` (milestone
+M10b) and the zombie aviator `bryan`. Their art is committed under CC0-1.0 in `pets/`, as text sources that
 `scripts/build-pet.mjs` builds into `pets/<name>/animations.xml`; `pets/SPEC.md`
 describes the source form and the design. Set `"pets": { "default": "brah" }` in
-config.json (or choose it in the setup window's Pet step) for geese. With no
+config.json (or choose it in the setup window's Pet step) for geese, or `"bryan"` for zombies. With no
 `pets.default` in config.json, the strip draws the sheep, from the checkout
 (a development build) or from the app's Resources, only while it matches its pin in
-`pets.lock.json`. The names `bellwether` and `brah` can't be used by `pets import`.
+`pets.lock.json`. The names `bellwether`, `brah` and `bryan` can't be used by `pets import`.
 
 ```
 node scripts/build-pet.mjs build bellwether        # after editing pets/bellwether/src or pet.json (or: build brah, build --all)

@@ -1,0 +1,6 @@
+# sit 1 of 3: bending to sit, the knees going, the arms dropping.
+part leg_far 18 33
+part leg 13 33
+part body 14 26
+part head 10 10
+part arm_down 16 28

@@ -1,0 +1,9 @@
+# dizzy 2 of 4: swaying right.
+part arm_far 4 26
+part leg_far 19 33
+part leg 14 33
+part body 15 24
+part head_x 11 8
+part arm 6 27
+part star 12 0
+part star 24 7

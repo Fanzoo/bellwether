@@ -1,0 +1,7 @@
+# graze 2 of 4: the head lolls forward.
+part arm_far 3 26
+part leg_far 19 33
+part leg 14 33
+part body 14 24
+part head 9 9
+part arm 5 27

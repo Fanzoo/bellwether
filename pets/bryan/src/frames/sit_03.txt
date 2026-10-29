@@ -1,0 +1,5 @@
+# sit 3 of 3: sitting, a slow blink.
+part legs_sit 6 35
+part body 14 29
+part head_blink 10 13
+part arm_down 16 30

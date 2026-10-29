@@ -1,0 +1,7 @@
+# walk 3 of 4 (contact): the far foot forward, the near one dragging behind.
+part arm_far 3 26
+part leg_far 11 33
+part leg 20 33
+part body 14 24
+part head 10 8
+part arm 5 27

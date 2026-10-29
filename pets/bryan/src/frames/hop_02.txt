@@ -1,0 +1,7 @@
+# hop 2 of 4: springing up, legs stretched.
+part arm_far 3 22
+part leg_far 19 29
+part leg 14 29
+part body 14 20
+part head 10 4
+part arm 5 23

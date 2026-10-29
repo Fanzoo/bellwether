@@ -1,0 +1,7 @@
+# arrive 4 of 4: standing, ready to shuffle off.
+part arm_far 3 26
+part leg_far 19 33
+part leg 14 33
+part body 14 24
+part head 10 8
+part arm 5 27

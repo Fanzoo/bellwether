@@ -1,0 +1,7 @@
+# hop 3 of 4: tucked at the top, eyes shut in glee.
+part arm_far 3 21
+part leg_far 18 26
+part leg 15 26
+part body 14 19
+part head_happy 10 3
+part arm 5 22

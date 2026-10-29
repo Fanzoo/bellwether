@@ -13,7 +13,8 @@
     "targets": ["app"],
     "resources": {
       "../../pets/bellwether/animations.xml": "pets/bellwether/animations.xml",
-      "../../pets/brah/animations.xml": "pets/brah/animations.xml"
+      "../../pets/brah/animations.xml": "pets/brah/animations.xml",
+      "../../pets/bryan/animations.xml": "pets/bryan/animations.xml"
     },
     "macOS": {
       "minimumSystemVersion": "13.0",

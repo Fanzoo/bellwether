@@ -1,0 +1,7 @@
+# hop 4 of 4: reaching down for the ground.
+part arm_far 3 24
+part leg_far 19 31
+part leg 14 31
+part body 14 22
+part head 10 6
+part arm 5 25
