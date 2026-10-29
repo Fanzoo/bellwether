@@ -280,7 +280,10 @@ keeps the plain name.
   - Teams and Google Meet in a browser have no such process. Before sharing in those, use
     *Hide everything (for screen sharing)*, or set `bubble.detail` to `"tool"` so a bubble
     never shows a command.
-- **Full-screen apps:** the strip stays off a full-screen app's Space.
+- **Full-screen apps:** the strip stays off a full-screen app's Space. An app that does
+  its own full screen on an ordinary Space, hiding the Dock (Parallels' "Optimize full
+  screen for games"), hides only its monitor's strip: `privacy::covered_monitors`, every
+  500 ms, with `privacy.hideWhenFullscreen` (default true).
 - **Near the cursor:** a sheep (and its bubble) fades to `fade.opacity` while the
   cursor is within `fade.radiusPx` of it, so you can see and click what's underneath.
 - `BELLWETHER_CONFIG=<file>` points the shell at another config file, read-only. It's a

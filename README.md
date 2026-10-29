@@ -106,7 +106,10 @@ To come back to the window later: menu-bar sheep > *Set up Bellwether…*.
 **Screen sharing and full screen.** The strip asks macOS to leave it out of screen
 captures, and it hides itself while Zoom is sharing your screen. Teams and Google Meet in
 a browser can't be detected: use *Hide everything (for screen sharing)* first. The strip
-stays off full-screen apps.
+stays off full-screen apps, including apps that do their own full screen and hide the Dock
+(such as Parallels with "Optimize full screen for games"); there only that monitor's strip
+hides. `"privacy": { "hideWhenFullscreen": false }` in config.json keeps it showing over
+those.
 
 **config.json.** Bellwether runs without one. To change something, create
 `~/Library/Application Support/Bellwether/config.json` with just the keys you want; every
