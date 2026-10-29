@@ -1,0 +1,4 @@
+# arrive 2 of 4: the helmet and face come up, the hand still waving.
+part hand_up 8 26
+part head 11 21
+part mound 8 35

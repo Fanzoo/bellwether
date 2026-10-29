@@ -1,0 +1,3 @@
+# lie 3 of 3: turning to look at you.
+part prone 14 35
+part head_front 1 21

@@ -1,0 +1,5 @@
+# sleep loop 3 of 3: breathing in again.
+part legs_sit 6 35
+part body 14 29
+part head_blink 8 16
+part arm_down 16 30

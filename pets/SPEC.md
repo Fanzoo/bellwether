@@ -286,3 +286,30 @@ is an overlay, as on the sheep.
 - **carried** (3): lifted by the helmet, the neck drawn in, eyes wide, the feet dangling
   and paddling, swinging a pixel either way. **land** (3; 1 of its own): feet reaching
   down, the crouch, standing side on.
+
+## The zombie (`bryan`)
+
+The maintainer asked for a cute 8-bit zombie named Bryan, wearing the helmet, bundled,
+and approved both review rounds (2026-10-28).
+
+- A **cute cartoon zombie**, small and big-headed, in chunky 8-bit pixel art. Goofy, never
+  gory: no blood, no exposed bone, no wounds beyond a stitched scar.
+- It wears the **flight helmet with goggles in every frame**, drawn as on the sheep (the
+  round dome with a light rim, the ear flap, the chin strap), so the session colour sits
+  where it does on the other pets.
+- **Skin** is a pale, slightly grey green, shaded with greyer greens, never purple (the
+  tinter's window): no bruises or rot in purple. A droopy eye in a dark socket, a button
+  nose, a crooked mouth with one tooth, a stitched scar on the cheek.
+- **Clothes:** a scruffy tan-brown bomber jacket with a cream fur collar and a torn hem,
+  grey-blue trousers and scuffed brown shoes.
+- **The zombie pose:** arms held straight out in front while standing and walking (sitting,
+  they hang limp at his sides, the hands on the ground), a stiff shuffling walk with the
+  head lolling.
+- **arrive** is rising out of the ground: a hand pokes up through a heap of dirt, then the
+  helmet and face, then Bryan to the waist, then standing. **leave** is meant to be the
+  reverse, sinking back into a heap of dirt, but the strip drops a leaving pet only once it is
+  off the strip, so for now he runs off like the sheep.
+
+Round 1 drew walk, turn, sit and arrive; round 2 the other behaviours: 17 animations, 57
+frames. From the front the eyes are bigger (one wide, one droopy) so the face reads at
+strip size; the profile keeps the small droopy eye.

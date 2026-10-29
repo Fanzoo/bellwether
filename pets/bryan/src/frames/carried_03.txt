@@ -1,0 +1,7 @@
+# carried 3 of 3: swinging a pixel left, the other leg kicking.
+part arm_far 2 22
+part leg_far 18 29
+part leg 12 28
+part body 13 20
+part head 9 4
+part arm 4 23

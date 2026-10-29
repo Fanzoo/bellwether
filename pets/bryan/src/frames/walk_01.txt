@@ -1,0 +1,7 @@
+# walk 1 of 4 (contact): a stiff shuffle, the near foot dragged forward, arms out.
+part arm_far 3 26
+part leg_far 21 33
+part leg 11 33
+part body 14 24
+part head 10 8
+part arm 5 27

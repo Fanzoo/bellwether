@@ -1,0 +1,4 @@
+# trip 4 of 5: pushing up on one arm.
+part prone 14 35
+part head 3 19
+part arm_down 7 31

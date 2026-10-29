@@ -44,7 +44,7 @@ const TRIPLE = 'x86_64-pc-windows-msvc';
 /** The test folder's port: never the live brain's 47417. */
 export const TEST_PORT = 47491;
 /** Bellwether's own pets (crates/brain/src/pets.rs BUNDLED). */
-export const PETS = ['bellwether', 'brah'];
+export const PETS = ['bellwether', 'brah', 'bryan'];
 
 /** config.example.json with the test port, every other line as it is. */
 export function testConfig(example, port = TEST_PORT) {

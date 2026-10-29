@@ -1,0 +1,6 @@
+# trip 2 of 5: falling, arms flung out.
+part leg_far 24 32
+part leg 21 33
+part body 11 28
+part head 3 16
+part arm 0 31

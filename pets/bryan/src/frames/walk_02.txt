@@ -1,0 +1,7 @@
+# walk 2 of 4 (passing): the feet together, Bryan a pixel higher, arms bobbing.
+part arm_far 3 25
+part leg_far 18 33
+part leg 15 33
+part body 14 23
+part head 10 7
+part arm 5 26

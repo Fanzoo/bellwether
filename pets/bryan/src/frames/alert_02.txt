@@ -1,0 +1,5 @@
+# alert 2 of 5: a crouch.
+part leg_front_short 15 36
+part leg_front_short 21 36
+part body_front 12 26
+part head_front 10 10

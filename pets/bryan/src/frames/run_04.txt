@@ -1,0 +1,7 @@
+# run 4 of 4: passing again, the head lolling forward.
+part arm_far 1 24
+part leg_far 17 31
+part leg 13 31
+part body 13 22
+part head 7 8
+part arm 3 25

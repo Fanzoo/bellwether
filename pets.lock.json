@@ -134,6 +134,69 @@
           }
         ]
       }
+    },
+    "bryan": {
+      "sha256": "9c11e621c30fd5f67c4e9129b92009e30539ed066264ba3f2410f16d8c4c47fb",
+      "bytes": 69619,
+      "animationMap": {
+        "walk": "walk",
+        "run": "run",
+        "graze": "graze",
+        "sleep": [
+          "sleep",
+          "sleep loop"
+        ],
+        "alert": "alert",
+        "turn": "turn",
+        "trip": "trip",
+        "sit": "sit",
+        "dizzy": "dizzy",
+        "chew": "chew",
+        "arrive": "arrive",
+        "leave": "leave",
+        "hop": "hop",
+        "lie": "lie",
+        "carried": "carried",
+        "land": "land"
+      },
+      "overlays": {
+        "18": [
+          {
+            "tile": 57,
+            "x": 3,
+            "y": 7,
+            "w": 7,
+            "h": 7
+          }
+        ],
+        "19": [
+          {
+            "tile": 57,
+            "x": 4,
+            "y": 6,
+            "w": 7,
+            "h": 7
+          }
+        ],
+        "20": [
+          {
+            "tile": 57,
+            "x": 6,
+            "y": 2,
+            "w": 7,
+            "h": 7
+          }
+        ],
+        "21": [
+          {
+            "tile": 58,
+            "x": 8,
+            "y": 0,
+            "w": 9,
+            "h": 8
+          }
+        ]
+      }
     }
   }
 }

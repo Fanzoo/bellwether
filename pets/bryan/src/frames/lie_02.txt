@@ -1,0 +1,3 @@
+# lie 2 of 3: a blink.
+part prone 14 35
+part head_blink 2 22

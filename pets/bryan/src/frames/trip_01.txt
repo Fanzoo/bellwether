@@ -1,0 +1,7 @@
+# trip 1 of 5: a foot catches, pitching forward.
+part arm_far 2 29
+part leg_far 15 33
+part leg 21 33
+part body 12 25
+part head 7 10
+part arm 3 30

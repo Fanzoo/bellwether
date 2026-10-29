@@ -1,0 +1,6 @@
+# alert 3 of 5: a big jump, a "!".
+part leg_front 15 28
+part leg_front 21 28
+part body_front 12 17
+part head_front 10 1
+part bang 33 2

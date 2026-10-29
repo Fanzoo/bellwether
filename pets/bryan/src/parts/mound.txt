@@ -1,0 +1,6 @@
+# A heap of dirt Bryan climbs out of. Its bottom row is the ground.
+......oooooooooooo......
+...oooBBbBBbbBBbbBBooo..
+.ooBBbbBbbbBbbbBbbbbBBoo
+obbBbbbbbBbbbbbbbbBbbbbo
+oooooooooooooooooooooooo

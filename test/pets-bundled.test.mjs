@@ -43,7 +43,7 @@ const MASK_HEX = Object.values(MASK);
 const hex = (d, i) => `#${[d[i], d[i + 1], d[i + 2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 
 test('there is at least the sheep, and the bundled names are fixed', () => {
-  assert.deepEqual(BUNDLED, ['bellwether', 'brah']);
+  assert.deepEqual(BUNDLED, ['bellwether', 'brah', 'bryan']);
   assert.ok(PETS.includes('bellwether'), 'M10a ships the sheep');
 });
 
@@ -496,7 +496,7 @@ describe('(g) provenance', () => {
   });
   test('NOTICE says how the bundled pets were made and dedicates them under CC0, naming each bundled pet', () => {
     const n = fs.readFileSync(path.join(AGENT_DIR, 'NOTICE'), 'utf8').replace(/\s+/g, ' ');
-    assert.match(n, /Bundled pets \(the sheep "bellwether"(,? and the aviator goose "brah")?\), CC0-1\.0\./);
+    assert.match(n, /Bundled pets \(the sheep "bellwether", the aviator goose "brah" and the zombie aviator "bryan"\), CC0-1\.0\./);
     assert.match(n, /made by an AI coding agent under the direction of the project's maintainer, from a written specification \(pets\/SPEC\.md\)/);
     assert.match(n, /No third-party art was used/);
     assert.match(n, /dedicated to the public domain under CC0 1\.0 Universal \(pets\/LICENSE\)/);

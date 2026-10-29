@@ -38,7 +38,12 @@ describe('doctor\'s pets line, by the strip\'s rules', () => {
     assert.equal(c.status, 'PASS', c.detail);
     assert.equal(c.detail, "brah, Bellwether's own pet, bundled; sha256 matches its pin");
   });
-  for (const name of ['BELLWETHER', 'Bellwether', 'bellwether.', 'Brah']) {
+  test('"bryan": the zombie, bundled, matching its pin', async () => {
+    const c = await pets({ default: 'bryan' });
+    assert.equal(c.status, 'PASS', c.detail);
+    assert.equal(c.detail, "bryan, Bellwether's own pet, bundled; sha256 matches its pin");
+  });
+  for (const name of ['BELLWETHER', 'Bellwether', 'bellwether.', 'Brah', 'Bryan']) {
     test(`${JSON.stringify(name)}: names are exact, never a PASS`, async () => {
       const c = await pets({ default: name });
       assert.equal(c.status, 'WARN', c.detail);

@@ -1,0 +1,7 @@
+# run 2 of 4: passing, both feet off the ground.
+part arm_far 1 24
+part leg_far 17 31
+part leg 13 31
+part body 13 22
+part head 8 7
+part arm 3 25
