@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
+
+A third pet to choose, a zombie aviator named Bryan; sessions in the Claude desktop app
+now behave like terminal ones; and the strip hides over apps that do their own full screen.
 
 - **A third pet: Bryan, a zombie aviator.** A cute 8-bit zombie in the same flight
   helmet, which takes the session colour, and a bomber jacket. He shuffles with his arms
   out and climbs out of the ground when a session starts. Choose him in the setup
   window's Pet step, or set `"pets": { "default": "bryan" }` in config.json.
-
 - **Sessions in the Claude desktop app.** They already got a sheep; now it stands on the
   monitor where the Claude app's window is, and clicking it brings the Claude app forward
   (the app, not the exact session). The hooks carry one more header for this

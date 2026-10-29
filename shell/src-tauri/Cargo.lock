@@ -233,7 +233,7 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bellwether-brain"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "bellwether-core",
  "bytes",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "bellwether-core"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "indexmap 2.14.2",
@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "bellwether-shell"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "bellwether-brain",
  "bellwether-core",
