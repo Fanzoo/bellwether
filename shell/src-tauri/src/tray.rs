@@ -260,7 +260,36 @@ fn icon() -> Image<'static> {
             dot(x, y as f64, 1.2);
         }
     }
+    // macOS draws it as a template (any colour it likes, from the alpha). Windows shows the
+    // pixels as they are, and a black sheep vanishes on a dark taskbar: there it is white
+    // with a dark outline, which reads on a dark or a light taskbar.
+    if !cfg!(target_os = "macos") {
+        outline_white(&mut rgba, N);
+    }
     Image::new_owned(rgba, N as u32, N as u32)
+}
+
+/// Fills the shape (its alpha) white and rings it with a one-pixel dark outline.
+fn outline_white(rgba: &mut [u8], n: usize) {
+    let solid: Vec<bool> = (0..n * n).map(|i| rgba[i * 4 + 3] != 0).collect();
+    for py in 0..n {
+        for px in 0..n {
+            let i = py * n + px;
+            let rgb = if solid[i] {
+                [0xff, 0xff, 0xff]
+            } else {
+                let near = (-1i32..=1).any(|dy| (-1i32..=1).any(|dx| {
+                    let (x, y) = (px as i32 + dx, py as i32 + dy);
+                    x >= 0 && y >= 0 && (x as usize) < n && (y as usize) < n && solid[y as usize * n + x as usize]
+                }));
+                if !near {
+                    continue;
+                }
+                [0x20, 0x20, 0x20]
+            };
+            rgba[i * 4..i * 4 + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 0xff]);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -268,6 +297,21 @@ mod tests {
     use super::*;
     use bellwether_brain::legacy::{Agent, Loaded};
     use crate::login_items::Service;
+
+    #[test]
+    fn the_windows_tray_sheep_is_white_with_a_dark_outline() {
+        let n = 32;
+        let mut rgba = vec![0u8; n * n * 4];
+        for (x, y) in [(10, 10), (11, 10), (10, 11), (11, 11)] {
+            rgba[(y * n + x) * 4 + 3] = 255;
+        }
+        outline_white(&mut rgba, n);
+        let px = |x: usize, y: usize| &rgba[(y * n + x) * 4..(y * n + x) * 4 + 4];
+        assert_eq!(px(10, 10), [0xff, 0xff, 0xff, 0xff], "the shape is white");
+        assert_eq!(px(9, 10), [0x20, 0x20, 0x20, 0xff], "the ring is dark");
+        assert_eq!(px(12, 12), [0x20, 0x20, 0x20, 0xff], "diagonals too");
+        assert_eq!(px(13, 10)[3], 0, "beyond the ring stays transparent");
+    }
 
     #[test]
     fn the_tray_names_legacy_agents_and_offers_the_login_items_pane() {
