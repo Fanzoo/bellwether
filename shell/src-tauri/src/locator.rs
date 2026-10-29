@@ -732,6 +732,10 @@ impl Runner for RealRunner {
         for (k, v) in env {
             cmd.env(k, v);
         }
+        // Windows: a console program (herdr) started from the strip, which has no console,
+        // would flash a console window of its own.
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000); // CREATE_NO_WINDOW
         let mut child = cmd.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { RunError::NotFound } else { RunError::Failed(e.to_string()) })?;
         // Read both pipes while it runs: a big `ps` listing would otherwise fill the
         // pipe and block until the time limit.
