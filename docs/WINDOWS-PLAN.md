@@ -7,7 +7,8 @@ app, brain, CLI and setup window, signed and updating itself.
 Status: proposal, with the maintainer's decisions of 2026-10-20 applied (see "Decisions
 (maintainer, 2026-10-20)" under Open questions). W1 is built and has had a first run on
 the maintainer's PC; W2's first part is built; W3 is built, its click and hover
-checks passed on the PC, the rest of its by-hand list open (their status sections); nothing else is built yet. Items marked
+checks passed on the PC, the rest of its by-hand list open; W4 is built and awaits its PC
+checks (their status sections); nothing else is built yet. Items marked
 **ASSUMPTION** are technical guesses that a milestone proves. Bracketed numbers such as
 [4] point to the Sources list at the end. Crate versions were read from `Cargo.lock` and
 crates.io on 2026-10-19 [21]. The Tauri, tao and wry behaviour quoted here was read from
@@ -1521,6 +1522,63 @@ Builds:
   (WD11).
 
 **By hand (about 20 minutes):** M12's list, with a mouse and a touchpad.
+
+#### W4 status (developer, 2026-10-29): built; the cargo tests green on the Mac; the PC checks open
+
+What W4 found already in place, and what it built:
+
+- **The cursor mapping was already physical.** W2 (WD3) put the hover, the hold, the
+  carried sheep's strip and the drop's monitor through `Space::NATIVE`, which is physical
+  pixels on Windows: `cursor_now`, `strip_frames` and `locate_cursor` divide only the
+  offset inside a strip, by that strip's own scale. Its tests with mixed scales (100% and
+  150% side by side, a 150% monitor above, a 175% one at negative x) were already in
+  `clickthrough.rs`. Nothing changed there.
+- **`mouse_down()` on Windows** (`clickthrough.rs`): `GetAsyncKeyState` for the left,
+  right and middle buttons, the high bit only (the low "pressed since the last call" bit
+  would count a click that already ended). Before W4 it was `true` on Windows, so the
+  250 ms fail-safe never fired there and a lost hold kept the strip taking clicks until
+  the 2-minute ceiling. Linux keeps `true`. Test:
+  `a_windows_button_counts_as_down_only_while_it_is_held`.
+- **M12 step 1 on Windows**, answered by the checks below:
+  - (a) moves and the release outside the strip, same monitor: checks 1–2 (WebView2's
+    pointer capture);
+  - (b) the same on the other monitor: check 5;
+  - (d) the button read needs no permission: `GetAsyncKeyState` has none to ask for;
+    check 6 proves it reads the buttons while another app is in front;
+  - (e) a strip opened at the lift: its `webview: first snapshot drawn: … ms after the
+    page started` line in `shell.log` (over 300 ms only means the carried sheep waits at
+    the pressed strip's edge until the other strip is ready).
+- **M12 check 5 (two monitors)** is proven for Windows by check 5 below, and stays open
+  for macOS until a Mac has a second display (WD11).
+
+**By hand on the maintainer's PC (about 20 minutes), with this branch's CI test folder.**
+`.\run-test.cmd --sessions`, then two or three `claude --settings <folder>\hooks.json`
+sessions in herdr (as in W3). For check 5 the two monitors should be at different scales
+(Settings > System > Display > Scale); the PC's log shows `\\.\DISPLAY2` at 150%.
+
+1. Click versus drag, with a mouse and with the touchpad (a tap, a click-and-drag, a
+   tap-and-drag): a press and release that barely moves brings Windows Terminal forward;
+   moving 4 px or more lifts the sheep, which dangles under the cursor and follows it off
+   the strip and back.
+2. A drop onto empty ground and onto another sheep: it lands and walks to the nearest
+   clear spot.
+3. A drop while alerting (ask a session for something that needs a permission): the badge
+   while carried, then the bubble after landing.
+4. Quiet and Hide mid-drag: in a terminal, `Start-Sleep 5; .\cli mute`, then pick up a
+   sheep and keep holding: at 5 s the drag ends and the sheep is back where it was picked
+   up. `.\cli unmute`. The same with `.\cli hide` (then `.\cli show`).
+5. Two monitors: carry a sheep onto the other monitor's strip: the strip appears there and
+   the sheep is drawn at the cursor (not offset); drop it there; carry it back. The other
+   strip goes away once no sheep needs it.
+6. The fail-safe: open the setup window at its Pet step and leave it in front. Pick up a
+   sheep and keep holding it; with the other hand, choose another pet with the keyboard
+   (the strips reload). Let go, wait a moment, then click a desktop icon under the strip:
+   the click reaches the icon.
+7. `/exit` and `/clear` on a dropped sheep's session.
+8. Quit from the tray and run `.\run-test.cmd --sessions` again (`shell restart` is
+   macOS only): every sheep is back on its terminal's monitor, the drops forgotten.
+
+Send back: notes on 1–8 and `home\shell.log`.
 
 ### W5. Screen sharing and full screen
 
