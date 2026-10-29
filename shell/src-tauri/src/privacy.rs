@@ -262,7 +262,7 @@ mod tests {
     use crate::locator::{Rect, Win};
 
     fn w(layer: i32, owner: &str, x: f64, y: f64, wd: f64, h: f64) -> (i32, Win) {
-        (layer, Win { pid: 1, owner: owner.into(), bounds: Rect { x, y, w: wd, h } })
+        (layer, Win::new(1, owner, Rect { x, y, w: wd, h }))
     }
     const MAIN: (f64, f64, f64, f64) = (0.0, 0.0, 1728.0, 1117.0);
     fn monitors() -> Vec<(String, Rect)> {

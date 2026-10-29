@@ -6,8 +6,8 @@ app, brain, CLI and setup window, signed and updating itself.
 
 Status: proposal, with the maintainer's decisions of 2026-10-20 applied (see "Decisions
 (maintainer, 2026-10-20)" under Open questions). W1 is built and has had a first run on
-the maintainer's PC; W2's first part is built (their status sections); nothing else is
-built yet. Items marked
+the maintainer's PC; W2's first part is built; W3 is built and awaits its PC checks
+(their status sections); nothing else is built yet. Items marked
 **ASSUMPTION** are technical guesses that a milestone proves. Bracketed numbers such as
 [4] point to the Sources list at the end. Crate versions were read from `Cargo.lock` and
 crates.io on 2026-10-19 [21]. The Tauri, tao and wry behaviour quoted here was read from
@@ -1333,8 +1333,8 @@ Tested:
 - the full `npm test` on Windows with its pinned skip list (WD12 4): today only the
   black-box hook suite runs there; `test/impl.mjs` drives the conformance session over
   FIFOs (`mkfifo`), and other suites assume Unix programs;
-- the Windows CI job's first run with W2 (all of the above is unrun on `windows-2025`);
-- the macOS CI run;
+- ~~the Windows CI job's first run with W2~~ and ~~the macOS CI run~~: both green since
+  (2026-10-28, PR #3 and the 1.2.0 commit);
 - the PC checks below.
 
 **By hand on the maintainer's PC (about 20 minutes), with the CI test folder.** Never the
@@ -1424,6 +1424,70 @@ terminal (defterm) falls back to `app-activate`; two Windows Terminal windows ea
 running `herdr` attached (the log says `app` confidence); `--dump-desktop` with herdr and
 those sessions running, attached, plus the `HERDR_SOCKET_PATH` value as the brain saw it
 (user name masked). VS Code only if it is installed; otherwise its case rests on fixtures.
+
+#### W3 status (developer, 2026-10-29): built; the locator's Windows tests green on the Mac; the PC checks open
+
+Found on the maintainer's PC with the 1.2.0 test folder (before W3): a click on a herdr
+session's sheep ran herdr's CLI (the pane was selected, `Focused("herdr (wH:t5, pane
+wH:p5)")`) but nothing raised Windows Terminal, the walk had no process list (`ps failed
+(NotFound)`), each herdr run flashed a console window, and the tray icon (a macOS template,
+drawn black) vanished on a dark taskbar. The last two are fixed in PR #4 (`CREATE_NO_WINDOW`
+for the locator's commands; a white tray sheep with a dark outline off macOS).
+
+Built:
+
+- **The `Native` seam** (`locator.rs`; real: `winlocate.rs`): the process list (Toolhelp;
+  "this user's" by the token's SID, for `claude.exe`, `node.exe` and `herdr.exe` only),
+  a process's marker variables and its command line read from its PEB
+  (`NtQueryInformationProcess` + `ReadProcessMemory`, same user only; only the asked-for
+  keys are kept: `env_values`), and raising a window (`SW_RESTORE` if minimised, then
+  `SetForegroundWindow`; if that is refused, `FlashWindowEx` and the log says `foreground
+  refused for <exe>`). `Locator::with_native` switches to it and drops `iterm2` and
+  `terminal-app` with one line each. macOS is unchanged (`ps`, `open`, AppleScript).
+- **The Windows window list** (`usable_windows`, shared with the tests): `EnumWindows`,
+  not cloaked, not tool windows, not ours, at least 50 px each way unless minimised;
+  owner = exe name, bounds = DWM's in physical px, with the handle. A minimised window can
+  be raised but never places a sheep.
+- **The walk**: as macOS, up to the first window owner, but on Windows `explorer.exe`
+  never counts (Windows Terminal's parent; it owns File Explorer's windows). A session
+  whose walk reaches it (a shortcut handed to Windows Terminal, defterm) falls to
+  `app-activate`.
+- **herdr**: settled from the PC's W1 dump: herdr's server is a child of the attached
+  client (`herdr.exe` → `herdr.exe` → `pwsh.exe` → `WindowsTerminal.exe`), and every
+  `claude.exe` is under the server. A client is a `herdr.exe` with no `herdr.exe` above it.
+  Several clients: `app` confidence. A click runs herdr's CLI (workspace, tab, agent
+  focus) and raises the client's Windows Terminal window; with no attached client the log
+  says `no attached herdr client has a window (detached?)`. `HERDR_SOCKET_PATH` on Windows
+  must be `\\.\pipe\<plain name>` or an existing absolute file (`check_socket_windows`); the
+  pipe's server isn't asked who it is (connecting would take one of herdr's pipe
+  instances). The herdr path: on PATH, then `%LOCALAPPDATA%\Programs\Herdr\bin\herdr.exe`.
+- **process-tree**: `claude.exe`, or `node.exe` whose command line has `claude-code`, of
+  this user, whose `WT_SESSION` (and `TMUX_PANE`) match; exactly one, or no answer. A
+  session with `HERDR_PANE_ID` never matches here (its `WT_SESSION` is the server's).
+- **app-activate**: `claude-desktop` → `claude.exe`, `vscode` → `Code.exe`, `WezTerm` →
+  `wezterm-gui.exe`, a `WT_SESSION` → `WindowsTerminal.exe`; the exe's frontmost window.
+- **Windows wording**: the default chain `herdr > vscode > process-tree > app-activate`,
+  `locator: … (herdr at …; no permission needed)`, `dock: none on Windows …`; doctor's
+  "appears above the taskbar" and its herdr CLI line without iTerm2/Terminal.
+- **The black flash on the first hover** (PC test, 2026-10-29: the strip went black for a
+  moment the first time the cursor came near a sheep): tao's click-through toggle drops
+  `WS_EX_LAYERED` along with `WS_EX_TRANSPARENT`, and a see-through window that stops
+  being layered repaints black. The strip's style keeper (`win.rs`, `kept_style`) now keeps
+  `WS_EX_LAYERED` for good, so only `WS_EX_TRANSPARENT` toggles. PC check: no flash on
+  hover, and a click on a sheep still lands.
+
+Tested on the Mac: 19 Windows locator tests over `test/fixtures/windows/desktop-pc-herdr.json`
+(the PC's W1 dump, trimmed to the terminal's, herdr's and claude's processes and windows)
+with a fake `Native`: herdr exact on the PC's Windows Terminal window and a click raising it
+with no macOS command run; herdr detached; two clients; process-tree by `WT_SESSION`; two
+Windows Terminal windows (`app`); two lookalikes (not guessed); a walk reaching explorer;
+a minimised window and a refused foreground; `node.exe`; another user's `claude.exe`;
+environment-block parsing; socket names. `npm run test:cargo` 344 passed;
+`cargo xwin check --workspace --target x86_64-pc-windows-msvc` no warnings; `npm test` 1061
+passed, 1 skipped. Not run on Windows yet: the real `winlocate.rs` (PEB offsets for x64 and
+ARM64, the token check, the foreground rule for a click on a no-activate window).
+
+Open: the by-hand list above, on the PC, with this branch's CI test folder.
 
 ### W4. Dragging a sheep on Windows, and M12's two-monitor check
 

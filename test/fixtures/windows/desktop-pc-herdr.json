@@ -1,0 +1,548 @@
+{
+  "note": "The maintainer's PC (W1, 2026-10-21): herdr attached in Windows Terminal, five Claude Code sessions in herdr. Trimmed to the terminal's, herdr's and claude's processes and windows.",
+  "version": 1,
+  "os": {
+    "version": "10.0.26300.9711",
+    "displayVersion": "26H2"
+  },
+  "monitors": [
+    {
+      "name": "\\\\.\\DISPLAY1",
+      "primary": false,
+      "scale": 1.25,
+      "rect": [
+        5120,
+        -934,
+        7280,
+        2906
+      ],
+      "work": [
+        5120,
+        -934,
+        7280,
+        2846
+      ],
+      "taskbar": "bottom",
+      "strip": [
+        5120,
+        2671,
+        7280,
+        2846
+      ]
+    },
+    {
+      "name": "\\\\.\\DISPLAY2",
+      "primary": true,
+      "scale": 1.5,
+      "rect": [
+        0,
+        0,
+        5120,
+        2160
+      ],
+      "work": [
+        0,
+        0,
+        5120,
+        2088
+      ],
+      "taskbar": "bottom",
+      "strip": [
+        0,
+        1878,
+        5120,
+        2088
+      ]
+    }
+  ],
+  "foreground": 132162,
+  "processes": [
+    {
+      "pid": 7428,
+      "ppid": 4508,
+      "exe": "explorer.exe"
+    },
+    {
+      "pid": 31988,
+      "ppid": 7428,
+      "exe": "WindowsTerminal.exe"
+    },
+    {
+      "pid": 28244,
+      "ppid": 31988,
+      "exe": "pwsh.exe"
+    },
+    {
+      "pid": 14628,
+      "ppid": 28244,
+      "exe": "herdr.exe"
+    },
+    {
+      "pid": 31736,
+      "ppid": 14628,
+      "exe": "herdr.exe"
+    },
+    {
+      "pid": 15452,
+      "ppid": 31736,
+      "exe": "powershell.exe"
+    },
+    {
+      "pid": 19424,
+      "ppid": 31736,
+      "exe": "powershell.exe"
+    },
+    {
+      "pid": 31372,
+      "ppid": 31736,
+      "exe": "powershell.exe"
+    },
+    {
+      "pid": 28568,
+      "ppid": 31372,
+      "exe": "claude.exe"
+    },
+    {
+      "pid": 5336,
+      "ppid": 15452,
+      "exe": "claude.exe"
+    },
+    {
+      "pid": 36784,
+      "ppid": 19424,
+      "exe": "claude.exe"
+    },
+    {
+      "pid": 38664,
+      "ppid": 31988,
+      "exe": "pwsh.exe"
+    },
+    {
+      "pid": 42288,
+      "ppid": 31736,
+      "exe": "powershell.exe"
+    },
+    {
+      "pid": 44596,
+      "ppid": 42288,
+      "exe": "claude.exe"
+    },
+    {
+      "pid": 16692,
+      "ppid": 31736,
+      "exe": "powershell.exe"
+    },
+    {
+      "pid": 26356,
+      "ppid": 16692,
+      "exe": "claude.exe"
+    }
+  ],
+  "windows": [
+    {
+      "hwnd": 24581104,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 7214312,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 3479046,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 5770468,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 986134,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 2428114,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 199772,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 1512482,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 23790840,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 7799450,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 590918,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ThumbnailDeviceHelperWnd",
+      "bounds": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 66000,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "Shell_TrayWnd",
+      "bounds": [
+        0,
+        2088,
+        5120,
+        2160
+      ],
+      "cloaked": false,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 66026,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "Shell_SecondaryTrayWnd",
+      "bounds": [
+        5120,
+        2846,
+        7280,
+        2906
+      ],
+      "cloaked": false,
+      "tool": true,
+      "topmost": true
+    },
+    {
+      "hwnd": 264442,
+      "pid": 38664,
+      "exe": "pwsh.exe",
+      "class": "PseudoConsoleWindow",
+      "bounds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cloaked": false,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 198452,
+      "pid": 28244,
+      "exe": "pwsh.exe",
+      "class": "PseudoConsoleWindow",
+      "bounds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cloaked": false,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 132162,
+      "pid": 31988,
+      "exe": "WindowsTerminal.exe",
+      "class": "CASCADIA_HOSTING_WINDOW_CLASS",
+      "bounds": [
+        578,
+        432,
+        2619,
+        1979
+      ],
+      "cloaked": false,
+      "tool": false,
+      "topmost": false
+    },
+    {
+      "hwnd": 6296018,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "CabinetWClass",
+      "bounds": [
+        2716,
+        637,
+        4490,
+        2079
+      ],
+      "cloaked": false,
+      "tool": false,
+      "topmost": false
+    },
+    {
+      "hwnd": 2560036,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "CabinetWClass",
+      "bounds": [
+        2716,
+        637,
+        4490,
+        2079
+      ],
+      "cloaked": false,
+      "tool": false,
+      "topmost": false
+    },
+    {
+      "hwnd": 201146,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "ApplicationFrameWindow",
+      "bounds": [
+        9,
+        0,
+        5111,
+        2079
+      ],
+      "cloaked": true,
+      "tool": false,
+      "topmost": false
+    },
+    {
+      "hwnd": 66168,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "DummyDWMListenerWindow",
+      "bounds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 66162,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "EdgeUiInputTopWndClass",
+      "bounds": [
+        5139,
+        -934,
+        7280,
+        -930
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 66144,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "EdgeUiInputTopWndClass",
+      "bounds": [
+        23,
+        0,
+        5120,
+        4
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 66120,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "DummyDWMListenerWindow",
+      "bounds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 66118,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "DummyDWMListenerWindow",
+      "bounds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 66116,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "DummyDWMListenerWindow",
+      "bounds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 66114,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "DummyDWMListenerWindow",
+      "bounds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cloaked": true,
+      "tool": true,
+      "topmost": false
+    },
+    {
+      "hwnd": 66056,
+      "pid": 7428,
+      "exe": "explorer.exe",
+      "class": "Progman",
+      "bounds": [
+        0,
+        -934,
+        7280,
+        2906
+      ],
+      "cloaked": false,
+      "tool": true,
+      "topmost": false
+    }
+  ]
+}
