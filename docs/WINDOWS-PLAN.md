@@ -6,8 +6,8 @@ app, brain, CLI and setup window, signed and updating itself.
 
 Status: proposal, with the maintainer's decisions of 2026-10-20 applied (see "Decisions
 (maintainer, 2026-10-20)" under Open questions). W1 is built and has had a first run on
-the maintainer's PC; W2's first part is built; W3 is built and awaits its PC checks
-(their status sections); nothing else is built yet. Items marked
+the maintainer's PC; W2's first part is built; W3 is built, its click and hover
+checks passed on the PC, the rest of its by-hand list open (their status sections); nothing else is built yet. Items marked
 **ASSUMPTION** are technical guesses that a milestone proves. Bracketed numbers such as
 [4] point to the Sources list at the end. Crate versions were read from `Cargo.lock` and
 crates.io on 2026-10-19 [21]. The Tauri, tao and wry behaviour quoted here was read from
@@ -1425,7 +1425,7 @@ running `herdr` attached (the log says `app` confidence); `--dump-desktop` with 
 those sessions running, attached, plus the `HERDR_SOCKET_PATH` value as the brain saw it
 (user name masked). VS Code only if it is installed; otherwise its case rests on fixtures.
 
-#### W3 status (developer, 2026-10-29): built; the locator's Windows tests green on the Mac; the PC checks open
+#### W3 status (developer, 2026-10-29): built; the locator's Windows tests green on the Mac; on the PC the click raises herdr's window and the hover flash is gone; the rest of the by-hand list open
 
 Found on the maintainer's PC with the 1.2.0 test folder (before W3): a click on a herdr
 session's sheep ran herdr's CLI (the pane was selected, `Focused("herdr (wH:t5, pane
@@ -1473,8 +1473,8 @@ Built:
   moment the first time the cursor came near a sheep): tao's click-through toggle drops
   `WS_EX_LAYERED` along with `WS_EX_TRANSPARENT`, and a see-through window that stops
   being layered repaints black. The strip's style keeper (`win.rs`, `kept_style`) now keeps
-  `WS_EX_LAYERED` for good, so only `WS_EX_TRANSPARENT` toggles. PC check: no flash on
-  hover, and a click on a sheep still lands.
+  `WS_EX_LAYERED` for good, so only `WS_EX_TRANSPARENT` toggles. Passed on the PC: no
+  flash on hover, and a click on a sheep still lands.
 
 Tested on the Mac: 19 Windows locator tests over `test/fixtures/windows/desktop-pc-herdr.json`
 (the PC's W1 dump, trimmed to the terminal's, herdr's and claude's processes and windows)
@@ -1487,7 +1487,20 @@ environment-block parsing; socket names. `npm run test:cargo` 344 passed;
 passed, 1 skipped. Not run on Windows yet: the real `winlocate.rs` (PEB offsets for x64 and
 ARM64, the token check, the foreground rule for a click on a no-activate window).
 
-Open: the by-hand list above, on the PC, with this branch's CI test folder.
+Checked on the maintainer's PC (2026-10-29, PR #5's CI test folder, run 40916133411): a
+click on a herdr session's sheep brings its Windows Terminal window forward with the
+herdr pane selected, so the real `winlocate.rs` (process list, PEB read, token check,
+`SetForegroundWindow` from a click on the no-activate strip: WA4) works on x64; no black
+flash on hover; clicks still land. (A first try ran an older test folder left in
+Downloads: its log still said `AppleScript on` and `ps failed (NotFound)`. W3's first
+locator line is `locator: herdr > vscode > process-tree > app-activate (herdr at …; no
+permission needed)`.)
+
+Open, from the by-hand list above: the sheep following the Windows Terminal window
+between monitors; herdr detached and re-attached; a plain Claude Code session in another
+Windows Terminal window (including minimised); two Windows Terminal windows; the defterm
+fallback; `foreground refused` (not seen: Windows allowed the foreground); the
+`--dump-desktop` record. ARM64's PEB offsets are untested (no ARM64 PC).
 
 ### W4. Dragging a sheep on Windows, and M12's two-monitor check
 
@@ -1756,7 +1769,8 @@ local updater feed (as RELEASING.md describes for macOS).
   reaches `WindowsTerminal.exe`; herdr's server is told apart from its clients by its
   parent chain or a `server` argument; `HERDR_SOCKET_PATH` is a named-pipe path on
   Windows (W3).
-- WA4. A click on a no-activate strip allows `SetForegroundWindow` (W3).
+- WA4. A click on a no-activate strip allows `SetForegroundWindow` (W3). Proved on the
+  maintainer's PC, 2026-10-29: the click raised Windows Terminal.
 - WA5. `tauri build` doesn't bundle the extra `[[bin]]` at the top level (W8).
 - WA6. Fanzoo Technology, Inc. completes Artifact Signing's organisation validation
   (started 2026-10-20) before W9.
