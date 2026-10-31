@@ -1523,7 +1523,7 @@ Builds:
 
 **By hand (about 20 minutes):** M12's list, with a mouse and a touchpad.
 
-#### W4 status (developer, 2026-10-29; PC run and fix round 2026-10-31): built; the PC's first run carried sheep across monitors at mixed scales, and froze three times; fixes and a freeze log built, the PC re-run open
+#### W4 status (developer, 2026-10-29; PC runs and fix round 2026-10-31): built; sheep carried across monitors at mixed scales on the PC; the fix round's re-run stable; the touchpad, check 6 and the foreground refusals open
 
 What W4 found already in place, and what it built:
 
@@ -1674,6 +1674,23 @@ Send back: notes on 1–8 and `home\shell.log`.
    has `main thread: no answer`.
 3. `/clear`, then `/exit` without a prompt: the sheep leaves.
 4. Check 1 with the touchpad.
+
+**The re-run (2026-10-31, run 41206339001's test folder): stable.**
+- 12 carries between the monitors (`guest` and `ghost` drops both ways, a strip opened
+  at the lift in 86 ms and closed when emptied), an alerting sheep carried, no
+  `main thread` line, and no freeze.
+- **The session's own Terminal window works:** `placement: … (herdr, Exact)` and
+  `(process-tree, Exact)` with two Terminal windows open, one on each monitor. This proves
+  the ASSUMPTION that Windows Terminal owns each tab's console window.
+- **The foreground retry took once** (`the first SetForegroundWindow was refused; the
+  second … took`). Two earlier clicks were refused even after it, so their taskbar buttons
+  flashed. The log doesn't yet say which window was in front then. Open: log the
+  foreground window's exe with a refusal, and look for another way past the rule if it
+  recurs.
+- Still open: the touchpad, check 6 (no setup window in the test folder), and a
+  `/clear` then `/exit` with no prompt (this run's `/clear` was followed by a prompt; the
+  sheep carried on, as it should). The freeze didn't recur; the watchdog stays in to
+  catch it if it does.
 
 ### W5. Screen sharing and full screen
 
