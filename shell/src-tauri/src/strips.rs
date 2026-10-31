@@ -46,6 +46,7 @@ impl Strips {
 
 /// Closes the strip on a monitor that no longer hosts a sheep.
 pub fn close<R: Runtime>(app: &AppHandle<R>, monitor: &str) {
+    let _doing = crate::watchdog::doing(format!("closing the strip on {monitor:?}"));
     let label = app.state::<Strips>().by_monitor.lock().unwrap().remove(monitor);
     if let Some(label) = label {
         app.state::<crate::clickthrough::Hitboxes>().by_window.lock().unwrap().remove(&label);
@@ -221,6 +222,7 @@ pub fn webview2_args(unthrottled: bool) -> Option<String> {
 
 pub fn open<R: Runtime>(app: &AppHandle<R>, monitor: &Monitor, height_px: f64, index: usize, capture_exclusion: bool, start_hidden: bool) -> tauri::Result<()> {
     let name = monitor_name(monitor);
+    let _doing = crate::watchdog::doing(format!("opening a strip on {name:?}"));
     let physical = (Space::NATIVE == Space::Physical).then(|| physical_rect(monitor, height_px));
     let r = match physical {
         // The builder's logical frame is only a first guess; the physical one is set below,

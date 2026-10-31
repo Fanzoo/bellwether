@@ -173,6 +173,11 @@ pub trait Native: Send + Sync {
     /// Restores the window if minimised and brings it forward. `Err` says why not (the
     /// foreground was refused: its taskbar button flashes instead).
     fn raise(&self, hwnd: u64) -> Result<(), String>;
+    /// The top-level window hosting this process's console. For a process in a Windows
+    /// Terminal tab, that tab's window: Windows Terminal owns each tab's console window, and
+    /// one WindowsTerminal.exe owns every Terminal window, so the process tree alone can't
+    /// tell them apart (PC test, 2026-10-31). `None` if it can't be told.
+    fn console_host(&self, pid: i32) -> Option<u64>;
 }
 
 pub trait Windows: Send + Sync {
@@ -495,6 +500,13 @@ impl Locator {
         None
     }
 
+    /// Windows: the window hosting `pid`'s console (its terminal tab's window), if it is one
+    /// of `wins`.
+    fn tab_window<'w>(&self, wins: &'w [Win], pid: i32) -> Option<&'w Win> {
+        let h = self.native.as_ref()?.console_host(pid).filter(|h| *h != 0)?;
+        wins.iter().find(|w| w.hwnd == h)
+    }
+
     /// The owner's frontmost window, and `exact` only if it has just one.
     fn owner_window(wins: &[Win], pid: i32) -> Option<Found> {
         // A minimised window says nothing about where the terminal is.
@@ -615,10 +627,12 @@ impl Locator {
     /// herdr's host window: the attached `herdr` client processes (same user, on a tty;
     /// the server has none), each walked up to the process that owns a window. Doesn't
     /// use the environment, which newer herdr strips of the host's markers.
-    fn herdr_host(&self) -> Option<(HashMap<i32, Proc>, Vec<Win>, i32, String, usize)> {
+    /// Returns the processes, the windows, the host window's owner, the client's tty, the
+    /// number of attached clients, and the client's pid.
+    fn herdr_host(&self) -> Option<(HashMap<i32, Proc>, Vec<Win>, i32, String, usize, i32)> {
         let procs = self.ps();
         let wins = self.windows.list();
-        let mut hosts: Vec<(usize, i32, String)> = Vec::new();
+        let mut hosts: Vec<(usize, i32, String, i32)> = Vec::new();
         // A client is told from the server by its terminal on macOS (the server has none).
         // Windows has no tty: there a client is a herdr.exe with no herdr.exe above it (the
         // server is started by a client, or outlives it with no window above it at all).
@@ -639,25 +653,27 @@ impl Locator {
         for p in procs.values().filter(|p| is_program(&p.comm, "herdr") && p.uid == self.cfg.uid).filter(client) {
             if let Some(owner) = self.window_owner(&procs, &wins, p.pid) {
                 let front = wins.iter().position(|w| w.pid == owner).unwrap_or(usize::MAX);
-                hosts.push((front, owner, p.tty.clone()));
+                hosts.push((front, owner, p.tty.clone(), p.pid));
             }
         }
         hosts.sort();
         let count = hosts.len();
-        let (_, owner, tty) = hosts.into_iter().next()?;
-        Some((procs, wins, owner, tty, count))
+        let (_, owner, tty, client) = hosts.into_iter().next()?;
+        Some((procs, wins, owner, tty, count, client))
     }
 
     fn herdr_locate(&self, t: &Terminal) -> Option<Found> {
         self.herdr_pane(t)?;
-        let (_, wins, owner, tty, clients) = self.herdr_host()?;
+        let (_, wins, owner, tty, clients, client) = self.herdr_host()?;
         let owner_name = wins.iter().find(|w| w.pid == owner).map(|w| w.owner.clone()).unwrap_or_default();
         if owner_name == "iTerm2" {
             if let Some(b) = self.osascript("iTerm2", "iTerm2", &iterm_script_by_tty(&tty, false)).and_then(|o| Self::parse_bounds(&o)) {
                 return Some(Found { bounds: Some(b), confidence: Confidence::Exact });
             }
         }
-        let mut found = Self::owner_window(&wins, owner)?;
+        // Windows: the client's own Terminal window, of the several one WindowsTerminal.exe owns.
+        let tab = self.tab_window(&wins, client).filter(|w| !w.minimized).map(|w| Found { bounds: Some(w.bounds), confidence: Confidence::Exact });
+        let mut found = tab.or_else(|| Self::owner_window(&wins, owner))?;
         if clients > 1 {
             found.confidence = Confidence::App; // several herdr clients: the frontmost host wins
         }
@@ -685,11 +701,18 @@ impl Locator {
         let _ = self.runner.run(h, &["tab", "focus", &tab], &env);
         // `agent focus` takes the pane id hosting an agent (herdr --skill, 0.9.0).
         let pane_focused = self.runner.run(h, &["agent", "focus", &pane], &env).is_ok();
-        if let Some((procs, wins, owner, tty, _)) = self.herdr_host() {
+        if let Some((procs, wins, owner, tty, _, client)) = self.herdr_host() {
             let owner_name = wins.iter().find(|w| w.pid == owner).map(|w| w.owner.clone()).unwrap_or_default();
             let raised = owner_name == "iTerm2" && self.osascript("iTerm2", "iTerm2", &iterm_script_by_tty(&tty, true)).is_some();
             if !raised {
-                self.activate(&procs, owner);
+                match (&self.native, self.tab_window(&wins, client)) {
+                    (Some(n), Some(w)) => {
+                        self.raise(n.as_ref(), w);
+                    }
+                    _ => {
+                        self.activate(&procs, owner);
+                    }
+                }
             }
         } else {
             (self.log)("locator: herdr: no attached herdr client has a window (detached?); the pane is selected in herdr, no window raised");
@@ -822,6 +845,9 @@ impl Locator {
     fn tree_locate(&self, t: &Terminal) -> Option<Found> {
         let (procs, wins, claude) = self.claude_process(t)?;
         let owner = self.window_owner(&procs, &wins, claude)?;
+        if let Some(w) = self.tab_window(&wins, claude).filter(|w| !w.minimized && w.pid == owner) {
+            return Some(Found { bounds: Some(w.bounds), confidence: Confidence::Exact });
+        }
         Self::owner_window(&wins, owner)
     }
 
@@ -831,8 +857,11 @@ impl Locator {
         }
         let (procs, wins, claude) = self.claude_process(t)?;
         let owner = self.window_owner(&procs, &wins, claude)?;
-        if self.native.is_some() {
-            // Windows raises the owner's own frontmost window (exact with one window).
+        if let Some(n) = &self.native {
+            // Windows raises the session's own tab window, else the owner's frontmost one.
+            if let Some(w) = self.tab_window(&wins, claude).filter(|w| w.pid == owner) {
+                return self.raise(n.as_ref(), w).then(|| Focus::Focused(name.to_string()));
+            }
             return self.activate(&procs, owner).then(|| Focus::Focused(name.to_string()));
         }
         self.activate(&procs, owner).then(|| Focus::AppActivated(name.to_string()))
@@ -1483,6 +1512,7 @@ pub mod tests {
         node_claude: HashSet<i32>,
         refuse: bool,
         raised: Mutex<Vec<u64>>,
+        consoles: Mutex<HashMap<i32, u64>>,
     }
 
     impl Native for FakeNative {
@@ -1499,6 +1529,9 @@ pub mod tests {
         fn raise(&self, hwnd: u64) -> Result<(), String> {
             self.raised.lock().unwrap().push(hwnd);
             if self.refuse { Err("SetForegroundWindow".into()) } else { Ok(()) }
+        }
+        fn console_host(&self, pid: i32) -> Option<u64> {
+            self.consoles.lock().unwrap().get(&pid).copied()
         }
     }
 
@@ -1545,7 +1578,7 @@ pub mod tests {
         for (pid, k, v) in env {
             envs.entry(*pid).or_default().push((k.to_string(), v.to_string()));
         }
-        let native = Arc::new(FakeNative { procs, env: envs, node_claude: HashSet::new(), refuse, raised: Mutex::default() });
+        let native = Arc::new(FakeNative { procs, env: envs, node_claude: HashSet::new(), refuse, raised: Mutex::default(), consoles: Mutex::default() });
         let mut loc = Locator::new(
             runner.clone(),
             Arc::new(FakeWindows(wins)),
@@ -1648,6 +1681,31 @@ pub mod tests {
     }
 
     #[test]
+    fn windows_terminal_with_two_windows_uses_the_window_hosting_the_sessions_console() {
+        // A second Terminal window (555) in front, as when a plain session was opened on the
+        // other monitor: before, both the herdr sheep and its click went to that window.
+        let (procs, wins) = pc(|p, w| plain(p, w, true));
+        let (loc, _, native, _) = windows_locator(herdr_runner(), procs.clone(), wins.clone(), &[(80001, "WT_SESSION", WT)], false);
+        assert_eq!(loc.locate(&win_herdr_term()).bounds, Some(Rect { x: 5200.0, y: -900.0, w: 2000.0, h: 1900.0 }), "without the console: the front window");
+        // herdr's client (14628) runs in the back window's tab; the plain claude.exe in the front one.
+        native.consoles.lock().unwrap().extend([(14628, WT_HWND), (80001, 555)]);
+        let l = loc.locate(&win_herdr_term());
+        assert_eq!((l.strategy.as_str(), l.confidence, l.bounds), ("herdr", Confidence::Exact, Some(Rect { x: 578.0, y: 432.0, w: 2041.0, h: 1547.0 })));
+        assert_eq!(loc.focus(&win_herdr_term()), Focus::Focused("herdr (wH:t5, pane wH:p5)".into()));
+        assert_eq!(*native.raised.lock().unwrap(), vec![WT_HWND], "the click raises herdr's window, not the front one");
+        let t = Terminal { wt_session: Some(WT.into()), ..Default::default() };
+        let l = loc.locate(&t);
+        assert_eq!((l.strategy.as_str(), l.confidence, l.bounds), ("process-tree", Confidence::Exact, Some(Rect { x: 5200.0, y: -900.0, w: 2000.0, h: 1900.0 })));
+        native.raised.lock().unwrap().clear();
+        native.consoles.lock().unwrap().insert(80001, WT_HWND);
+        assert_eq!(loc.focus(&t), Focus::Focused("process-tree".into()));
+        assert_eq!(*native.raised.lock().unwrap(), vec![WT_HWND], "the plain session's own window, though another is in front");
+        // A console window that isn't one of the usable windows (hidden, or gone): as before.
+        native.consoles.lock().unwrap().insert(80001, 999_999);
+        assert_eq!(loc.locate(&t).confidence, Confidence::App);
+    }
+
+    #[test]
     fn windows_a_session_whose_walk_reaches_explorer_falls_back_to_app_activate() {
         // Started from a shortcut and handed to Windows Terminal (defterm): pwsh's parent is
         // explorer.exe, whose File Explorer windows never count.
@@ -1688,7 +1746,7 @@ pub mod tests {
         let (loc, _, _, _) = windows_locator(FakeRunner::default(), procs.clone(), wins.clone(), &env, false);
         assert_eq!(loc.locate(&t).strategy, "app-activate", "neither: node.exe without Claude Code, and another user's claude.exe");
         let (loc, _, native, _) = windows_locator(FakeRunner::default(), procs, wins, &env, false);
-        let native = Arc::new(FakeNative { node_claude: [82001].into_iter().collect(), procs: native.procs.clone(), env: native.env.clone(), refuse: false, raised: Mutex::default() });
+        let native = Arc::new(FakeNative { node_claude: [82001].into_iter().collect(), procs: native.procs.clone(), env: native.env.clone(), refuse: false, raised: Mutex::default(), consoles: Mutex::default() });
         let loc = loc.with_native(native);
         assert_eq!(loc.locate(&t).strategy, "process-tree", "node.exe running Claude Code's cli.js is the session");
     }
