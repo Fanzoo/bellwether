@@ -52,17 +52,25 @@ describe('the Windows test folder (W1, WD12)', () => {
     // --sessions: the token made once, and the hooks as a file for claude --settings,
     // through cli.cmd (the folder's home and config), stopping on a failure.
     const sessions = lines.slice(lines.indexOf(':sessions'), lines.indexOf(':dump'));
-    const calls = sessions.filter((l) => l.startsWith('call '));
+    const calls = sessions.filter((l) => l.startsWith('call "'));
     assert.deepEqual(calls, ['call "%HERE%cli.cmd" token init', 'call "%HERE%cli.cmd" hooks print --out "%HERE%hooks.json"']);
     assert.equal(sessions.filter((l) => l === 'if errorlevel 1 exit /b 1').length, 2);
     assert.ok(sessions.some((l) => l.includes('claude --settings "%HERE%hooks.json"')));
     // A failed dump says why (shell.log's --dump-desktop lines) and exits non-zero.
     const dump = lines.slice(lines.indexOf(':dump'));
     assert.ok(dump.includes('set "RC=%ERRORLEVEL%"') && dump.includes('exit /b %RC%') && dump.some((l) => l.startsWith('findstr /c:"--dump-desktop:"')));
-    // Each demo run starts a fresh log; the last one is kept.
-    const demo = lines.slice(0, lines.indexOf(':dump'));
-    const move = demo.findIndex((l) => l.startsWith('if exist "%BELLWETHER_HOME%\\shell.log" move /y'));
-    assert.ok(move >= 0 && move < demo.findIndex((l) => l.includes('--demo --demo-monitors')) && demo[move].includes('shell.previous.log'));
+    // Each run starts a fresh log; the three before are kept, oldest moved first.
+    const demo = lines.slice(0, lines.indexOf(':rotate'));
+    assert.ok(demo.indexOf('call :rotate') >= 0 && demo.indexOf('call :rotate') < demo.findIndex((l) => l.includes('--demo --demo-monitors')));
+    assert.ok(sessions.indexOf('call :rotate') >= 0 && sessions.indexOf('call :rotate') < sessions.findIndex((l) => l.startsWith('start ')));
+    const rotate = lines.slice(lines.indexOf(':rotate'), lines.indexOf(':sessions'));
+    const moves = rotate.filter((l) => l.includes(' move /y ')).map((l) => l.match(/shell[\w.-]*\.log/g));
+    assert.deepEqual(moves, [
+      ['shell.previous-2.log', 'shell.previous-2.log', 'shell.previous-3.log'],
+      ['shell.previous.log', 'shell.previous.log', 'shell.previous-2.log'],
+      ['shell.log', 'shell.log', 'shell.previous.log'],
+    ]);
+    assert.equal(rotate.at(-1), 'goto :eof');
     const code = lines.filter((l) => !l.startsWith('rem') && !l.startsWith('echo')).join('\n');
     assert.ok(!/APPDATA|USERPROFILE|\.claude|47417|autostart|install/.test(code), 'nothing of the live install');
     assert.deepEqual(code.match(/hooks [a-z]+/g), ['hooks print'], 'hooks are printed to a file, never installed');

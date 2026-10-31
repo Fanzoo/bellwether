@@ -446,7 +446,18 @@ impl Flock {
         }
         // A session that ends before we ever saw it (brain started late) gets no sheep.
         if ev.event == "SessionEnd" && !self.sessions.contains_key(session) {
-            return false;
+            // Except the session after a /clear or a resume, which can end before its first
+            // prompt (Claude Code sends no hook at a session's start): the sheep its pane kept
+            // for it leaves, or it would stay until the brain restarts.
+            let (key, terminal_based) = identity_of(&ev.terminal, Some(session));
+            match self.sheep.get_mut(&key).filter(|s| terminal_based && s.session_id.is_none()) {
+                Some(s) => {
+                    s.leave(t);
+                    self.evaluate(t);
+                    return true;
+                }
+                None => return false,
+            }
         }
         let key = self.sheep_for(ev, session, t);
         self.handle(&key, ev, t);
@@ -1151,6 +1162,43 @@ mod tests {
         assert_eq!(strip_iterm_prefix("w12t3p45:X:Y"), "X:Y");
         assert_eq!(strip_iterm_prefix("wt1p0:UUID"), "wt1p0:UUID");
         assert_eq!(strip_iterm_prefix("UUID"), "UUID");
+    }
+
+    fn pane_event(t: f64, event: &str, session: &str, reason: Option<&str>) -> HookEvent {
+        let mut terminal = Obj::new();
+        terminal.set("wtSession", "11111111-2222-4333-8444-555555555555");
+        let mut scalars = vec![("sessionId", session.to_string())];
+        if let Some(r) = reason {
+            scalars.push(("reason", r.to_string()));
+        }
+        HookEvent { received_at: t, event: event.into(), scalars, project_label: Some("meadow".into()), terminal, ..HookEvent::default() }
+    }
+
+    fn states(f: &Flock) -> Vec<String> {
+        f.snapshot().get("flock").as_arr().map(|a| a.iter().filter_map(|s| s.get("state").as_str().map(str::to_string)).collect()).unwrap_or_default()
+    }
+
+    #[test]
+    fn the_session_after_a_clear_that_ends_unprompted_takes_its_sheep_away() {
+        let mut f = Flock::new(FlockConfig::from_merged(&crate::config::Config::defaults().merged), &Js::Null, 0.0);
+        f.apply(&pane_event(1000.0, "UserPromptSubmit", "a", None));
+        f.apply(&pane_event(2000.0, "Stop", "a", None));
+        // /clear: the sheep stays for the next session in the same tab.
+        assert!(f.apply(&pane_event(10_000.0, "SessionEnd", "a", Some("clear"))));
+        assert_eq!(states(&f).len(), 1);
+        assert_ne!(states(&f)[0], "leaving");
+        // That session is closed before its first prompt: its only hook is SessionEnd.
+        assert!(f.apply(&pane_event(20_000.0, "SessionEnd", "b", Some("prompt_input_exit"))));
+        assert_eq!(states(&f), vec!["leaving".to_string()]);
+    }
+
+    #[test]
+    fn an_unknown_session_ending_leaves_a_live_sheep_in_its_pane_alone() {
+        let mut f = Flock::new(FlockConfig::from_merged(&crate::config::Config::defaults().merged), &Js::Null, 0.0);
+        f.apply(&pane_event(1000.0, "UserPromptSubmit", "a", None));
+        // Some other session the brain never saw, with the same tab id: not this sheep's.
+        assert!(!f.apply(&pane_event(5000.0, "SessionEnd", "z", Some("prompt_input_exit"))));
+        assert_ne!(states(&f)[0], "leaving");
     }
 
     #[test]

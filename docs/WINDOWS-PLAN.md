@@ -1523,7 +1523,7 @@ Builds:
 
 **By hand (about 20 minutes):** M12's list, with a mouse and a touchpad.
 
-#### W4 status (developer, 2026-10-29): built; the cargo tests green on the Mac; the PC checks open
+#### W4 status (developer, 2026-10-29; PC run and fix round 2026-10-31): built; the PC's first run carried sheep across monitors at mixed scales, and froze three times; fixes and a freeze log built, the PC re-run open
 
 What W4 found already in place, and what it built:
 
@@ -1579,6 +1579,101 @@ sessions in herdr (as in W3). For check 5 the two monitors should be at differen
    macOS only): every sheep is back on its terminal's monitor, the drops forgotten.
 
 Send back: notes on 1–8 and `home\shell.log`.
+
+**The PC's first run (2026-10-31, PR #6's test folder; herdr in Windows Terminal on the
+150% monitor, a plain Windows Terminal session on the 100% portrait one).**
+
+- Passed:
+  - check 1, click versus drag with the mouse;
+  - check 2, drops onto empty ground and onto another sheep;
+  - check 3, a sheep carried while alerting (badge, then the bubble on landing);
+  - check 4, Quiet and Hide mid-drag (`drag cancelled: the strip is hidden`, the sheep
+    set back down);
+  - check 5, carrying a sheep to the other monitor and back: the other strip opened at the
+    lift and drew the sheep at the cursor (`dropped on "\\.\DISPLAY2" … (guest)`, then
+    back on `DISPLAY1`).
+- So M12 step 1 on Windows:
+  - (a) and (b): yes, WebView2's pointer capture keeps the moves and the release coming,
+    on the same monitor and on the other one;
+  - (d): no permission;
+  - (e): a strip opened at the lift drew its first snapshot in 87–101 ms.
+- **M12 check 5 is proven for Windows; it stays open for macOS** (WD11).
+- Not run:
+  - check 6: the test folder has no tray item for the setup window;
+  - the touchpad.
+- **Three freezes** (09:01, 09:03, 09:05; the brain logged `the app that started this brain
+  … is gone` as each was ended in Task Manager). Each was while carrying a sheep toward
+  the other monitor:
+  - the sheep stopped at the first monitor's edge;
+  - Windows drew the strip as a white "bellwether (Not Responding)" bar;
+  - a sheep's hover fade stuck.
+
+  Their logs were lost: each `run-test.cmd` run moved the last log to `shell.previous.log`,
+  so two restarts overwrote it. Not reproduced since, in about 20 minutes of carrying
+  sheep across. Not found by reading the code: no lock is held across a wait on the main
+  thread, and tao's calls from other threads post rather than wait.
+- **Windows Terminal with two windows** (the plain session's window in front): the herdr
+  sheep moved to the plain session's monitor (`placement: … -> "\\.\DISPLAY1" (herdr,
+  App)`), and a click on one selected the herdr pane but raised the front Terminal window.
+  One `WindowsTerminal.exe` owns every Terminal window, so the walk from herdr's client or
+  from `claude.exe` ends at that process, and W3 took its front window.
+- **`foreground refused for WindowsTerminal.exe`** three times. The focus runs a second or
+  more after the click (herdr's CLI), and Windows lets only the process with the last input
+  change the foreground.
+- **A sheep left after `/clear` and exit.** After `/clear` the sheep stays for the next
+  session in the same tab. That session was closed before its first prompt, so its only
+  hook was `SessionEnd`, from a session the brain had never seen, which it ignored. This
+  affects macOS too.
+- **Declining a question (Esc) leaves the sheep alerting until the next prompt.** Claude
+  Code sends no hook for it: the brain log has nothing between `permission_prompt` and the
+  next `UserPromptSubmit`. Not fixed. It affects macOS too.
+- The sheep can't be carried below the strip: as designed (D10).
+
+**Fix round (2026-10-31):**
+
+- **The freeze log** (`watchdog.rs`): a thread posts a beat to the main thread every
+  second. After 2 s without one, `shell.log` gets `main thread: no answer for … s; last
+  marked: …`, every 10 s after that while it lasts, and `answering again after … s` once it
+  ends. Marked steps:
+  - `sprite_drag`'s phases;
+  - `report_hitboxes`;
+  - opening and closing a strip;
+  - reading the monitors;
+  - the tray menu;
+  - the on-top fix on a foreground change.
+
+  If the watchdog thread itself overslept (sleep, a paused process), it starts counting
+  again instead.
+- **`run-test.cmd` keeps the three logs before** (`shell.previous.log`, `-2`, `-3`).
+- **The session's own Terminal window** (`Native::console_host`, `winlocate.rs`): the
+  locator attaches to the session's console for a moment and takes the window that owns
+  its console window. Windows Terminal owns each tab's hidden pseudo-console window, so
+  this is the session's own Terminal window, not just the front one.
+  - **herdr** asks it for its attached client;
+  - **process-tree** asks it for `claude.exe`;
+  - when that window is found, placement is exact and a click raises it;
+  - when it isn't, as before.
+
+  While attached, console events (Ctrl-C, close) are ignored, and the standard handles are
+  put back afterwards. Attaching is skipped when the strip has a console of its own.
+  **ASSUMPTION**, proved on the PC: Windows Terminal owns each tab's console window (the
+  log stops saying `(herdr, App)` with one client).
+- **A refused foreground is tried again** with the foreground window's input attached
+  (`AttachThreadInput`), before falling back to the flash. The log says `the first
+  SetForegroundWindow was refused; the second … took`.
+- **The sheep kept after `/clear`** (`flock.rs`): a `SessionEnd` from an unseen session
+  whose tab or pane has a sheep waiting for its next session makes that sheep leave. A
+  live sheep with a session is left alone.
+
+**Re-run on the PC** (the fix round's test folder, the same setup):
+
+1. With the plain Terminal window in front, click a herdr sheep: herdr's window comes
+   forward. Sheep placement says `(herdr, Exact)`.
+2. Carry sheep across the monitors for a while. If the strip freezes again, wait 15 s
+   before ending it. Then send `shell.log`, or after restarts the `shell.previous*.log` that
+   has `main thread: no answer`.
+3. `/clear`, then `/exit` without a prompt: the sheep leaves.
+4. Check 1 with the touchpad.
 
 ### W5. Screen sharing and full screen
 

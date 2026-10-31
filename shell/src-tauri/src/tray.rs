@@ -178,6 +178,7 @@ pub fn build(app: &AppHandle<Wry>, kept: Kept, muted: bool, notices: &[Notice], 
 }
 
 fn on_menu(app: &AppHandle<Wry>, id: &str) {
+    let _doing = crate::watchdog::doing(format!("the tray's {id:?}"));
     let switches = app.state::<Switches>();
     let brain = app.state::<Arc<Brain>>().inner().clone();
     match id {

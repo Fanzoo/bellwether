@@ -34,6 +34,7 @@ mod strips;
 mod sys;
 mod tray;
 mod updater;
+mod watchdog;
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
@@ -284,6 +285,7 @@ async fn get_snapshot(
 /// Where this window's sprites are, in the window's logical pixels.
 #[tauri::command]
 fn report_hitboxes(window: tauri::WebviewWindow, boxes: Vec<Rect>, hitboxes: tauri::State<'_, Hitboxes>) {
+    let _doing = watchdog::doing("report_hitboxes");
     let boxes: Vec<Rect> = boxes.into_iter().filter(|r| [r.x, r.y, r.w, r.h].iter().all(|v| v.is_finite()) && r.w > 0.0 && r.h > 0.0).take(MAX_HITBOXES).collect();
     if crate::settings::env_os("SHELL_TRACE").is_some() {
         let list: Vec<String> = boxes.iter().map(|r| format!("{:.0},{:.0} {:.0}x{:.0}", r.x, r.y, r.w, r.h)).collect();
@@ -369,6 +371,7 @@ fn sprite_drag(
 ) -> Value {
     let id = clean_id(&id);
     let label = window.label().to_string();
+    let _doing = watchdog::doing(format!("sprite_drag {phase} on {label}"));
     let num = |v: Option<f64>| v.filter(|v| v.is_finite() && v.abs() < 100_000.0);
     match phase.as_str() {
         "press" => {
@@ -826,7 +829,10 @@ pub fn run() {
             #[cfg(windows)]
             {
                 let h = handle.clone();
-                let hooked = win::on_foreground_change(Box::new(move || strips::keep_on_top(&h, "on a foreground change")));
+                let hooked = win::on_foreground_change(Box::new(move || {
+                    let _doing = watchdog::doing("the strips put back on top (a foreground change)");
+                    strips::keep_on_top(&h, "on a foreground change")
+                }));
                 log(if hooked {
                     "strips: put back on top every 2 s and on every foreground change (HWND_TOPMOST, no activation)"
                 } else {
@@ -865,6 +871,7 @@ pub fn run() {
             let h = handle.clone();
             let demo_drag = flags.demo_drag;
             std::thread::spawn(move || clickthrough::run(h, fade_radius, demo_drag));
+            watchdog::start(handle.clone());
             if updates_on {
                 updater::schedule(handle.clone(), update_policy);
             }
@@ -1237,6 +1244,7 @@ fn monitors_main(app: &tauri::AppHandle) -> Vec<locator::Monitor> {
     let (tx, rx) = std::sync::mpsc::channel();
     let h = app.clone();
     if app.run_on_main_thread(move || {
+        let _doing = watchdog::doing("reading the monitors");
         if crate::settings::env_os("SHELL_TRACE").is_some() {
             let a = h.available_monitors();
             let w = h.webview_windows().into_values().next().map(|w| w.available_monitors().map(|v| v.len()));
