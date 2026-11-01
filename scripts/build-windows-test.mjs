@@ -21,6 +21,8 @@
  *   cli.cmd          the CLI with the same home and config: `.\cli doctor` (not
  *                    bellwether.cmd: beside Bellwether.exe, `.\bellwether` runs the exe,
  *                    since cmd tries .EXE before .CMD and NTFS ignores case)
+ *   sharing-check.cmd    lists the programs that run only while you share your screen
+ *                    (W5: the Teams check); reads the process list, changes nothing
  *   config.json      config.example.json on the test port (TEST_PORT)
  *   pets\<name>\animations.xml   Bellwether's own pets (checked against the pins compiled in)
  *   README.txt
@@ -151,6 +153,34 @@ export function cliCmd(port = TEST_PORT) {
   return lines.join('\r\n') + '\r\n';
 }
 
+/**
+ * sharing-check.cmd (W5, WD5): which programs run only while a meeting app shares the
+ * screen. It reads the process list three times (before, during, after sharing) and prints
+ * the names seen only during, as `privacy.sharingProcesses.win32` spells them (with .exe).
+ * Read-only; PowerShell with -NoProfile, nothing installed. CRLF; no `%` (cmd would expand it).
+ */
+export function sharingCheckCmd() {
+  const ps = [
+    "$names = { Get-Process | ForEach-Object { $_.ProcessName + '.exe' } | Sort-Object -Unique }",
+    '$before = & $names',
+    "Read-Host 'Not sharing yet. Start sharing your whole screen (Teams, Zoom...), wait 5 seconds, then press Enter' | Out-Null",
+    '$during = & $names',
+    "Read-Host 'Now stop sharing, wait 5 seconds, then press Enter' | Out-Null",
+    '$after = & $names',
+    '$only = $during | Where-Object { ($before -notcontains $_) -and ($after -notcontains $_) }',
+    "if ($only) { 'Running only while sharing:'; $only | ForEach-Object { '  ' + $_ } } else { 'No program ran only while sharing.' }",
+  ].join('; ');
+  const lines = [
+    '@echo off',
+    'rem Which programs run only while you share your screen (Windows plan W5, the Teams check).',
+    'rem It reads the list of running programs before, during and after a share, and prints the',
+    'rem names seen only during it. It changes nothing.',
+    `powershell -NoProfile -Command "${ps}"`,
+    'pause',
+  ];
+  return lines.join('\r\n') + '\r\n';
+}
+
 export function readme(port = TEST_PORT) {
   return [
     'Bellwether: Windows test build (unsigned; never ship it)',
@@ -183,6 +213,9 @@ export function readme(port = TEST_PORT) {
     '(the three runs before are kept: home\\shell.previous.log, -2 and -3), so attach shell.log after the run',
     'you are reporting on. --dump-desktop adds its outcome to the current shell.log, and',
     'exits with a non-zero code if the file could not be written.',
+    '',
+    'sharing-check.cmd: start it, then share your screen in a meeting app when it asks, and',
+    'stop when it asks again. It prints the programs that ran only while you shared (W5).',
     '',
     'Windows may warn that the app is unrecognised (it is unsigned): More info, Run anyway.',
     '',
@@ -228,6 +261,7 @@ function assemble(exes, out) {
   fs.copyFileSync(exes.cli, path.join(out, 'bin', 'bellwether.exe'));
   fs.writeFileSync(path.join(out, 'run-test.cmd'), runTestCmd());
   fs.writeFileSync(path.join(out, 'cli.cmd'), cliCmd());
+  fs.writeFileSync(path.join(out, 'sharing-check.cmd'), sharingCheckCmd());
   fs.writeFileSync(path.join(out, 'config.json'), testConfig(fs.readFileSync(path.join(AGENT, 'config.example.json'), 'utf8')));
   fs.writeFileSync(path.join(out, 'README.txt'), readme());
   for (const pet of PETS) {

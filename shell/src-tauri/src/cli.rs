@@ -615,11 +615,11 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
     use bellwether_brain::doctor::{self, Input};
     use bellwether_core::settings_checks::Check;
     let config = bellwether_core::config::load(home, std::env::var("BELLWETHER_CONFIG").ok().as_deref());
-    let sharing = config.as_ref().ok().map(|c| {
-        let v: serde_json::Value = serde_json::from_str(&bellwether_core::json::stringify(&c.merged)).unwrap_or(serde_json::Value::Null);
-        let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(windows) { "win32" } else { "linux" };
+    let merged: Option<serde_json::Value> = config.as_ref().ok().map(|c| serde_json::from_str(&bellwether_core::json::stringify(&c.merged)).unwrap_or(serde_json::Value::Null));
+    let os = crate::privacy::os_name();
+    let sharing = merged.as_ref().map(|v| {
         let count = v.pointer(&format!("/privacy/sharingProcesses/{os}")).and_then(|l| l.as_array()).map(|l| l.len()).unwrap_or(0);
-        (crate::privacy::sharing_warnings_for(&v, os), count)
+        (crate::privacy::sharing_warnings_for(v, os), count)
     });
     let input = Input {
         settings_file: settings_file.unwrap_or_else(doctor::user_settings),
@@ -654,6 +654,15 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
     // The brain's checks: config, token, the brain, the hook entries, the other settings
     // levels, the strip's log, pets, legacy LaunchAgents.
     checks.extend(doctor::checks(&input));
+    // The effective capture exclusion (WD5): its default differs by OS. Windows only, so
+    // macOS's report is unchanged.
+    if cfg!(windows) {
+        if let Some(v) = &merged {
+            let (on, why) = crate::privacy::capture_exclusion(v, os);
+            let effect = if on { "the sheep are left out of screen captures and screenshots (the strip logs what Windows applied)" } else { "the sheep show in screenshots and shares; the strip hides while a sharing program runs" };
+            add(&mut checks, "INFO", "capture exclusion", format!("{} ({why}): {effect}", if on { "on" } else { "off" }));
+        }
+    }
     let checked_port = input.port().unwrap_or(bellwether_brain::DEFAULT_PORT);
 
     // Login items. The brain answering on the port is this app's agent when launchd (pid

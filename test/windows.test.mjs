@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { AGENT_DIR } from './helpers.mjs';
-import { PETS, TEST_PORT, cliCmd, readme, runTestCmd, testConfig } from '../scripts/build-windows-test.mjs';
+import { PETS, TEST_PORT, cliCmd, readme, runTestCmd, sharingCheckCmd, testConfig } from '../scripts/build-windows-test.mjs';
 
 /**
  * Windows plan W1: the test folder the maintainer runs on his PC (scripts/build-windows-test.mjs)
@@ -84,6 +84,17 @@ describe('the Windows test folder (W1, WD12)', () => {
       assert.ok(lines.includes(l), l);
     }
     assert.ok(!/APPDATA|USERPROFILE|\.claude|47417/.test(lines.filter((l) => !l.startsWith('rem')).join('\n')));
+  });
+
+  test('sharing-check.cmd: CRLF, read-only, and names programs as the config spells them (W5)', () => {
+    const cmd = sharingCheckCmd();
+    assert.ok(cmd.endsWith('\r\n') && !/[^\r]\n/.test(cmd), 'CRLF line endings throughout');
+    assert.ok(!cmd.includes('%'), 'no % for cmd to expand');
+    const ps = cmd.split('\r\n').find((l) => l.startsWith('powershell -NoProfile -Command "'));
+    assert.ok(ps && ps.endsWith('"') && (ps.match(/"/g) || []).length === 2, 'one quoted PowerShell command');
+    assert.match(ps, /\$_\.ProcessName \+ '\.exe'/, 'names with .exe, as privacy.sharingProcesses.win32 has them');
+    assert.ok(!/Stop-Process|Remove-|Set-|New-Item|Out-File|>/.test(ps), 'it changes nothing');
+    assert.match(readme(), /sharing-check\.cmd/);
   });
 
   test('the README says what it never touches and how to clean up', () => {

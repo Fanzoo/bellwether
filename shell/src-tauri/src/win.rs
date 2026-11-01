@@ -12,7 +12,7 @@ use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, STYLESTRUCT, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_STYLECHANGING, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_EX_TRANSPARENT, STYLESTRUCT, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_STYLECHANGING, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     EVENT_SYSTEM_FOREGROUND, HWND_TOPMOST, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
@@ -205,6 +205,7 @@ pub(crate) fn windows(procs: &[dump::Process]) -> Vec<dump::Window> {
             let mut cloaked: u32 = 0;
             let _ = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED as u32, &mut cloaked as *mut u32 as *mut c_void, 4);
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
             dump::Window {
                 hwnd: hwnd as usize as u64,
                 pid,
@@ -214,9 +215,52 @@ pub(crate) fn windows(procs: &[dump::Process]) -> Vec<dump::Window> {
                 cloaked: cloaked != 0,
                 tool: ex & WS_EX_TOOLWINDOW != 0,
                 topmost: ex & WS_EX_TOPMOST != 0,
+                caption: style & WS_CAPTION == WS_CAPTION,
+                transparent: ex & WS_EX_TRANSPARENT != 0,
             }
         })
         .collect()
+}
+
+/// The full-screen check's view of the desktop (WD5), every 500 ms: the windows front to
+/// back (no exe names: a Toolhelp snapshot would double the cost), each monitor's full
+/// rectangle by name, the foreground window, and what the shell says.
+pub fn full_screen_view() -> (Vec<dump::Window>, Vec<(String, [i32; 4])>, u64, crate::privacy::Notify) {
+    let monitors = monitors(0.0).into_iter().map(|m| (m.name, m.rect)).collect();
+    (windows(&[]), monitors, unsafe { GetForegroundWindow() } as usize as u64, notify_state())
+}
+
+/// `SHQueryUserNotificationState`: whether the shell sees a full screen.
+fn notify_state() -> crate::privacy::Notify {
+    use crate::privacy::Notify;
+    use windows_sys::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
+    let mut state = 0;
+    if unsafe { SHQueryUserNotificationState(&mut state) } != 0 {
+        return Notify::Normal;
+    }
+    match state {
+        QUNS_BUSY => Notify::Busy,
+        QUNS_RUNNING_D3D_FULL_SCREEN => Notify::D3dFullScreen,
+        QUNS_PRESENTATION_MODE => Notify::Presentation,
+        _ => Notify::Normal,
+    }
+}
+
+/// Capture exclusion as Windows has it on a strip (`GetWindowDisplayAffinity`), for the log:
+/// WDA_EXCLUDEFROMCAPTURE needs Windows 10 2004 or later; before that Windows falls back to
+/// WDA_MONITOR (a black rectangle in captures) or refuses.
+pub fn display_affinity(hwnd: HWND) -> String {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_MONITOR, WDA_NONE};
+    let mut a = 0u32;
+    if unsafe { GetWindowDisplayAffinity(hwnd, &mut a) } == 0 {
+        return "unreadable (GetWindowDisplayAffinity failed)".into();
+    }
+    match a {
+        WDA_EXCLUDEFROMCAPTURE => "WDA_EXCLUDEFROMCAPTURE: absent from captures, your own screenshots too".into(),
+        WDA_MONITOR => "WDA_MONITOR only (Windows older than 10 2004): a black rectangle in captures".into(),
+        WDA_NONE => "WDA_NONE: Windows did not take it; the strip shows in captures".into(),
+        other => format!("{other:#x} (unknown)"),
+    }
 }
 
 /// The desktop as this process sees it with per-monitor DPI v2 (as the strip runs), so

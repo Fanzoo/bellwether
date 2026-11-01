@@ -1047,6 +1047,7 @@ pub fn layered_windows() -> Vec<(i32, Win)> {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[cfg_attr(windows, allow(dead_code))]
 pub fn layered_windows() -> Vec<(i32, Win)> {
     Vec::new()
 }
@@ -1562,6 +1563,8 @@ pub mod tests {
                     cloaked: w["cloaked"].as_bool().unwrap(),
                     tool: w["tool"].as_bool().unwrap(),
                     topmost: w["topmost"].as_bool().unwrap(),
+                    caption: w["caption"].as_bool().unwrap_or(true),
+                    transparent: w["transparent"].as_bool().unwrap_or(false),
                 }
             })
             .collect();
