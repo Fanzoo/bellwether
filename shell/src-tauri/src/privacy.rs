@@ -15,6 +15,11 @@
 //! stayed over them, on the screen's bottom edge. `covered_monitors` finds those, and
 //! with `privacy.hideWhenFullscreen` on (the default) that monitor's strip hides, with
 //! the same 2 s debounce on the way back.
+//!
+//! Windows has no full-screen Spaces: a full-screen video or game is an ordinary window
+//! that covers its monitor, and the strip (topmost) would stand over it.
+//! `covered_monitors_win` finds those (Windows plan WD5), with what the shell itself says
+//! (`SHQueryUserNotificationState`) for the cases a rectangle misses.
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -37,6 +42,7 @@ pub const FULLSCREEN_POLL: Duration = Duration::from_millis(500);
 /// Measured with Parallels (2026-10-28): its window is 0,33 1728x1084 on a 1728x1117
 /// screen, and the Dock's window (layer 20, the whole screen) is gone. During the swipe
 /// onto its Space the Dock is still there, so nothing is covered until it settles.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn covered_monitors(windows: &[(i32, crate::locator::Win)], monitors: &[(String, crate::locator::Rect)], dock_autohide: bool) -> Vec<String> {
     if dock_autohide || windows.iter().any(|(_, w)| w.owner == "Dock") {
         return Vec::new();
@@ -54,6 +60,88 @@ pub fn covered_monitors(windows: &[(i32, crate::locator::Win)], monitors: &[(Str
         })
         .map(|(name, _)| name.clone())
         .collect()
+}
+
+/// What Windows' shell says about the foreground app (`SHQueryUserNotificationState`), as
+/// far as the full-screen check cares.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Notify {
+    /// Nothing in full screen (or the call failed).
+    Normal,
+    /// QUNS_BUSY: the shell sees a full-screen app in front (its own "rude window" test).
+    Busy,
+    /// QUNS_RUNNING_D3D_FULL_SCREEN: an exclusive Direct3D full screen; no rectangle to see.
+    D3dFullScreen,
+    /// QUNS_PRESENTATION_MODE: Windows' presentation settings are on.
+    Presentation,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl Notify {
+    pub fn describe(self) -> &'static str {
+        match self {
+            Notify::Normal => "nothing in full screen",
+            Notify::Busy => "a full-screen app in front (QUNS_BUSY)",
+            Notify::D3dFullScreen => "an exclusive Direct3D full screen (QUNS_RUNNING_D3D_FULL_SCREEN)",
+            Notify::Presentation => "presentation mode (QUNS_PRESENTATION_MODE)",
+        }
+    }
+}
+
+/// Windows' own windows that cover a monitor without being an app in full screen: the
+/// desktop (Progman, WorkerW) and the taskbars.
+#[cfg_attr(not(windows), allow(dead_code))]
+const NOT_APPS: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
+
+/// Windows (WD5): the monitors (by name) a full-screen window covers, each with why.
+/// `windows` are in z-order, front first (EnumWindows), with physical-pixel bounds; the
+/// monitors' rectangles are physical pixels too; `me` is this process (its strips are
+/// left out).
+///
+/// For each monitor, the windows over it are read front to back, skipping this app's, the
+/// desktop's and the taskbars', cloaked ones (another virtual desktop, a suspended Store
+/// app), tool windows and click-through overlays (a GPU driver's), and any that overlaps
+/// the monitor by less than 50x50 px. The first one left decides:
+/// - it covers the whole monitor and has no title bar (a browser's F11, a video's full
+///   screen, a game in a borderless window): covered;
+/// - it covers the whole monitor with a title bar: covered only if it is the foreground
+///   window and the shell says QUNS_BUSY; otherwise it is a maximised window over an
+///   auto-hidden taskbar, and the sheep stay;
+/// - it is topmost and smaller (a picture-in-picture video, a meeting's floating bar): the
+///   next one decides;
+/// - anything else: not covered.
+///
+/// An exclusive Direct3D full screen or presentation mode covers every monitor.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn covered_monitors_win(windows: &[crate::dump::Window], monitors: &[(String, [i32; 4])], me: u32, foreground: u64, notify: Notify) -> Vec<(String, String)> {
+    if matches!(notify, Notify::D3dFullScreen | Notify::Presentation) {
+        return monitors.iter().map(|(name, _)| (name.clone(), notify.describe().to_string())).collect();
+    }
+    let mut out = Vec::new();
+    for (name, m) in monitors {
+        for w in windows {
+            if w.pid == me || w.cloaked || w.tool || w.transparent || NOT_APPS.contains(&w.class.as_str()) {
+                continue;
+            }
+            let b = w.bounds;
+            let (ow, oh) = (b[2].min(m[2]) - b[0].max(m[0]), b[3].min(m[3]) - b[1].max(m[1]));
+            if ow < 50 || oh < 50 {
+                continue;
+            }
+            let covers = b[0] <= m[0] && b[1] <= m[1] && b[2] >= m[2] && b[3] >= m[3];
+            let who = || format!("{} ({}, pid {})", if w.exe.is_empty() { "a window" } else { w.exe.as_str() }, w.class, w.pid);
+            if covers && !w.caption {
+                out.push((name.clone(), format!("{} covers it with no title bar", who())));
+            } else if covers && notify == Notify::Busy && w.hwnd == foreground {
+                out.push((name.clone(), format!("{} covers it, and Windows says {}", who(), notify.describe())));
+            } else if !covers && w.topmost {
+                continue;
+            }
+            break;
+        }
+    }
+    out
 }
 
 /// The first running process whose name is in `wanted` (case-insensitive, whole name).
@@ -123,9 +211,17 @@ pub fn sharing_warnings_for(config: &Value, os: &str) -> Vec<String> {
                 None => "is not a string",
                 Some(n) if n.trim().is_empty() => "is empty",
                 Some(n) if n != n.trim() => "has spaces at either end; process names are compared whole",
-                Some(n) if n.contains('/') => "is a path; list process names (such as CptHost), not paths",
+                Some(n) if n.contains('/') || (os == "win32" && n.contains('\\')) => {
+                    if os == "win32" {
+                        "is a path; list program names (such as CptHost.exe), not paths"
+                    } else {
+                        "is a path; list process names (such as CptHost), not paths"
+                    }
+                }
                 Some(n) if os == "darwin" && n.len() > 31 => "is longer than 31 bytes, and macOS cuts process names there; use its first 31 bytes",
                 Some(n) if os == "darwin" && n.to_ascii_lowercase().ends_with(".exe") => "is a Windows program name; it never runs on macOS",
+                // Windows' names keep their extension (Toolhelp's szExeFile), and nothing is cut.
+                Some(n) if os == "win32" && !n.to_ascii_lowercase().ends_with(".exe") => "has no .exe; Windows program names are compared with it (CptHost.exe, not CptHost)",
                 Some(_) => return None,
             };
             Some(format!("privacy.sharingProcesses.{os} entry {v} {why}"))
@@ -227,8 +323,8 @@ fn proc_name(pid: i32) -> Option<String> {
 
 /// The process list, cheaply: one call for the pids, and a name lookup only for pids
 /// not seen before (about 700 lookups a poll cost ~0.3% CPU, measured). Everything is
-/// looked up afresh every 10 s, in case a pid was reused.
-// Read on macOS only until W5 (a Toolhelp snapshot on Windows).
+/// looked up afresh every 10 s, in case a pid was reused. On Windows one Toolhelp snapshot
+/// has every name already (WD5), so there is nothing to keep.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Default)]
 pub struct ProcessNames {
@@ -249,7 +345,12 @@ impl ProcessNames {
         pids.iter().filter_map(|&p| self.names.entry(p).or_insert_with(|| proc_name(p)).clone()).collect()
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    pub fn read(&mut self, _now: Instant) -> Vec<String> {
+        crate::win::processes().into_iter().map(|p| p.exe).collect()
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
     pub fn read(&mut self, _now: Instant) -> Vec<String> {
         Vec::new()
     }
@@ -309,6 +410,86 @@ mod tests {
         assert!(covered_monitors(&short, &monitors(), false).is_empty());
         let narrow = [w(0, "Parallels Desktop", 100.0, 33.0, 1600.0, 1084.0)];
         assert!(covered_monitors(&narrow, &monitors(), false).is_empty());
+    }
+
+    /// A window as win::windows() reads it: an ordinary app window unless changed.
+    fn ww(hwnd: u64, class: &str, bounds: [i32; 4]) -> crate::dump::Window {
+        crate::dump::Window { hwnd, pid: 7000 + hwnd as u32, exe: String::new(), class: class.into(), bounds, cloaked: false, tool: false, topmost: false, caption: true, transparent: false }
+    }
+
+    /// The maintainer's PC (W4's log): a 5120x2160 primary and a portrait 2160x3840 beside it.
+    fn pc() -> Vec<(String, [i32; 4])> {
+        vec![(r"\\.\DISPLAY2".into(), [0, 0, 5120, 2160]), (r"\\.\DISPLAY1".into(), [5120, -934, 7280, 2906])]
+    }
+
+    fn names(found: Vec<(String, String)>) -> Vec<String> {
+        found.into_iter().map(|(n, _)| n).collect()
+    }
+
+    #[test]
+    fn a_full_screen_video_on_monitor_two_covers_monitor_two_only() {
+        let me = 42;
+        let strip = crate::dump::Window { pid: me, topmost: true, tool: true, ..ww(1, "Tauri Window", [5120, 2718, 7280, 2858]) };
+        let taskbar = crate::dump::Window { topmost: true, ..ww(2, "Shell_SecondaryTrayWnd", [5120, 2858, 7280, 2906]) };
+        let video = crate::dump::Window { caption: false, ..ww(3, "Chrome_WidgetWin_1", [5120, -934, 7280, 2906]) };
+        let terminal = ww(4, "CASCADIA_HOSTING_WINDOW_CLASS", [100, 100, 3000, 2000]);
+        let desktop = ww(5, "Progman", [0, -934, 7280, 2906]);
+        let wins = [strip, taskbar, video.clone(), terminal, desktop];
+        let found = covered_monitors_win(&wins, &pc(), me, 3, Notify::Busy);
+        assert_eq!(names(found.clone()), vec![r"\\.\DISPLAY1".to_string()]);
+        assert!(found[0].1.contains("Chrome_WidgetWin_1") && found[0].1.contains("no title bar"), "{found:?}");
+        // The video left full screen: a window with a title bar that doesn't cover the monitor.
+        let windowed = crate::dump::Window { caption: true, bounds: [5300, 0, 7000, 1500], ..video };
+        assert!(covered_monitors_win(&[windowed, ww(5, "Progman", [0, -934, 7280, 2906])], &pc(), me, 3, Notify::Normal).is_empty(), "the desktop never counts");
+    }
+
+    #[test]
+    fn a_maximised_window_over_an_auto_hidden_taskbar_is_not_full_screen() {
+        // Auto-hide: the work area is the whole monitor, and so is a maximised window.
+        let maximised = ww(3, "CASCADIA_HOSTING_WINDOW_CLASS", [0, 0, 5120, 2160]);
+        assert!(covered_monitors_win(std::slice::from_ref(&maximised), &pc(), 42, 3, Notify::Normal).is_empty());
+        // Unless the shell itself calls it full screen while it is in front (a Store app's
+        // full screen keeps its styles).
+        let found = covered_monitors_win(std::slice::from_ref(&maximised), &pc(), 42, 3, Notify::Busy);
+        assert_eq!(names(found), vec![r"\\.\DISPLAY2".to_string()]);
+        assert!(covered_monitors_win(&[maximised], &pc(), 42, 99, Notify::Busy).is_empty(), "not the foreground window");
+    }
+
+    #[test]
+    fn small_topmost_windows_and_overlays_are_looked_past_and_an_ordinary_window_ends_the_search() {
+        let pip = crate::dump::Window { topmost: true, ..ww(1, "Chrome_WidgetWin_1", [4000, 1500, 5000, 2100]) };
+        let overlay = crate::dump::Window { topmost: true, transparent: true, caption: false, ..ww(2, "CEF-OSC-WIDGET", [0, 0, 5120, 2160]) };
+        let hidden_app = crate::dump::Window { cloaked: true, caption: false, ..ww(3, "ApplicationFrameWindow", [0, 0, 5120, 2160]) };
+        let game = crate::dump::Window { caption: false, ..ww(4, "UnityWndClass", [0, 0, 5120, 2160]) };
+        let found = covered_monitors_win(&[pip.clone(), overlay.clone(), hidden_app.clone(), game.clone()], &pc(), 42, 0, Notify::Normal);
+        assert_eq!(names(found), vec![r"\\.\DISPLAY2".to_string()], "the game, behind a picture-in-picture video");
+        let editor = ww(5, "Notepad", [200, 200, 1200, 1200]);
+        assert!(covered_monitors_win(&[pip, editor, game], &pc(), 42, 0, Notify::Normal).is_empty(), "the game is behind an ordinary window: not in front");
+        // Tiny slivers (a snapped window's edge on the next monitor) don't decide.
+        let sliver = ww(6, "Notepad", [5100, 0, 5140, 800]);
+        let full = crate::dump::Window { caption: false, ..ww(7, "mpv", [5120, -934, 7280, 2906]) };
+        assert_eq!(names(covered_monitors_win(&[sliver, full], &pc(), 42, 0, Notify::Normal)), vec![r"\\.\DISPLAY1".to_string()]);
+    }
+
+    #[test]
+    fn an_exclusive_full_screen_or_presentation_mode_covers_every_monitor() {
+        for n in [Notify::D3dFullScreen, Notify::Presentation] {
+            let found = covered_monitors_win(&[], &pc(), 42, 0, n);
+            assert_eq!(found.len(), 2, "{n:?}");
+            assert!(found.iter().all(|(_, why)| why == n.describe()));
+        }
+        assert!(covered_monitors_win(&[], &pc(), 42, 0, Notify::Busy).is_empty(), "Busy alone names no monitor");
+    }
+
+    #[test]
+    fn windows_sharing_names_need_their_exe_and_are_not_paths() {
+        let cfg = json!({"privacy": {"sharingProcesses": {"win32": ["CptHost.exe", "cpthost.EXE", "CptHost", r"C:\\Program Files\\Zoom\\CptHost.exe", "x".repeat(40) + ".exe", "zoom.us"]}}});
+        let w = sharing_warnings_for(&cfg, "win32");
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert!(w[0].contains("\"CptHost\" has no .exe"), "{w:?}");
+        assert!(w[1].contains("is a path; list program names (such as CptHost.exe)"), "{w:?}");
+        assert!(w[2].contains("\"zoom.us\" has no .exe"), "{w:?}");
+        assert!(sharing_warnings_for(&json!({"privacy": {"sharingProcesses": {"darwin": ["a/b"]}}}), "darwin")[0].contains("(such as CptHost)"), "macOS's wording unchanged");
     }
 
     #[test]

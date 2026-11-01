@@ -7,8 +7,9 @@ app, brain, CLI and setup window, signed and updating itself.
 Status: proposal, with the maintainer's decisions of 2026-10-20 applied (see "Decisions
 (maintainer, 2026-10-20)" under Open questions). W1 is built and has had a first run on
 the maintainer's PC; W2's first part is built; W3 is built, its click and hover
-checks passed on the PC, the rest of its by-hand list open; W4 is built and awaits its PC
-checks (their status sections); nothing else is built yet. Items marked
+checks passed on the PC, the rest of its by-hand list open; W4 is built and its PC
+re-run was stable, a few checks open; W5 is built and awaits its PC checks (their status
+sections); nothing else is built yet. Items marked
 **ASSUMPTION** are technical guesses that a milestone proves. Bracketed numbers such as
 [4] point to the Sources list at the end. Crate versions were read from `Cargo.lock` and
 crates.io on 2026-10-19 [21]. The Tauri, tao and wry behaviour quoted here was read from
@@ -1724,6 +1725,102 @@ Builds:
 **By hand (about 20 minutes):** a Zoom call and a Teams call with a second device (a phone
 in the meeting); Meet in a browser with *Hide everything*; the full-screen cases; the
 opt-in check.
+
+#### W5 status (developer, 2026-10-31): built; the detector's rules tested on the Mac; the xwin check clean; the by-hand list open
+
+What W5 found already in place, and what it built:
+
+- **Already there:** the sharing poll (every 500 ms), its 2 s debounce, `privacy.hideWhenSharing`,
+  the `win32` list with `CptHost.exe`, the per-OS capture-exclusion default and its log
+  line (W1-10), and the per-monitor hide with its own debounce (macOS, milestone 7). Only
+  the Windows inputs were missing: the process reader returned nothing on Windows, and the
+  full-screen check ran on macOS only.
+- **The process reader** (`privacy.rs` `ProcessNames::read`): one Toolhelp snapshot per
+  poll (`win::processes`, the dump's reader), names as Windows has them (`CptHost.exe`),
+  compared whole and case-insensitively. No cache: the snapshot carries every name.
+- **Windows rules in `sharing_warnings_for`**: a `win32` name without `.exe` is a WARN
+  ("has no .exe; Windows program names are compared with it"), a name with `\` or `/` is
+  a path ("list program names (such as CptHost.exe)"); no 31-byte cut. macOS's rules and
+  wording are unchanged. Tests: `windows_sharing_names_need_their_exe_and_are_not_paths`,
+  and the same rules through the JS conformance bridge (`test/privacy.test.mjs`).
+- **The full-screen detector** (`privacy::covered_monitors_win`, pure, tested on the Mac;
+  `win::full_screen_view` collects its input every 500 ms). For each monitor it reads the
+  windows front to back, skipping Bellwether's own, the desktop (`Progman`, `WorkerW`), the
+  taskbars, cloaked windows, tool windows, click-through overlays, and any overlap under
+  50x50 px. The first window left decides: it covers the monitor with no title bar
+  (`WS_CAPTION`): covered; it covers it with a title bar: covered only if it is the
+  foreground window and `SHQueryUserNotificationState` says QUNS_BUSY; a smaller topmost
+  window (a picture-in-picture video): the next one decides; anything else: not covered.
+  QUNS_RUNNING_D3D_FULL_SCREEN and QUNS_PRESENTATION_MODE cover every monitor. The hide is
+  the macOS one: that monitor's strip, back 2 s after.
+  Tests: a video full screen on the PC's second monitor (only DISPLAY1 covered); a
+  maximised window over an auto-hidden taskbar (not covered, unless QUNS_BUSY and in
+  front); a game behind a picture-in-picture window and a GPU overlay (covered), behind an
+  ordinary window (not); D3D and presentation mode (all).
+- **The log** says, at start, whether the check runs (`full screen: … (checked every 500
+  ms)` or `not checked (privacy.hideWhenFullscreen is false)`); each change in what the
+  shell says (`full screen: Windows says …`); and, with each hide, which window covered the
+  monitor (`strip-1 hidden: an app covers its monitor (full screen: … (Chrome_WidgetWin_1,
+  pid …) covers it with no title bar)`).
+- **Capture exclusion read back:** with `privacy.captureExclusion: true`, each strip's log
+  line now says what Windows applied (`GetWindowDisplayAffinity`): WDA_EXCLUDEFROMCAPTURE,
+  WDA_MONITOR (Windows older than 10 2004: a black rectangle), or WDA_NONE.
+- **Doctor** (Windows only) adds `INFO capture exclusion off (the Windows default;
+  privacy.captureExclusion: true turns it on): …`, or `on (privacy.captureExclusion in
+  config.json): …`.
+- **`sharing-check.cmd`** in the test folder, for the Teams check: it lists the running
+  programs before, during and after a share (PowerShell's `Get-Process`, read-only) and
+  prints the names seen only during it, spelled as the config wants them (with `.exe`).
+- `dump::Window` gained `caption` and `transparent`, so a `--dump-desktop` file shows what
+  the detector sees.
+
+Deviations:
+
+- **W5-1, doctor doesn't read the affinity back.** WD5 says the log *and doctor* read
+  `GetWindowDisplayAffinity` for each strip. Doctor is another process; it shows the
+  effective setting and why, and the strip's own log line has what Windows applied.
+- **W5-2, the title bar tells full screen from maximised.** WD5 compared the foreground
+  window's bounds with the monitor. With the taskbar auto-hidden a maximised window has
+  the same bounds, and the sheep would vanish whenever a window is maximised (macOS had
+  the same problem, settled there by the Dock's auto-hide setting). Full screen here is
+  "covers the monitor with no title bar", or with one when the shell itself says QUNS_BUSY
+  for that foreground window.
+- **W5-3, the front window on each monitor, not only the foreground one.** A video full
+  screen on monitor 2 keeps monitor 2's strip hidden while you work on monitor 1; with the
+  foreground window only, the strip would come back over the video at the first click
+  elsewhere.
+- **W5-4, the README isn't touched yet.** It doesn't cover Windows until W10; the
+  test folder's README.txt has the sharing check.
+
+By hand on the PC (about 20 minutes; `run-test.cmd`, the demo is enough unless noted):
+
+1. Defaults: Win+Shift+S over the strip; the sheep are in the screenshot. The log's first
+   lines say `capture exclusion off (the Windows default …)` and `full screen: a window
+   covering a monitor hides …`.
+2. Zoom, sharing the whole screen, a phone in the meeting: the log says `privacy:
+   CptHost.exe is running (screen sharing); hiding the strip` and the phone never sees the
+   sheep. Stop sharing: `the sharing process has gone`, and the strip is back 2 s later.
+3. The Teams check: `sharing-check.cmd`, sharing the whole screen in the new Teams when it
+   asks. Send its output. If a program runs only while Teams shares, it joins the `win32`
+   default list; if not, the README says to use *Hide everything* before sharing in Teams.
+   (Zoom through the same script is a useful control: it should print `CptHost.exe`.)
+4. Meet in a browser: the tray's *Hide everything (for screen sharing)* before sharing;
+   the phone sees no sheep.
+5. A video full screen (F11 in a browser, or the player's full-screen button) on monitor 2:
+   monitor 2's strip hides (the log names the window), monitor 1's stays. Click on monitor
+   1 while the video plays: monitor 2's strip stays hidden. Leave full screen: it is back
+   2 s later.
+6. A PowerPoint slideshow (or another presentation app): record what the log says
+   (`full screen: Windows says …`) and which strips hide. WD5 expects all of them; the
+   rectangle alone hides only the slideshow's monitor.
+7. A maximised window (and, if you use it, with the taskbar on auto-hide): the sheep stay.
+8. `privacy.hideWhenFullscreen: false` in the test folder's config.json, rerun: the log says
+   `not checked`, and check 5's video leaves the strip up. `privacy.hideWhenSharing:
+   false`: `hide while sharing off`, and check 2's share leaves the strip up. Put both back.
+9. Opt-in: `privacy.captureExclusion: true`, rerun: each strip's line says `Windows
+   reports WDA_EXCLUDEFROMCAPTURE …`; Win+Shift+S and the Zoom phone show no sheep, also
+   with the cursor over a sheep; no black rectangle. `.\cli doctor` says `capture
+   exclusion on (privacy.captureExclusion in config.json)`. Put it back.
 
 ### W6. Start at login, the brain's life, single instance
 

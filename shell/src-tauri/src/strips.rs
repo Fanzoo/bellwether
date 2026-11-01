@@ -266,7 +266,15 @@ pub fn open<R: Runtime>(app: &AppHandle<R>, monitor: &Monitor, height_px: f64, i
     // strip also hides while sharing, and the tray can hide it (Milestone 7).
     if capture_exclusion {
         window.set_content_protected(true)?;
-        log(&format!("{label}: capture exclusion on ({})", if cfg!(windows) { "WDA_EXCLUDEFROMCAPTURE: also absent from your own screenshots" } else { "sharingType none" }));
+        #[cfg(windows)]
+        let how = match window.hwnd() {
+            // Read back: what Windows actually applied (WD5).
+            Ok(hwnd) => format!("Windows reports {}", crate::win::display_affinity(hwnd.0 as _)),
+            Err(e) => format!("WDA_EXCLUDEFROMCAPTURE asked; not read back (no window handle: {e})"),
+        };
+        #[cfg(not(windows))]
+        let how = "sharingType none".to_string();
+        log(&format!("{label}: capture exclusion on ({how})"));
     }
     #[cfg(target_os = "macos")]
     {

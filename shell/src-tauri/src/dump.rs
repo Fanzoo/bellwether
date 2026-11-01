@@ -70,6 +70,11 @@ pub struct Window {
     pub cloaked: bool,
     pub tool: bool,
     pub topmost: bool,
+    /// A title bar (WS_CAPTION): a window that covers its monitor without one is in full
+    /// screen (WD5).
+    pub caption: bool,
+    /// Click-through (WS_EX_TRANSPARENT): an overlay, never an app in full screen.
+    pub transparent: bool,
 }
 
 /// One monitor's entry from what Windows says about it: the taskbar edge and the strip's
@@ -135,7 +140,7 @@ mod tests {
             monitors: vec![monitor("\\\\.\\DISPLAY1".into(), true, 1.0, [0, 0, 1920, 1080], [0, 0, 1920, 1032], 140.0)],
             foreground: 132456,
             processes: vec![Process { pid: 9100, ppid: 8800, exe: "claude.exe".into() }],
-            windows: vec![Window { hwnd: 132456, pid: 8800, exe: "WindowsTerminal.exe".into(), class: "CASCADIA_HOSTING_WINDOW_CLASS".into(), bounds: [1930, 10, 3800, 1400], cloaked: false, tool: false, topmost: false }],
+            windows: vec![Window { hwnd: 132456, pid: 8800, exe: "WindowsTerminal.exe".into(), class: "CASCADIA_HOSTING_WINDOW_CLASS".into(), bounds: [1930, 10, 3800, 1400], cloaked: false, tool: false, topmost: false, caption: true, transparent: false }],
         };
         let text = render(&d);
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -148,7 +153,7 @@ mod tests {
             k.join(",")
         };
         assert_eq!(keys(&v), "foreground,monitors,os,processes,version,windows");
-        assert_eq!(keys(&v["windows"][0]), "bounds,class,cloaked,exe,hwnd,pid,tool,topmost", "no title");
+        assert_eq!(keys(&v["windows"][0]), "bounds,caption,class,cloaked,exe,hwnd,pid,tool,topmost,transparent", "no title");
         assert_eq!(keys(&v["processes"][0]), "exe,pid,ppid", "no command line or environment");
         assert!(text.ends_with("}\n"));
     }

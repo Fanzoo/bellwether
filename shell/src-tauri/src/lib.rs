@@ -982,6 +982,23 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
             .collect()
     };
     let mut monitors = if hide_when_fullscreen && cfg!(target_os = "macos") { monitor_rects(&app) } else { Vec::new() };
+    // Windows reads its own monitors with each poll (WD5); what the shell said last, logged
+    // when it changes, and why each covered monitor is covered.
+    let poll_cover = hide_when_fullscreen && (cfg!(target_os = "macos") || cfg!(windows));
+    #[cfg(windows)]
+    let mut last_notify = privacy::Notify::Normal;
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut cover_why: std::collections::HashMap<String, String> = Default::default();
+    if cfg!(windows) {
+        log(&format!(
+            "full screen: {}",
+            if hide_when_fullscreen {
+                "a window covering a monitor hides that monitor's strip; an exclusive Direct3D full screen or presentation mode hides them all (checked every 500 ms)"
+            } else {
+                "not checked (privacy.hideWhenFullscreen is false)"
+            }
+        ));
+    }
     loop {
         let now = Instant::now();
         // `bellwether show` / `bellwether hide` (or the file edited by hand) while running.
@@ -1059,14 +1076,29 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
                 });
             }
         }
-        // Full screen (macOS): which monitors an app covers now, each debounced.
+        // Full screen: which monitors an app covers now, each debounced.
         let mut now_covered = covered_labels.clone();
-        if !monitors.is_empty() && now.duration_since(last_cover_poll) >= privacy::FULLSCREEN_POLL {
+        if poll_cover && now.duration_since(last_cover_poll) >= privacy::FULLSCREEN_POLL {
             last_cover_poll = now;
-            let covered = privacy::covered_monitors(&locator::layered_windows(), &monitors, dock.autohide);
+            #[cfg(windows)]
+            let (covered, names): (Vec<String>, Vec<String>) = {
+                let _ = &monitors; // macOS's monitors in points: unused here
+                let (wins, mons, foreground, notify) = win::full_screen_view();
+                if notify != last_notify {
+                    log(&format!("full screen: Windows says {}", notify.describe()));
+                    last_notify = notify;
+                }
+                let found = privacy::covered_monitors_win(&wins, &mons, std::process::id(), foreground, notify);
+                for (name, why) in &found {
+                    cover_why.insert(name.clone(), why.clone());
+                }
+                (found.into_iter().map(|(n, _)| n).collect(), mons.into_iter().map(|(n, _)| n).collect())
+            };
+            #[cfg(not(windows))]
+            let (covered, names): (Vec<String>, Vec<String>) = (privacy::covered_monitors(&locator::layered_windows(), &monitors, dock.autohide), monitors.iter().map(|(n, _)| n.clone()).collect());
             let by_monitor = app.state::<strips::Strips>().by_monitor.lock().unwrap().clone();
             now_covered.clear();
-            for (name, _) in &monitors {
+            for name in &names {
                 let d = cover_debounce.entry(name.clone()).or_insert_with(privacy::Debounce::new);
                 if d.update(covered.contains(name), now) {
                     if let Some(label) = by_monitor.get(name) {
@@ -1086,7 +1118,8 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
                         let _ = if cover { w.hide() } else { w.show() };
                     }
                 }
-                log(&format!("{label} {}", if cover { "hidden: an app covers its monitor (full screen)" } else { "shown: the full-screen app has gone" }));
+                let why = app.state::<strips::Strips>().monitor_of(label).and_then(|m| cover_why.get(&m)).map(|w| format!(": {w}")).unwrap_or_default();
+                log(&format!("{label} {}", if cover { format!("hidden: an app covers its monitor (full screen{why})") } else { "shown: the full-screen app has gone".to_string() }));
             }
             covered_labels = now_covered;
         }

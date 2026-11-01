@@ -21,6 +21,11 @@ describe('privacy.sharingProcesses entries that can never match (D2)', () => {
     assert.match(w.join('\n'), /spaces at either end/);
     assert.match(w.join('\n'), /7 is not a string/);
     assert.deepEqual(sharingProcessWarnings(cfg(['CptHost']), 'win32'), [], '.exe is fine on Windows');
+    const win = (win32) => ({ privacy: { sharingProcesses: { darwin: [], win32, linux: [] } } });
+    const ww = sharingProcessWarnings(win(['CptHost.exe', 'ms-teams.EXE', 'CptHost', 'C:\\Zoom\\bin\\CptHost.exe', 'y'.repeat(40) + '.exe']), 'win32');
+    assert.equal(ww.length, 2, ww.join('\n'));
+    assert.match(ww[0], /"CptHost" has no \.exe/);
+    assert.match(ww[1], /is a path; list program names \(such as CptHost\.exe\)/);
     assert.match(sharingProcessWarnings({ privacy: { sharingProcesses: { darwin: 'CptHost' } } }, 'darwin')[0], /not a list/);
     assert.deepEqual(sharingProcessWarnings({}, 'darwin'), []);
   });
@@ -42,7 +47,7 @@ describe('privacy.sharingProcesses entries that can never match (D2)', () => {
   });
   test('the shell has the same rules, and logs them at start', () => {
     const rs = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'privacy.rs'), 'utf8');
-    for (const phrase of ['is empty', 'has spaces at either end', 'is a path', 'is longer than 31 bytes', 'is a Windows program name', 'is not a string']) assert.ok(rs.includes(phrase), phrase);
+    for (const phrase of ['is empty', 'has spaces at either end', 'is a path', 'is longer than 31 bytes', 'is a Windows program name', 'has no .exe', 'is not a string']) assert.ok(rs.includes(phrase), phrase);
     const lib = fs.readFileSync(path.join(AGENT_DIR, 'shell', 'src-tauri', 'src', 'lib.rs'), 'utf8');
     assert.match(lib, /for w in privacy::sharing_warnings\(&settings\.config\)/);
   });
