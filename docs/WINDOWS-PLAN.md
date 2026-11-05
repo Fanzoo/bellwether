@@ -1726,7 +1726,7 @@ Builds:
 in the meeting); Meet in a browser with *Hide everything*; the full-screen cases; the
 opt-in check.
 
-#### W5 status (developer, 2026-10-31): built; the detector's rules tested on the Mac; the xwin check clean; the by-hand list open
+#### W5 status (developer, 2026-10-31; first run and Zoom fix 2026-11-05): built; the detector's rules tested on the Mac; first run in Parallels: Zoom hid for the whole meeting, now told by its sharing window (W5-5); the rest of the by-hand list open
 
 What W5 found already in place, and what it built:
 
@@ -1789,17 +1789,41 @@ Deviations:
   screen on monitor 2 keeps monitor 2's strip hidden while you work on monitor 1; with the
   foreground window only, the strip would come back over the video at the first click
   elsewhere.
+- **W5-5, Zoom's sharing is told by its window, not its process.** WD5 expected
+  `CptHost.exe` to run only while Zoom shares, as on macOS. On Windows it runs for the
+  whole meeting (first Parallels run, below), so the strip hid for every Zoom call.
+  `sharing-check.cmd`, run inside a meeting, found no program that runs only while sharing.
+  The desktop dumps did find a window: `CptHost.exe` has a window of class `unsharing
+  frame`, empty, while not sharing, and `sharing frame`, the green border around what is
+  shared (topmost, click-through), while sharing; Zoom's toolbar `ZPFloatToolbarClass`
+  appears too. So on Windows a running `CptHost.exe` hides the strip only while its
+  `sharing frame` has a size (`privacy::zoom_frame`, `win::sharing_detail`). With neither
+  frame (a Zoom that renames them) it hides, to be safe. Every other name in
+  `sharingProcesses.win32` still hides while it runs, and the default list is unchanged.
 - **W5-4, the README isn't touched yet.** It doesn't cover Windows until W10; the
   test folder's README.txt has the sharing check.
+
+First run, in Parallels (maintainer, 2026-11-05; Windows 11 VM, one display at scale 2):
+
+- Win+Shift+S showed the sheep (check 1, as expected with the defaults).
+- Zoom: the strip hid on joining the meeting, without any share, and came back 2 s after
+  leaving: `CptHost.exe` runs for the whole meeting on Windows. Fixed by W5-5.
+- Meet in a browser, sharing the whole screen: the sheep stayed (expected: no sharing
+  process; *Hide everything* first). While Chrome shared, Windows reported QUNS_BUSY for
+  12 s with no window covering the monitor, and the detector rightly left the strip up.
+- `sharing-check.cmd` inside a Zoom meeting: "No program ran only while sharing."
+- Full screen and Teams not tried yet.
 
 By hand on the PC (about 20 minutes; `run-test.cmd`, the demo is enough unless noted):
 
 1. Defaults: Win+Shift+S over the strip; the sheep are in the screenshot. The log's first
    lines say `capture exclusion off (the Windows default …)` and `full screen: a window
    covering a monitor hides …`.
-2. Zoom, sharing the whole screen, a phone in the meeting: the log says `privacy:
-   CptHost.exe is running (screen sharing); hiding the strip` and the phone never sees the
-   sheep. Stop sharing: `the sharing process has gone`, and the strip is back 2 s later.
+2. Zoom, a phone in the meeting. Joining without sharing: the sheep stay. Sharing the
+   whole screen: the log says `privacy: CptHost.exe shows its sharing frame (Zoom is
+   sharing); hiding the strip` and the phone never sees the sheep. Stop sharing, still in
+   the meeting: `sharing has stopped …`, and the strip is back 2 s later. Also share one
+   window instead of the screen, and record what happens.
 3. The Teams check: `sharing-check.cmd`, sharing the whole screen in the new Teams when it
    asks. Send its output. If a program runs only while Teams shares, it joins the `win32`
    default list; if not, the README says to use *Hide everything* before sharing in Teams.
