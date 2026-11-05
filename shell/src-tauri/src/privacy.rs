@@ -144,6 +144,32 @@ pub fn covered_monitors_win(windows: &[crate::dump::Window], monitors: &[(String
     out
 }
 
+/// What Zoom's capture helper shows on Windows. Zoom runs `CptHost.exe` for the whole
+/// meeting there, not only while sharing as on macOS (measured on Windows 11, W5): its window
+/// is `unsharing frame`, empty, while not sharing, and `sharing frame`, the green border
+/// around what is shared, while sharing.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomFrame {
+    Sharing,
+    NotSharing,
+    /// Neither window: a Zoom that names them differently. Treated as sharing, to be safe.
+    Unknown,
+}
+
+/// `windows` from win::windows(), `pids` the running `CptHost.exe` processes.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn zoom_frame(windows: &[crate::dump::Window], pids: &[u32]) -> ZoomFrame {
+    let mine = || windows.iter().filter(|w| pids.contains(&w.pid));
+    if mine().any(|w| w.class == "sharing frame" && w.bounds[2] > w.bounds[0] && w.bounds[3] > w.bounds[1]) {
+        ZoomFrame::Sharing
+    } else if mine().any(|w| w.class == "unsharing frame" || w.class == "sharing frame") {
+        ZoomFrame::NotSharing
+    } else {
+        ZoomFrame::Unknown
+    }
+}
+
 /// The first running process whose name is in `wanted` (case-insensitive, whole name).
 pub fn sharing_match(running: &[String], wanted: &[String]) -> Option<String> {
     running.iter().find(|n| wanted.iter().any(|w| !w.is_empty() && w.eq_ignore_ascii_case(n))).cloned()
@@ -479,6 +505,20 @@ mod tests {
             assert!(found.iter().all(|(_, why)| why == n.describe()));
         }
         assert!(covered_monitors_win(&[], &pc(), 42, 0, Notify::Busy).is_empty(), "Busy alone names no monitor");
+    }
+
+    #[test]
+    fn zoom_on_windows_shares_only_while_its_sharing_frame_is_on_screen() {
+        // From the maintainer's dumps (2026-11-05): in a meeting, then sharing the screen.
+        let frame = |class: &str, bounds: [i32; 4]| crate::dump::Window { pid: 13248, tool: bounds[2] == 0, topmost: bounds[2] > 0, caption: false, transparent: true, ..ww(329436, class, bounds) };
+        let other = ww(1, "ConfMultiTabContentWndClass", [407, 220, 2817, 1683]);
+        let meeting = [other.clone(), frame("unsharing frame", [0, 0, 0, 0])];
+        let sharing = [frame("sharing frame", [0, 0, 3456, 2167]), other.clone(), frame("unsharing frame", [0, 0, 0, 0])];
+        assert_eq!(zoom_frame(&meeting, &[13248]), ZoomFrame::NotSharing);
+        assert_eq!(zoom_frame(&sharing, &[13248]), ZoomFrame::Sharing);
+        assert_eq!(zoom_frame(&sharing, &[999]), ZoomFrame::Unknown, "another process's windows don't count");
+        assert_eq!(zoom_frame(&[other], &[13248]), ZoomFrame::Unknown, "no frame at all: hide, to be safe");
+        assert_eq!(zoom_frame(&[frame("sharing frame", [0, 0, 0, 0])], &[13248]), ZoomFrame::NotSharing, "an empty sharing frame");
     }
 
     #[test]

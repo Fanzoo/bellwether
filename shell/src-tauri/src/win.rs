@@ -230,6 +230,22 @@ pub fn full_screen_view() -> (Vec<dump::Window>, Vec<(String, [i32; 4])>, u64, c
     (windows(&[]), monitors, unsafe { GetForegroundWindow() } as usize as u64, notify_state())
 }
 
+/// Whether a running sharing program is sharing now (WD5). Only Zoom's `CptHost.exe` needs
+/// a look at its windows (privacy::zoom_frame); any other name counts as sharing while it
+/// runs. Returns what the log says about it.
+pub fn sharing_detail(name: &str) -> Option<String> {
+    use crate::privacy::{zoom_frame, ZoomFrame};
+    if !name.eq_ignore_ascii_case("CptHost.exe") {
+        return Some(name.to_string());
+    }
+    let pids: Vec<u32> = processes().into_iter().filter(|p| p.exe.eq_ignore_ascii_case("CptHost.exe")).map(|p| p.pid).collect();
+    match zoom_frame(&windows(&[]), &pids) {
+        ZoomFrame::Sharing => Some(format!("{name} shows its sharing frame (Zoom is sharing)")),
+        ZoomFrame::NotSharing => None,
+        ZoomFrame::Unknown => Some(format!("{name} runs with no sharing or unsharing frame (an unknown Zoom; hidden to be safe)")),
+    }
+}
+
 /// `SHQueryUserNotificationState`: whether the shell sees a full screen.
 fn notify_state() -> crate::privacy::Notify {
     use crate::privacy::Notify;
