@@ -144,35 +144,56 @@ pub fn covered_monitors_win(windows: &[crate::dump::Window], monitors: &[(String
     out
 }
 
-/// What Zoom's capture helper shows on Windows. Zoom runs `CptHost.exe` for the whole
-/// meeting there, not only while sharing as on macOS (measured on Windows 11, W5): its window
-/// is `unsharing frame`, empty, while not sharing, and `sharing frame`, the green border
-/// around what is shared, while sharing.
+/// Sharing programs that run for the whole meeting on Windows, and the window each shows
+/// only while it shares (measured on Windows 11, W5): (program, its sharing window's
+/// class, a class it shows only while *not* sharing, if any).
+/// - Zoom's `CptHost.exe`: `sharing frame`, the green border around what is shared; an
+///   empty `unsharing frame` otherwise.
+/// - The new Teams, `ms-teams.exe`: `ScreenBorderWindow`, the border around the shared
+///   screen; nothing otherwise.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const SHARING_WINDOWS: [(&str, &str, Option<&str>); 2] = [("CptHost.exe", "sharing frame", Some("unsharing frame")), ("ms-teams.exe", "ScreenBorderWindow", None)];
+
 #[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ZoomFrame {
+pub enum Frame {
     Sharing,
     NotSharing,
-    /// Neither window: a Zoom that names them differently. Treated as sharing, to be safe.
+    /// Neither window, for a program that shows one either way: a version that names them
+    /// differently. Treated as sharing, to be safe.
     Unknown,
 }
 
-/// `windows` from win::windows(), `pids` the running `CptHost.exe` processes.
+/// Whether `program` (one of SHARING_WINDOWS) shares now: `windows` from win::windows(),
+/// `pids` its running processes. A program not in the table: None.
 #[cfg_attr(not(windows), allow(dead_code))]
-pub fn zoom_frame(windows: &[crate::dump::Window], pids: &[u32]) -> ZoomFrame {
-    let mine = || windows.iter().filter(|w| pids.contains(&w.pid));
-    if mine().any(|w| w.class == "sharing frame" && w.bounds[2] > w.bounds[0] && w.bounds[3] > w.bounds[1]) {
-        ZoomFrame::Sharing
-    } else if mine().any(|w| w.class == "unsharing frame" || w.class == "sharing frame") {
-        ZoomFrame::NotSharing
+pub fn sharing_window(windows: &[crate::dump::Window], pids: &[u32], program: &str) -> Option<Frame> {
+    let (_, sharing, idle) = SHARING_WINDOWS.iter().find(|(p, _, _)| p.eq_ignore_ascii_case(program))?;
+    let mine = || windows.iter().filter(|w| pids.contains(&w.pid) && !w.cloaked);
+    Some(if mine().any(|w| w.class == *sharing && w.bounds[2] > w.bounds[0] && w.bounds[3] > w.bounds[1]) {
+        Frame::Sharing
+    } else if idle.is_none() || mine().any(|w| Some(w.class.as_str()) == *idle || w.class == *sharing) {
+        Frame::NotSharing
     } else {
-        ZoomFrame::Unknown
-    }
+        Frame::Unknown
+    })
 }
 
 /// The first running process whose name is in `wanted` (case-insensitive, whole name).
+#[cfg_attr(windows, allow(dead_code))]
 pub fn sharing_match(running: &[String], wanted: &[String]) -> Option<String> {
-    running.iter().find(|n| wanted.iter().any(|w| !w.is_empty() && w.eq_ignore_ascii_case(n))).cloned()
+    sharing_matches(running, wanted).into_iter().next()
+}
+
+/// Every running process whose name is in `wanted`, each name once, in the order they run.
+pub fn sharing_matches(running: &[String], wanted: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for n in running {
+        if wanted.iter().any(|w| !w.is_empty() && w.eq_ignore_ascii_case(n)) && !out.iter().any(|o| o.eq_ignore_ascii_case(n)) {
+            out.push(n.clone());
+        }
+    }
+    out
 }
 
 /// This build's platform name, as `privacy.sharingProcesses` spells it.
@@ -514,11 +535,25 @@ mod tests {
         let other = ww(1, "ConfMultiTabContentWndClass", [407, 220, 2817, 1683]);
         let meeting = [other.clone(), frame("unsharing frame", [0, 0, 0, 0])];
         let sharing = [frame("sharing frame", [0, 0, 3456, 2167]), other.clone(), frame("unsharing frame", [0, 0, 0, 0])];
-        assert_eq!(zoom_frame(&meeting, &[13248]), ZoomFrame::NotSharing);
-        assert_eq!(zoom_frame(&sharing, &[13248]), ZoomFrame::Sharing);
-        assert_eq!(zoom_frame(&sharing, &[999]), ZoomFrame::Unknown, "another process's windows don't count");
-        assert_eq!(zoom_frame(&[other], &[13248]), ZoomFrame::Unknown, "no frame at all: hide, to be safe");
-        assert_eq!(zoom_frame(&[frame("sharing frame", [0, 0, 0, 0])], &[13248]), ZoomFrame::NotSharing, "an empty sharing frame");
+        let zoom = |w: &[crate::dump::Window], pids: &[u32]| sharing_window(w, pids, "cpthost.exe").unwrap();
+        assert_eq!(zoom(&meeting, &[13248]), Frame::NotSharing);
+        assert_eq!(zoom(&sharing, &[13248]), Frame::Sharing);
+        assert_eq!(zoom(&sharing, &[999]), Frame::Unknown, "another process's windows don't count");
+        assert_eq!(zoom(&[other], &[13248]), Frame::Unknown, "no frame at all: hide, to be safe");
+        assert_eq!(zoom(&[frame("sharing frame", [0, 0, 0, 0])], &[13248]), Frame::NotSharing, "an empty sharing frame");
+        assert_eq!(sharing_window(&sharing, &[13248], "Zoom.exe"), None, "not in the table: its process decides");
+    }
+
+    #[test]
+    fn teams_on_windows_shares_only_while_its_screen_border_is_on_screen() {
+        // From the maintainer's dumps (2026-11-06): the new Teams in a meeting, then sharing.
+        let teams = |class: &str, bounds: [i32; 4]| crate::dump::Window { pid: 8100, ..ww(500, class, bounds) };
+        let meeting = [teams("TeamsWebView", [357, 259, 3099, 1802])];
+        let border = crate::dump::Window { tool: true, topmost: true, transparent: true, caption: false, ..teams("ScreenBorderWindow", [0, 0, 3456, 2168]) };
+        let sharing = [border.clone(), teams("TeamsWebView", [2999, 1446, 3385, 2061])];
+        assert_eq!(sharing_window(&meeting, &[8100], "ms-teams.exe"), Some(Frame::NotSharing), "Teams has no idle window: no border, not sharing");
+        assert_eq!(sharing_window(&sharing, &[8100], "MS-Teams.exe"), Some(Frame::Sharing));
+        assert_eq!(sharing_window(&[crate::dump::Window { cloaked: true, ..border }], &[8100], "ms-teams.exe"), Some(Frame::NotSharing), "a cloaked border isn't on screen");
     }
 
     #[test]
@@ -562,6 +597,8 @@ mod tests {
         assert_eq!(sharing_match(&running, &["Cpt".to_string()]), None, "a part of a name is not a match");
         assert_eq!(sharing_match(&running, &[String::new()]), None);
         assert_eq!(sharing_match(&[], &wanted), None);
+        let both = ["ms-teams.exe".to_string(), "CptHost.exe".into(), "MS-TEAMS.EXE".into()];
+        assert_eq!(sharing_matches(&both, &["CptHost.exe".into(), "ms-teams.exe".into()]), vec!["ms-teams.exe".to_string(), "CptHost.exe".into()], "each once, so a Zoom idling in a meeting can't hide a Teams share");
     }
 
     #[test]

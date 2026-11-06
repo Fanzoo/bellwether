@@ -54,7 +54,7 @@
     "hideWhenSharing": true,
     "sharingProcesses": {
       "darwin": ["CptHost", "zoom.us Screen Share"],
-      "win32": ["CptHost.exe"],
+      "win32": ["CptHost.exe", "ms-teams.exe"],
       "linux": []
     },
     "hideWhenFullscreen": true

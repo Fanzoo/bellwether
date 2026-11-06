@@ -881,7 +881,7 @@ No new `config.json` keys. Existing keys that start doing something on Windows:
 | `privacy.captureExclusion` | `false` (the Windows default; macOS keeps `true`) | opt-in: `WDA_EXCLUDEFROMCAPTURE` on every strip, which also hides the sheep from your own screenshots |
 | `privacy.hideWhenSharing` | `true` | hide while a `sharingProcesses.win32` process runs |
 | `privacy.hideWhenFullscreen` | `true` | the WD5 detector (unused on macOS) |
-| `privacy.sharingProcesses.win32` | `["CptHost.exe"]` | the Toolhelp process names |
+| `privacy.sharingProcesses.win32` | `["CptHost.exe", "ms-teams.exe"]` | the Toolhelp process names; Zoom's and Teams' count only while their sharing border shows (W5-5, W5-6) |
 | `locator.strategies` | `["herdr", "process-tree", "vscode", "app-activate"]` | the Windows default order; macOS-only names are skipped with one log line |
 | `locator.herdrPath` | `"herdr"` | resolved on PATH, then `%LOCALAPPDATA%\Programs\Herdr\bin\herdr.exe` |
 
@@ -1726,7 +1726,7 @@ Builds:
 in the meeting); Meet in a browser with *Hide everything*; the full-screen cases; the
 opt-in check.
 
-#### W5 status (developer, 2026-10-31; first run and Zoom fix 2026-11-05): built; the detector's rules tested on the Mac; first run in Parallels: Zoom hid for the whole meeting, now told by its sharing window (W5-5); the rest of the by-hand list open
+#### W5 status (developer, 2026-10-31; Parallels runs and fixes 2026-11-05 and -06): built; Zoom and Teams told by their sharing windows (W5-5, W5-6); Zoom and a full-screen video checked in Parallels; the Teams re-run and the rest of the by-hand list open
 
 What W5 found already in place, and what it built:
 
@@ -1799,7 +1799,16 @@ Deviations:
   appears too. So on Windows a running `CptHost.exe` hides the strip only while its
   `sharing frame` has a size (`privacy::zoom_frame`, `win::sharing_detail`). With neither
   frame (a Zoom that renames them) it hides, to be safe. Every other name in
-  `sharingProcesses.win32` still hides while it runs, and the default list is unchanged.
+  `sharingProcesses.win32` still hides while it runs.
+- **W5-6, Teams joins the default list, told by its window too.** The Teams check: in a
+  meeting of the new Teams, `sharing-check.cmd` found no program that runs only while
+  sharing. The dumps found `ms-teams.exe`'s `ScreenBorderWindow` (the border around the
+  shared screen; topmost, click-through, the monitor's size), only while sharing; nothing
+  else changed. `ms-teams.exe` joins `sharingProcesses.win32` in `config.example.json`, and
+  `privacy::SHARING_WINDOWS` holds both programs' windows. Teams has no window that shows
+  only while *not* sharing, so it has no "unknown version" fallback: no border, no hide.
+  Every running listed name is asked now (`sharing_matches`), so a Zoom idling in a
+  meeting can't hide a Teams share.
 - **W5-4, the README isn't touched yet.** It doesn't cover Windows until W10; the
   test folder's README.txt has the sharing check.
 
@@ -1812,7 +1821,12 @@ First run, in Parallels (maintainer, 2026-11-05; Windows 11 VM, one display at s
   process; *Hide everything* first). While Chrome shared, Windows reported QUNS_BUSY for
   12 s with no window covering the monitor, and the detector rightly left the strip up.
 - `sharing-check.cmd` inside a Zoom meeting: "No program ran only while sharing."
-- Full screen and Teams not tried yet.
+- After the Zoom fix (W5-5): joining a meeting left the sheep up; sharing the whole screen
+  hid them; stopping brought them back. Sharing one window left them up, and they weren't
+  in the share (Zoom captures only that window).
+- A full-screen video hid the sheep (check 5, one display).
+- Teams sharing didn't hide the sheep (before W5-6); `sharing-check.cmd` in a Teams
+  meeting: "No program ran only while sharing"; the dumps found its border window (W5-6).
 
 By hand on the PC (about 20 minutes; `run-test.cmd`, the demo is enough unless noted):
 
@@ -1824,10 +1838,9 @@ By hand on the PC (about 20 minutes; `run-test.cmd`, the demo is enough unless n
    sharing); hiding the strip` and the phone never sees the sheep. Stop sharing, still in
    the meeting: `sharing has stopped …`, and the strip is back 2 s later. Also share one
    window instead of the screen, and record what happens.
-3. The Teams check: `sharing-check.cmd`, sharing the whole screen in the new Teams when it
-   asks. Send its output. If a program runs only while Teams shares, it joins the `win32`
-   default list; if not, the README says to use *Hide everything* before sharing in Teams.
-   (Zoom through the same script is a useful control: it should print `CptHost.exe`.)
+3. Teams (W5-6): joining a meeting leaves the sheep up; sharing the whole screen hides them
+   (`privacy: ms-teams.exe shows its sharing border`); stopping brings them back 2 s later.
+   Sharing one window: record what happens.
 4. Meet in a browser: the tray's *Hide everything (for screen sharing)* before sharing;
    the phone sees no sheep.
 5. A video full screen (F11 in a browser, or the player's full-screen button) on monitor 2:
