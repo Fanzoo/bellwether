@@ -81,7 +81,8 @@
               "zoom.us Screen Share"
             ],
             "win32": [
-              "CptHost.exe"
+              "CptHost.exe",
+              "ms-teams.exe"
             ],
             "linux": []
           },
@@ -722,7 +723,8 @@
               "zoom.us Screen Share"
             ],
             "win32": [
-              "CptHost.exe"
+              "CptHost.exe",
+              "ms-teams.exe"
             ],
             "linux": []
           },
@@ -828,7 +830,8 @@
               "zoom.us Screen Share"
             ],
             "win32": [
-              "CptHost.exe"
+              "CptHost.exe",
+              "ms-teams.exe"
             ],
             "linux": []
           },

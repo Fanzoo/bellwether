@@ -1019,16 +1019,17 @@ fn privacy_loop(app: tauri::AppHandle, brain: Arc<Brain>, sharing_names: Vec<Str
         }
         if !sharing_names.is_empty() && now.duration_since(last_poll) >= privacy::SHARING_POLL {
             last_poll = now;
-            let found = privacy::sharing_match(&processes.read(now), &sharing_names);
-            // Windows: Zoom's CptHost.exe runs for the whole meeting; its window says whether
-            // it shares (W5).
+            // Windows: Zoom and Teams run for the whole meeting; their windows say whether
+            // they share (W5), so every running name is asked, not only the first.
             #[cfg(windows)]
-            let found = found.and_then(|n| win::sharing_detail(&n));
+            let found = privacy::sharing_matches(&processes.read(now), &sharing_names).into_iter().find_map(|n| win::sharing_detail(&n));
+            #[cfg(not(windows))]
+            let found = privacy::sharing_match(&processes.read(now), &sharing_names);
             if found != sharing {
                 match &found {
                     Some(name) if cfg!(windows) => log(&format!("privacy: {name}; hiding the strip")),
                     Some(name) => log(&format!("privacy: {name} is running (screen sharing); hiding the strip")),
-                    None if cfg!(windows) => log("privacy: sharing has stopped (the program has gone, or Zoom's sharing frame); the strip shows again in 2 s"),
+                    None if cfg!(windows) => log("privacy: sharing has stopped (the program has gone, or its sharing border); the strip shows again in 2 s"),
                     None => log("privacy: the sharing process has gone; the strip shows again in 2 s"),
                 }
                 sharing = found;
