@@ -33,6 +33,8 @@ pub enum Status {
     NotFound,
     /// Not inside an app bundle, or not macOS 13+.
     Unavailable,
+    /// Windows: the Run value starts another copy's exe (the install moved; WD6).
+    Elsewhere,
 }
 
 impl Status {
@@ -43,6 +45,7 @@ impl Status {
             Status::RequiresApproval => "requiresApproval",
             Status::NotFound => "notFound",
             Status::Unavailable => "unavailable",
+            Status::Elsewhere => "elsewhere",
         }
     }
 }
@@ -132,7 +135,14 @@ pub fn agent_token_check(home: &std::path::Path) -> Result<(), String> {
     })
 }
 
-/// `preflight` with this process's session, bundle and environment.
+/// `preflight` with this process's session, bundle and environment. Windows: the Run
+/// values' own checks (winstart.rs).
+#[cfg(windows)]
+pub fn preflight_here(services: &[Service], registering: bool) -> Result<(), String> {
+    crate::winstart::preflight_here(services, registering)
+}
+
+#[cfg(not(windows))]
 pub fn preflight_here(services: &[Service], registering: bool) -> Result<(), String> {
     let overrides = bundle_agent_overrides();
     let home = agent_home(&overrides);
@@ -206,19 +216,23 @@ mod mac {
 #[cfg(target_os = "macos")]
 pub use mac::{open_settings, register, status, unregister};
 
-#[cfg(not(target_os = "macos"))]
+// Windows: the Run values (winstart.rs, WD6).
+#[cfg(windows)]
+pub use crate::winstart::{open_settings, register, status, unregister};
+
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn status(_s: Service) -> Status {
     Status::Unavailable
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn register(_s: Service) -> Result<Status, String> {
-    Err("start at login is macOS-only for now".into())
+    Err("start at login is for macOS and Windows".into())
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn unregister(_s: Service) -> Result<Status, String> {
-    Err("start at login is macOS-only for now".into())
+    Err("start at login is for macOS and Windows".into())
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn open_settings() {}
 
 /// What to do about `requiresApproval`: the item is registered, but macOS won't start it
@@ -235,8 +249,11 @@ pub fn install_exit(ended: &[Status]) -> i32 {
     }
 }
 
-/// What to tell the user about a status, in one line.
+/// What to tell the user about a status, in one line (Windows: in its own words).
 pub fn advice(s: Service, st: Status) -> String {
+    if cfg!(windows) {
+        return crate::winstart::advice(s, st);
+    }
     match st {
         Status::Enabled => format!("{}: enabled", s.name()),
         Status::NotRegistered => format!("{}: off (`bellwether autostart install --write` turns it on)", s.name()),
@@ -245,6 +262,7 @@ pub fn advice(s: Service, st: Status) -> String {
         // for a plist missing from the bundle (measured on macOS 26.6).
         Status::NotFound => format!("{}: off; macOS has never had it registered (`bellwether autostart install --write`). If it still says notFound after that, the bundle lacks the item: rebuild with `node scripts/build-app.mjs`", s.name()),
         Status::Unavailable => format!("{}: unavailable here (needs Bellwether.app on macOS 13 or newer)", s.name()),
+        Status::Elsewhere => format!("{}: registered for another copy of the app", s.name()),
     }
 }
 

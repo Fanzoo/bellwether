@@ -10,6 +10,8 @@
 use bellwether_shell_lib::dispatch::{mode_of, Mode};
 
 fn main() {
+    // The Windows test folder's build, run without cli.cmd (W6).
+    bellwether_shell_lib::winstart::adopt_test_folder();
     let args: Vec<String> = std::env::args().collect();
     match mode_of(&args) {
         Mode::Serve => std::process::exit(bellwether_shell_lib::cli::refused_without_home("serve").unwrap_or_else(|| bellwether_brain::cli::run("serve", &args[2..]))),

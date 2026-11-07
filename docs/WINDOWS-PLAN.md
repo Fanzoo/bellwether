@@ -8,8 +8,9 @@ Status: proposal, with the maintainer's decisions of 2026-10-20 applied (see "De
 (maintainer, 2026-10-20)" under Open questions). W1 is built and has had a first run on
 the maintainer's PC; W2's first part is built; W3 is built, its click and hover
 checks passed on the PC, the rest of its by-hand list open; W4 is built and its PC
-re-run was stable, a few checks open; W5 is built and awaits its PC checks (their status
-sections); nothing else is built yet. Items marked
+re-run was stable, a few checks open; W5 is built, Zoom and a full-screen video checked,
+the rest left to daily use; W6 is built and awaits its PC checks (their status sections);
+nothing else is built yet. Items marked
 **ASSUMPTION** are technical guesses that a milestone proves. Bracketed numbers such as
 [4] point to the Sources list at the end. Crate versions were read from `Cargo.lock` and
 crates.io on 2026-10-19 [21]. The Tauri, tao and wry behaviour quoted here was read from
@@ -1883,6 +1884,89 @@ Builds:
 
 **By hand (about 15 minutes):** the items above.
 
+#### W6 status (developer, 2026-11-06): built; the cargo suite green on the Mac, the Windows build checked with cargo-xwin; CI and the PC checks open
+
+What W6 found already in place (from W2): the brain's `SO_EXCLUSIVEADDRUSE` bind, the
+parent-pid wait (`OpenProcess(SYNCHRONIZE)`), the tokened `/control` `stop` and
+`stop_child`'s stop-then-`TerminateProcess`, and the single-instance plugin, whose lock is
+per port. What it built (`winstart.rs`, pure parts tested on the Mac):
+
+- **The Run values** behind `login_items`' API (`status`, `register`, `unregister`,
+  `open_settings`), so `autostart`, doctor and the tray use them unchanged. A value is
+  `NotRegistered` (absent), `Elsewhere` (new: it starts another copy's exe; `install
+  --write` points it here), `RequiresApproval` (turned off in Task Manager, `03`; WD6's
+  analogue, in Windows' words) or `Enabled` (`02`, no entry, or an unknown byte, never
+  taken as off). Unregistering removes the value only; `StartupApproved` is left alone.
+- **What counts as an install:** `<dir>\Bellwether.exe` with `<dir>\bin\bellwether.exe`
+  (the test folder now, the installer's folder from W8); either exe finds it. A development
+  build in `target-dev\` has no `bin\` and says so (`NOT_AN_INSTALL`).
+- **`autostart` on Windows:** status, install, uninstall (previews name the value and its
+  command), settings (`ms-settings:startupapps`). The checks before writing: an install;
+  a BELLWETHER_HOME other than the home the login processes will use is refused (they get
+  no environment, F10); the brain needs a usable token there (deviation 60).
+  `uninstall --write` stops what removing a value doesn't: the strip (asked to quit) and
+  this install's brain (the tokened stop), never another install's or one run from `bin\`.
+- **The brain's life** (`brain.rs`): with this install's brain value on, the strip never
+  starts a child brain. After 10 s with no answer (at login the two start together) it
+  starts a detached one (`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`, no parent pid),
+  at most every 15 s, and logs why. With the value off, the child brain as before.
+- **The version check** (Windows' own, after the token is known): a brain of another
+  version that runs an exe in this install's folder gets the tokened stop (5 s), then a
+  detached brain when it starts at login, else the strip's child; the log gives the
+  versions, pids and the time. Any other brain is left alone, with a warning. Doctor's
+  wrong-version line says which it is.
+- **`shell start|stop|restart`:** the strip is found by the plugin's hidden window
+  (`<lock id>-sic`/`-siw`; the release and dev identifiers, per port) and asked to quit
+  with the same `WM_COPYDATA` a second launch sends, carrying `--quit`; the strip quits
+  as from the tray (stopping a child brain). `start` runs `Bellwether.exe` detached and
+  waits for the window. `sys::alive` asks the process on Windows.
+- **Doctor:** identity names the install (and the test build's own value names); `login:
+  brain` and `login: app` lines; with the brain value on and no brain, what starts it.
+
+Deviations:
+
+- **W6-1, the test folder starts at login under its own names.** WD12 kept the test build
+  from start at login; W6's checks need it, and the maintainer wants the test folder for
+  daily use until the installer. It writes `Bellwether (test)` and `Bellwether Brain
+  (test)`, never the installed app's names, so the two never meet. Its exes find the
+  folder's home, config and agent directory themselves when BELLWETHER_HOME is unset
+  (`adopt_test_folder`, test builds only, from `run-test.cmd` beside them), as a Run value
+  has no environment. The live port stays refused.
+- **W6-2, Task Manager shows both values as "Bellwether".** Its Startup list names an
+  entry by the exe's description, not the value name, and both values run
+  `Bellwether.exe`. The *Command line* column (right-click the header) tells them apart:
+  the brain's ends in `serve`. Done-when 2 reads "the entry whose command ends in serve".
+- **W6-3, the old brain is found by folder.** WD6 says the brain must run "this install's
+  exe". An update replaces the exe in place, and an old exe renamed beside the new one keeps
+  its folder, so the check is the exe's folder; `bin\bellwether.exe serve` (run by hand)
+  is in `bin\` and left alone.
+- **W6-4, a Windows install needs no BELLWETHER_HOME** (M11-a's refusal): it counts as
+  Bellwether.app does. The test build never does: outside its folder it is refused, so it
+  can't reach `%APPDATA%\Bellwether`.
+
+By hand on the PC (about 15 minutes, the new test folder; first `.\cli token init`):
+
+1. `.\cli autostart install` (a preview naming both values), then `--write`; `.\cli
+   autostart status`: both enabled. Sign out and in: the sheep come back without a `.cmd`,
+   and `.\cli status` answers (port 47491). `home\shell.log` says which brain it found.
+2. Task Manager > Startup apps: turn off the entry whose command ends in `serve` (W6-2).
+   `.\cli autostart status` and `.\cli doctor` say it's turned off and how to turn it on;
+   `.\cli autostart settings` opens the page. Turn it back on.
+3. With the strip running, end the brain in Task Manager (Details: the `Bellwether.exe`
+   whose command line ends in `serve`): within 15 s `.\cli status` answers again, and
+   shell.log says `no brain has answered … so the strip started one`.
+4. Start `Bellwether.exe` again (double-click): no second strip, and shell.log says
+   `another bellwether shell tried to start`.
+5. `.\cli shell stop`, `shell start`, `shell restart`: each says what it did, and the brain
+   keeps running through all three.
+6. `reg export HKCU\Software\Microsoft\Windows\CurrentVersion\Run before.reg`,
+   `.\cli autostart uninstall --write`, export `after.reg`, `fc before.reg after.reg`:
+   only the two `(test)` values differ, and the strip and the brain have stopped.
+
+Moved to W8: done-when 5 (a brain of another version replaced on app start). Every test
+folder so far reports version 1.2.0, so there is no older brain to replace; W8's update
+from N to N+1 is that check, with the version swap's log lines.
+
 ### W7. The setup window and the tray on Windows
 
 Builds:
@@ -2261,7 +2345,9 @@ the plan said, what is true, and what was done.
   `alive` and `terminate`, exactly the libc calls on Unix. On Windows they are stand-ins
   until the milestone that needs them (uid 0 until W3's SID check; no parent pid and no
   liveness until W2; no stop until W6's tokened stop), so `shell stop` and `autostart
-  uninstall` can't stop a strip on Windows yet. Neither is usable there before W6.
+  uninstall` can't stop a strip on Windows yet. Neither is usable there before W6. (W6:
+  both work, through the strip's single-instance window and the tokened stop; `alive`
+  asks the process.)
 - **W1-9, compiling here.** The plan says the Mac has the Windows target installed. It
   does, but `cargo check --target x86_64-pc-windows-msvc` of the whole workspace stops at
   `ring`'s C build (no Windows headers; CI's existing cross-check covers only core and

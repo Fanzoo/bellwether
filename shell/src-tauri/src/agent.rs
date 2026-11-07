@@ -325,6 +325,7 @@ pub fn reconcile(c: &mut Check, health: &mut dyn FnMut() -> Option<Value>, ours:
 
 /// Doctor's word on a brain of another version than the app's: the brain line becomes a
 /// WARN, and this is appended to it.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn doctor_suffix(theirs: &str, ours: &str, pid: i64, label: Option<&str>, owner: &Owner) -> String {
     match (owner, label) {
         (Owner::Ours | Owner::Presumed, Some(l)) => format!(

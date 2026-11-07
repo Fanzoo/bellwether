@@ -39,6 +39,7 @@ mod watchdog;
 mod win;
 #[cfg(windows)]
 mod winlocate;
+pub mod winstart;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -716,6 +717,13 @@ pub fn run() {
     // parsed by the webview's own XML parser), so it is refused while a strip runs.
     if flags.locate.is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(move |app, argv, _cwd| {
+            // Windows: `bellwether shell stop` and `autostart uninstall --write` ask through
+            // the plugin's window (winstart.rs); quit as from the tray.
+            if argv.iter().any(|a| a == winstart::QUIT_ARG) {
+                log("asked to quit by the command line (`bellwether shell stop|restart` or `autostart uninstall`); quitting");
+                app.exit(0);
+                return;
+            }
             // `open -b <id> --args --onboarding` while the app runs: the window, here.
             if argv.iter().any(|a| a == "--onboarding") && !checks_only {
                 log("another launch asked for the setup window");
