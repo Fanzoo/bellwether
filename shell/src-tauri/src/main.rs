@@ -4,6 +4,8 @@
 use bellwether_shell_lib::dispatch::{mode_of, Mode};
 
 fn main() {
+    // The Windows test folder's build, started at login with no environment (W6).
+    bellwether_shell_lib::winstart::adopt_test_folder();
     let args: Vec<String> = std::env::args().collect();
     match mode_of(&args) {
         // The brain never touches Tauri: nothing of the app is initialised.

@@ -28,17 +28,17 @@ pub fn dir() -> PathBuf {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_dir() -> PathBuf {
+pub fn platform_dir() -> PathBuf {
     user_home().join("Library").join("Application Support").join("Bellwether")
 }
 
 #[cfg(windows)]
-fn platform_dir() -> PathBuf {
+pub fn platform_dir() -> PathBuf {
     std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(user_home).join("Bellwether")
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
-fn platform_dir() -> PathBuf {
+pub fn platform_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| user_home().join(".config")).join("bellwether")
 }
 

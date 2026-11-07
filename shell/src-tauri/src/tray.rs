@@ -66,7 +66,9 @@ pub fn notices(legacy: &[bellwether_brain::legacy::Agent], waiting: &[crate::log
         });
     }
     for s in waiting {
-        out.push(Notice { text: format!("Approve the {} in Login Items…", s.name()), opens_login_items: true });
+        // Windows: the Run value turned off in Task Manager (WD6); the item opens Settings > Apps > Startup.
+        let text = if cfg!(windows) { format!("Turn the {} on in Startup apps…", s.name()) } else { format!("Approve the {} in Login Items…", s.name()) };
+        out.push(Notice { text, opens_login_items: true });
     }
     out
 }
