@@ -74,7 +74,10 @@ pub fn run(args: &[String]) -> i32 {
 /// on stderr and gives the exit code (3). `run` asks it first, and main.rs asks it before
 /// `serve`, which starts the brain without going through `run`.
 pub fn refused_without_home(command: &str) -> Option<i32> {
-    let message = home_refusal(command, crate::identity::in_app_bundle(), std::env::var_os("BELLWETHER_HOME")).or_else(|| {
+    // A Windows install counts as Bellwether.app does (its files are %APPDATA%\Bellwether's),
+    // but never the test build: outside its folder it has no home of its own.
+    let installed_app = crate::identity::in_app_bundle() || (cfg!(windows) && !crate::winstart::test_build() && crate::winstart::install_exe().is_some());
+    let message = home_refusal(command, installed_app, std::env::var_os("BELLWETHER_HOME")).or_else(|| {
         // The Windows test folder's build only (WD12 5).
         if !cfg!(feature = "test-build") {
             return None;
@@ -91,8 +94,9 @@ pub fn refused_without_home(command: &str) -> Option<i32> {
 /// The Windows test folder's build (`--features test-build`; Windows plan WD12 5, W2) runs
 /// on the maintainer's own PC beside his real Claude Code. So it never edits a settings
 /// file it wasn't given: `hooks install|uninstall`, `token rotate` and `migrate` need
-/// `--settings <file>` (a scratch copy). It never starts at login (`autostart install|
-/// uninstall`, W6). And it never uses the live port 47417, from `--port` or the config.
+/// `--settings <file>` (a scratch copy). Its start at login (W6) writes Run values of its
+/// own (`Bellwether (test)`, winstart.rs), never the installed app's. And it never uses the
+/// live port 47417, from `--port` or the config.
 /// `config_port`: the port the config gives (None: it can't be read; the command says why).
 pub fn test_build_refusal(command: &str, tail: &[String], config_port: Option<u16>) -> Option<String> {
     let sub = tail.first().map(String::as_str);
@@ -103,9 +107,6 @@ pub fn test_build_refusal(command: &str, tail: &[String], config_port: Option<u1
             "this test build never edits your own Claude Code settings: give `{command}{}` a scratch copy with --settings <file> (for example: copy %USERPROFILE%\\.claude\\settings.json scratch-settings.json)",
             sub.map(|s| format!(" {s}")).unwrap_or_default()
         ));
-    }
-    if command == "autostart" && matches!(sub, Some("install" | "uninstall")) {
-        return Some("this test build never starts at login: `autostart` is for the installed app (W6)".into());
     }
     if matches!(command, "help" | "--help" | "-h" | "version" | "--version") {
         return None;
@@ -241,8 +242,8 @@ fn autostart(args: &[String]) -> CliResult {
     // Outside Bellwether.app there are no login items to change: say so before any
     // preview, rather than preview something that can't happen (a development binary
     // never reaches SMAppService, so nothing is registered and nothing is written).
-    if !crate::identity::in_app_bundle() && (sub == "install" || sub == "uninstall") {
-        return Err((NOT_THE_APP.to_string(), exit::NOT_RUNNING));
+    if !installed() && (sub == "install" || sub == "uninstall") {
+        return Err(((if cfg!(windows) { crate::winstart::NOT_AN_INSTALL } else { NOT_THE_APP }).to_string(), exit::NOT_RUNNING));
     }
     // From a terminal that predates the user's last login, SMAppService answers notFound
     // for everything and registrations can't be trusted (M1 finding F9).
@@ -260,7 +261,7 @@ fn autostart(args: &[String]) -> CliResult {
                 return via_app("login-items-settings");
             }
             login_items::open_settings();
-            println!("opened System Settings > General > Login Items & Extensions (Login Items before macOS 15)");
+            println!("{}", if cfg!(windows) { "opened Settings > Apps > Startup" } else { "opened System Settings > General > Login Items & Extensions (Login Items before macOS 15)" });
             Ok(exit::OK)
         }
         "status" => {
@@ -280,6 +281,16 @@ fn autostart(args: &[String]) -> CliResult {
             let on = sub == "install";
             if !has(&set, "write") {
                 for s in &services {
+                    if cfg!(windows) {
+                        let exe = crate::winstart::install_exe().unwrap_or_default();
+                        let name = crate::winstart::value_name(*s, crate::winstart::test_build());
+                        if on {
+                            println!("would write the Run value \"{name}\" = {} (now {}); add --write to do it", crate::winstart::command(*s, &exe), login_items::status(*s).word());
+                        } else {
+                            println!("would remove the Run value \"{name}\" (now {}); add --write to do it", login_items::status(*s).word());
+                        }
+                        continue;
+                    }
                     println!("would {} the {} (now {}); add --write to do it", if on { "register" } else { "unregister" }, s.name(), login_items::status(*s).word());
                 }
                 return Ok(exit::OK);
@@ -323,12 +334,62 @@ fn autostart(args: &[String]) -> CliResult {
             // strip (never another copy, never the repository's bellwether-shell), and say
             // what is still running.
             if !on && !has(&set, "via-app") {
+                #[cfg(windows)]
+                stop_own_instances_win(services.contains(&Service::MainApp), services.contains(&Service::Brain));
+                #[cfg(not(windows))]
                 stop_own_instances(services.contains(&Service::MainApp));
             }
             Ok(code)
         }
         _ => Err(bad(format!("unknown autostart command {sub:?} (status, install, uninstall, settings)"))),
     }
+}
+
+/// Whether this is an installed Bellwether: Bellwether.app, or on Windows an install
+/// folder (`Bellwether.exe` with `bin\bellwether.exe`; the test folder until W8).
+pub fn installed() -> bool {
+    crate::identity::in_app_bundle() || (cfg!(windows) && crate::winstart::install_exe().is_some())
+}
+
+/// Windows, after `uninstall --write`: removing a Run value stops nothing, so the running
+/// strip is asked to quit (when the app's value went) and this install's brain is given
+/// the tokened stop (when the brain's went), as unregistering does on macOS. Never a brain
+/// of another install, or one started by hand from bin\.
+#[cfg(windows)]
+fn stop_own_instances_win(app_removed: bool, brain_removed: bool) {
+    let port = config_port().unwrap_or(bellwether_brain::DEFAULT_PORT);
+    if app_removed {
+        match crate::winstart::quit_strip(port) {
+            Some((pid, true)) => println!("stopped the running strip (pid {pid})"),
+            Some((pid, false)) => println!("the strip (pid {pid}) didn't quit within 5 s; quit it from its tray icon"),
+            None => {}
+        }
+    }
+    let bellwether_brain::doctor::Health::Bellwether(h) = bellwether_brain::doctor::probe_health(port, Duration::from_millis(1000)) else { return };
+    let pid = h["pid"].as_u64().unwrap_or(0) as u32;
+    let ours = crate::winstart::install_exe().zip(crate::winstart::process_path(pid)).is_some_and(|(ours, theirs)| crate::winstart::same_install(&theirs, &ours));
+    if !ours {
+        println!("still running: the brain on port {port} (pid {pid}); it isn't this install's, so it was left alone");
+    } else if !brain_removed {
+        println!("still running: the brain (pid {pid}); `autostart uninstall --write` without --brain-only removes both");
+    } else if crate::brain::send_stop(port, &cli_token().into_iter().collect::<Vec<_>>()).is_ok() && crate::winstart::wait_exit(pid, Duration::from_secs(5)) {
+        println!("stopped the brain (pid {pid})");
+    } else {
+        println!("the brain (pid {pid}) didn't stop; end it in Task Manager, or `bellwether doctor` says what runs");
+    }
+}
+
+/// The port in the config, as every command reads it (the home's config.json, or
+/// BELLWETHER_CONFIG's file; the test folder's is beside its exe).
+#[cfg(windows)]
+fn config_port() -> Result<u16, String> {
+    bellwether_core::config::load(&bellwether_brain::home::dir(), std::env::var("BELLWETHER_CONFIG").ok().as_deref()).map(|c| c.port()).map_err(|e| e.message)
+}
+
+/// The token as the CLI reads it: BELLWETHER_HOOK_TOKEN, else the home's hook-token.
+#[cfg(windows)]
+fn cli_token() -> Option<String> {
+    bellwether_core::token::read(&bellwether_brain::home::dir(), std::env::var("BELLWETHER_HOOK_TOKEN").ok()).ok().map(|(t, _)| t)
 }
 
 /// What `autostart install|uninstall` says outside Bellwether.app.
@@ -340,17 +401,18 @@ pub const NOT_THE_APP: &str = "not running from Bellwether.app: login items belo
 fn offer_settings() {
     use std::io::IsTerminal;
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let pane = if cfg!(windows) { "Settings > Apps > Startup" } else { "System Settings > General > Login Items & Extensions" };
     if !interactive {
-        println!("`bellwether autostart settings` opens System Settings > General > Login Items & Extensions");
+        println!("`bellwether autostart settings` opens {pane}");
         return;
     }
-    print!("Open System Settings > General > Login Items & Extensions now? [y/N] ");
+    print!("Open {pane} now? [y/N] ");
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let mut answer = String::new();
     let _ = std::io::stdin().read_line(&mut answer);
     if wants_settings(&answer) {
         login_items::open_settings();
-        println!("opened it: turn Bellwether on under \"Allow in the Background\", then run `bellwether autostart status`");
+        println!("{}", if cfg!(windows) { "opened it: turn Bellwether on there, then run `bellwether autostart status`" } else { "opened it: turn Bellwether on under \"Allow in the Background\", then run `bellwether autostart status`" });
     } else {
         println!("left closed; `bellwether autostart settings` opens it later");
     }
@@ -378,6 +440,7 @@ fn own_strips() -> Vec<i32> {
 
 /// SIGTERM to these pids (this bundle's strips), then up to 5 s for each to go. The
 /// strip quits as from the menu: it stops a brain it started. Returns (pid, stopped).
+#[cfg_attr(windows, allow(dead_code))]
 fn stop_strips(strips: &[i32]) -> Vec<(i32, bool)> {
     for pid in strips {
         crate::sys::terminate(*pid);
@@ -392,6 +455,7 @@ fn stop_strips(strips: &[i32]) -> Vec<(i32, bool)> {
 /// After `uninstall --write`: SIGTERM to this bundle's running strip (when the app item
 /// was removed), then report anything of this bundle still running. Only processes whose
 /// executable is this exact bundle's, never this process or the ones that started it.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn stop_own_instances(app_removed: bool) {
     if app_removed {
         for (pid, stopped) in stop_strips(&own_strips()) {
@@ -408,6 +472,7 @@ pub(crate) fn stop_own_instances(app_removed: bool) {
 /// What is still running of this bundle after its login items went (`autostart uninstall`,
 /// `migrate --undo`), 300 ms on: a strip only when the app item stayed, and any other
 /// process but `--action` runs. Never this process or the ones that started it.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn stragglers(app_removed: bool) -> Vec<String> {
     let me = std::process::id() as i32;
     let parent = crate::sys::parent_pid();
@@ -482,6 +547,14 @@ fn shell(args: &[String]) -> CliResult {
 ///   menu, stopping a brain it started. A brain started by launchd keeps running.
 /// - restart: stop, then start.
 fn shell_control(sub: &str) -> CliResult {
+    #[cfg(windows)]
+    return shell_control_win(sub);
+    #[cfg(not(windows))]
+    shell_control_mac(sub)
+}
+
+#[cfg(not(windows))]
+fn shell_control_mac(sub: &str) -> CliResult {
     let Some(bundle) = crate::identity::bundle_path() else {
         return Err(("`bellwether shell start|stop|restart` controls Bellwether.app's strip, and this is a development binary outside the app. A development strip is started by hand: `cargo run --manifest-path shell/src-tauri/Cargo.toml` (docs/DEVELOPMENT.md)".into(), exit::NOT_RUNNING));
     };
@@ -499,8 +572,37 @@ fn shell_control(sub: &str) -> CliResult {
     Ok(exit::OK)
 }
 
+/// Windows (WD6): the install's strip on the configured port, found by its single-instance
+/// window. stop asks it to quit through that window (it quits as from the tray, stopping a
+/// brain it started); start runs `Bellwether.exe` detached unless one runs; restart, both.
+#[cfg(windows)]
+fn shell_control_win(sub: &str) -> CliResult {
+    if crate::winstart::install_exe().is_none() {
+        return Err(("`bellwether shell start|stop|restart` controls an installed Bellwether's strip, and this is a development build. A development strip is started by hand: `cargo run --manifest-path shell/src-tauri/Cargo.toml` (docs/DEVELOPMENT.md)".into(), exit::NOT_RUNNING));
+    }
+    let port = config_port().map_err(|e| (e, exit::BAD_CONFIG))?;
+    if sub != "start" {
+        match crate::winstart::quit_strip(port) {
+            Some((pid, true)) => println!("stopped the strip (pid {pid})"),
+            Some((pid, false)) => return Err((format!("the strip (pid {pid}) didn't quit within 5 s; quit it from its tray icon, or end it in Task Manager"), exit::UNEXPECTED)),
+            None if sub == "stop" => println!("the strip was not running"),
+            None => {}
+        }
+        if sub == "stop" {
+            return Ok(exit::OK);
+        }
+    }
+    match crate::winstart::start_strip(port) {
+        Ok((pid, false)) => println!("the strip is already running (pid {pid})"),
+        Ok((pid, true)) => println!("{} the strip (pid {pid}); it starts a brain of its own only if none answers", if sub == "restart" { "restarted" } else { "started" }),
+        Err(e) => return Err((e, exit::NOT_RUNNING)),
+    }
+    Ok(exit::OK)
+}
+
 /// SIGTERM to this bundle's running strips (`shell stop`, and `migrate --undo --write`): what
 /// was stopped, and whether any ran; Err when one didn't quit within 5 s.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn quit_strips() -> Result<(Vec<String>, bool), String> {
     let running = own_strips();
     quit_lines(&stop_strips(&running)).map(|said| (said, !running.is_empty()))
@@ -520,6 +622,7 @@ fn quit_lines(outcomes: &[(i32, bool)]) -> Result<Vec<String>, String> {
 
 /// Starts `bundle`'s strip through LaunchServices unless one runs already (`shell start` and
 /// `restart`, and the end of `migrate --to-app --write`): what happened.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn start_strip(bundle: &Path, restart: bool) -> Result<String, (String, i32)> {
     if !restart {
         if let Some(pid) = own_strips().first() {
@@ -646,7 +749,10 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
             let (status, detail) = signature(&bundle, session);
             add(&mut checks, status, "signature", detail);
         }
-        None if cfg!(windows) => add(&mut checks, "INFO", "identity", format!("a development or test build ({}), not an installed Bellwether: nothing starts at login", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())),
+        None if cfg!(windows) => match crate::winstart::install_exe() {
+            Some(exe) => add(&mut checks, "INFO", "identity", format!("Bellwether {} from {}{}", bellwether_brain::VERSION, exe.parent().unwrap_or(&exe).display(), if crate::winstart::test_build() { " (the test folder's build: its Run values are its own, \"Bellwether (test)\")" } else { "" })),
+            None => add(&mut checks, "INFO", "identity", format!("a development build ({}), not an installed Bellwether: nothing starts at login", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())),
+        },
         None => add(&mut checks, "INFO", "identity", format!("a development binary ({}), not Bellwether.app: no login items, and macOS permissions belong to this exact file", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())),
     }
     add(&mut checks, "INFO", "app data", home.display().to_string());
@@ -679,6 +785,14 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
         }
     }
 
+    // Windows: the two Run values (WD6), and "turned off in Task Manager".
+    if cfg!(windows) && installed() {
+        for s in [Service::Brain, Service::MainApp] {
+            let (status, detail) = login_verdict(s, login_items::status(s), session, None);
+            add(&mut checks, status, if s == Service::Brain { "login: brain" } else { "login: app" }, detail);
+        }
+    }
+
     // Accessibility: the strip's, which is what puts sheep on the Dock. Never this process's:
     // macOS answers AXIsProcessTrusted for the app responsible for the caller, and a CLI run
     // from a terminal is the terminal's (deviation 135). The strip logs its own answer at
@@ -694,13 +808,25 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
         let theirs = h["version"].as_str().unwrap_or("?").to_string();
         if theirs != bellwether_brain::VERSION {
             let pid = h["pid"].as_i64().unwrap_or(0);
+            #[cfg(windows)]
+            {
+                let suffix = windows_version_suffix(&theirs, pid);
+                if let Some(c) = checks.iter_mut().find(|c| c.name == "brain" && c.status == "PASS") {
+                    c.status = "WARN";
+                    c.detail.push_str(&suffix);
+                }
+            }
+            #[cfg(not(windows))]
             let check = crate::agent::Check::here();
-            let label = check.host.label();
-            let owner = crate::agent::owner(&check, label.as_deref(), pid);
-            let suffix = crate::agent::doctor_suffix(&theirs, bellwether_brain::VERSION, pid, label.as_deref(), &owner);
-            if let Some(c) = checks.iter_mut().find(|c| c.name == "brain" && c.status == "PASS") {
-                c.status = "WARN";
-                c.detail.push_str(&suffix);
+            #[cfg(not(windows))]
+            {
+                let label = check.host.label();
+                let owner = crate::agent::owner(&check, label.as_deref(), pid);
+                let suffix = crate::agent::doctor_suffix(&theirs, bellwether_brain::VERSION, pid, label.as_deref(), &owner);
+                if let Some(c) = checks.iter_mut().find(|c| c.name == "brain" && c.status == "PASS") {
+                    c.status = "WARN";
+                    c.detail.push_str(&suffix);
+                }
             }
         }
     }
@@ -710,16 +836,38 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
     let agent_on = checks.iter().any(|c| c.name == "login: brain" && c.status == "PASS");
     let brain_down = checks.iter().any(|c| c.name == "brain" && c.status == "FAIL");
     if agent_on && brain_down {
-        let (status, detail) = agent_down_hint(agent_port(), checked_port);
+        let (status, detail) = if cfg!(windows) { ("WARN", WINDOWS_BRAIN_DOWN.to_string()) } else { agent_down_hint(agent_port(), checked_port) };
         add(&mut checks, status, "login: brain", detail);
     }
     let mut report = doctor::finish(&input, checks);
-    if !crate::identity::in_app_bundle() {
-        for c in &mut report.checks {
+    for c in &mut report.checks {
+        if !installed() {
             c.detail = dev_binary_wording(&c.detail);
+        } else if cfg!(windows) {
+            c.detail = windows_wording(&c.detail);
         }
     }
     report
+}
+
+/// Doctor, Windows: the brain's Run value is on but no brain answers.
+pub const WINDOWS_BRAIN_DOWN: &str = "the brain starts at login but none answers now: a running strip starts one within 10 s of finding none (`bellwether shell start` starts the strip), or `bellwether serve` runs one now. Its log (logs\\brain.log in the app data folder) says why the last one stopped";
+
+/// The shared lines' launchd wording, in Windows' terms (an installed Bellwether).
+fn windows_wording(detail: &str) -> String {
+    detail.replace(". With start at login on, launchd starts it: `bellwether autostart status`", ". With start at login on, Windows starts it at login and a running strip starts it again within 10 s: `bellwether autostart status`")
+}
+
+/// Doctor, Windows: a brain of another version than this install's, and whose it is.
+#[cfg(windows)]
+fn windows_version_suffix(theirs: &str, pid: i64) -> String {
+    let ours = bellwether_brain::VERSION;
+    let exe = crate::winstart::process_path(pid as u32);
+    match (crate::winstart::install_exe(), exe) {
+        (Some(mine), Some(theirs_exe)) if crate::winstart::same_install(&theirs_exe, &mine) => format!("; this install is {ours}, and this brain is this install's, still running {theirs}: `bellwether shell restart` (the strip replaces it when it starts)"),
+        (_, Some(theirs_exe)) => format!("; this install is {ours}, and this brain runs {}, not this install, so Bellwether leaves it alone. End it (pid {pid}) in Task Manager, then `bellwether shell restart`", theirs_exe.display()),
+        (_, None) => format!("; this install is {ours}, and what pid {pid} runs can't be read, so Bellwether leaves it alone"),
+    }
 }
 
 /// A development binary has no login items (it refuses `autostart install`), so where
@@ -802,7 +950,7 @@ pub fn login_verdict(s: Service, st: Status, session: crate::identity::Session, 
     let status = match st {
         Status::Enabled => "PASS",
         Status::NotRegistered | Status::NotFound => "INFO",
-        Status::RequiresApproval | Status::Unavailable => "WARN",
+        Status::RequiresApproval | Status::Unavailable | Status::Elsewhere => "WARN",
     };
     (status, login_items::advice(s, st))
 }
@@ -858,7 +1006,7 @@ mod tests {
     /// The Windows test folder's build (W2): never a real settings file, never at login,
     /// never the live port. The rule is pure; the build calls it before every command.
     #[test]
-    fn the_test_build_refuses_real_settings_login_items_and_the_live_port() {
+    fn the_test_build_refuses_real_settings_and_the_live_port() {
         let t = |args: &[&str]| args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let r = |command: &str, args: &[&str], config: Option<u16>| test_build_refusal(command, &t(args), config);
         for (command, args) in [("hooks", &["install", "--write"][..]), ("hooks", &["uninstall"][..]), ("token", &["rotate", "--write"][..]), ("migrate", &["--write"][..])] {
@@ -872,7 +1020,9 @@ mod tests {
             assert_eq!(r(command, &with, Some(47491)), None);
         }
         assert_eq!(r("hooks", &["print", "--out", "hooks.json"], Some(47491)), None, "print writes no settings file");
-        assert!(r("autostart", &["install", "--write"], Some(47491)).unwrap().contains("never starts at login"));
+        // W6: the test folder starts at login, under Run values of its own (winstart.rs).
+        assert_eq!(r("autostart", &["install", "--write"], Some(47491)), None);
+        assert_eq!(r("autostart", &["uninstall", "--write"], Some(47491)), None);
         assert_eq!(r("autostart", &["status"], Some(47491)), None);
         // The live port, from the config or --port, in either spelling; another --port wins.
         assert!(r("status", &[], Some(47417)).unwrap().contains("never uses port 47417"));

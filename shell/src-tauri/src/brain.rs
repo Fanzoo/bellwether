@@ -267,7 +267,9 @@ pub fn run(brain: Arc<Brain>, mut cfg: BrainConfig) {
         .http_status_as_error(false)
         .build()
         .new_agent();
-    if cfg.check_version {
+    // macOS's version check restarts the login agent through launchd; Windows has its own
+    // (below), once there is a token for the stop.
+    if cfg.check_version && !cfg!(windows) {
         let check = cfg.agent_check.take().unwrap_or_else(crate::agent::Check::here);
         check_version(&agent, cfg.port, check, cfg.notify.as_deref());
     }
@@ -275,14 +277,23 @@ pub fn run(brain: Arc<Brain>, mut cfg: BrainConfig) {
         Some(t) => t,
         None => wait_for_token(),
     };
+    #[cfg(windows)]
+    if cfg.spawn && crate::winstart::install_exe().is_some() {
+        windows_version_check(&agent, &cfg, &token);
+    }
     let mut rev: i64 = -1;
     let mut spawned_once = false;
     let mut failures = 0u32;
+    // Windows, with the brain starting at login (WD6): since when no brain has answered,
+    // and when the strip last started a detached one.
+    let mut down_since: Option<Instant> = None;
+    let mut last_detached: Option<Instant> = None;
     loop {
         let url = format!("{base}/state?after={rev}&wait=25000");
         match agent.get(&url).header("X-Bellwether-Token", &token).call() {
             Ok(mut resp) if resp.status() == 200 => {
                 failures = 0;
+                down_since = None;
                 match resp.body_mut().read_json::<Value>() {
                     Ok(snap) => {
                         let new_rev = snap.get("rev").and_then(Value::as_i64).unwrap_or(rev);
@@ -316,11 +327,20 @@ pub fn run(brain: Arc<Brain>, mut cfg: BrainConfig) {
                 failures += 1;
                 if failures == 1 {
                     log(&format!("brain not answering on {base} ({e})"));
+                    down_since = Some(Instant::now());
                 }
                 let swapping = cfg.spawn && bellwether_brain::toapp::swapping(&cfg.home);
                 if swapping {
                     if failures == 1 {
                         log("a migration is moving the brain to the app's login agent; not starting one here");
+                    }
+                } else if cfg.spawn && brain_at_login() {
+                    // The login brain isn't the strip's child: a detached one replaces it after
+                    // 10 s without an answer (at login the two start together), at most every 15 s.
+                    let down = down_since.map_or(Duration::ZERO, |t| t.elapsed());
+                    if down >= LOGIN_GRACE && last_detached.is_none_or(|t| t.elapsed() >= Duration::from_secs(15)) && !healthy(&agent, &base) {
+                        last_detached = Some(Instant::now());
+                        spawn_detached(&cfg, &token, &format!("no brain has answered on port {} for {} s, and the brain starts at login", cfg.port, down.as_secs()));
                     }
                 } else if cfg.spawn && !spawned_once && !healthy(&agent, &base) {
                     spawned_once = true;
@@ -377,10 +397,87 @@ fn check_version(agent: &ureq::Agent, port: u16, mut check: crate::agent::Check,
     }
 }
 
+/// How long a login brain may stay silent before the strip starts one (WD6).
+const LOGIN_GRACE: Duration = Duration::from_secs(10);
+
+/// Whether the brain starts at login, so it isn't the strip's to start as a child: Windows,
+/// with this install's `Bellwether Brain` Run value on (WD6). On macOS launchd keeps the
+/// login agent alive itself.
+fn brain_at_login() -> bool {
+    #[cfg(windows)]
+    return crate::winstart::brain_at_login();
+    #[cfg(not(windows))]
+    false
+}
+
+/// Windows (WD6): a brain the strip starts in place of the login brain. Detached, with no
+/// BELLWETHER_PARENT_PID, so it outlives the strip as the login brain would.
+#[cfg(windows)]
+fn spawn_detached(cfg: &BrainConfig, token: &str, why: &str) {
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => return log(&format!("error: could not find this executable to start the brain ({e})")),
+    };
+    let mut cmd = brain_command(&exe, cfg, token);
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, crate::winstart::DETACHED);
+    match cmd.spawn() {
+        Ok(child) => log(&format!("{why}, so the strip started one: {} serve --port {} (pid {}), detached: it keeps running when the strip quits", exe.display(), cfg.port, child.id())),
+        Err(e) => log(&format!("error: {why}, but the brain couldn't be started with {} serve ({e})", exe.display())),
+    }
+}
+
+#[cfg(not(windows))]
+fn spawn_detached(_cfg: &BrainConfig, _token: &str, _why: &str) {}
+
+/// Windows, at start (WD6, D5's version check): a brain of another version that runs this
+/// install's exe (an update replaced it in place) gets the tokened stop, and a new one is
+/// started: detached when the brain starts at login, else the strip's own child, as when
+/// none answers. Any other brain is left alone, with a line in the log.
+#[cfg(windows)]
+fn windows_version_check(agent: &ureq::Agent, cfg: &BrainConfig, token: &str) {
+    let (port, ours) = (cfg.port, bellwether_brain::VERSION);
+    let base = format!("http://127.0.0.1:{port}");
+    let Some(h) = health(agent, &base).filter(|h| h.get("name").and_then(Value::as_str) == Some("bellwether")) else {
+        return log(&format!("brain on port {port}: none answered at start"));
+    };
+    let pid = h.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
+    let theirs = h.get("version").and_then(Value::as_str).unwrap_or("?").to_string();
+    if theirs == ours {
+        return log(&format!("brain on port {port}: version {ours}, pid {pid}"));
+    }
+    let exe = crate::winstart::process_path(pid);
+    let mine = crate::winstart::install_exe();
+    let this_install = matches!((&exe, &mine), (Some(e), Some(m)) if crate::winstart::same_install(e, m));
+    if !this_install {
+        return log(&format!(
+            "warning: the brain on port {port} is version {theirs} (pid {pid}), not this strip's {ours}, and it runs {}, not this install, so it is left alone. `bellwether doctor` shows what it is",
+            exe.map(|e| e.display().to_string()).unwrap_or_else(|| "something whose path can't be read".into())
+        ));
+    }
+    log(&format!("the brain on port {port} is this install's at version {theirs} (pid {pid}); this strip is {ours}, so it is stopped and started again"));
+    let started = Instant::now();
+    if let Err(e) = send_stop(port, &stop_tokens(crate::settings::token_now(), token)) {
+        return log(&format!("warning: the old brain didn't take the stop ({e}); it keeps running. `bellwether doctor` says what to do"));
+    }
+    if !crate::winstart::wait_exit(pid, Duration::from_secs(5)) {
+        return log(&format!("warning: the old brain (pid {pid}) took the stop but is still running after 5 s; end it in Task Manager"));
+    }
+    if !brain_at_login() {
+        return log("the old brain stopped; the strip starts its own now");
+    }
+    spawn_detached(cfg, token, &format!("the old brain (version {theirs}) stopped"));
+    while started.elapsed() < Duration::from_secs(10) {
+        if let Some(h) = health(agent, &base).filter(|h| h.get("version").and_then(Value::as_str) == Some(ours)) {
+            return log(&format!("the brain on port {port} is now version {ours} (pid {}), {} ms after the stop", h.get("pid").and_then(Value::as_u64).unwrap_or(0), started.elapsed().as_millis()));
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    log(&format!("warning: no brain of version {ours} answered within 10 s of the stop; the strip starts one again in 10 s if none answers"));
+}
+
 /// The command that starts a brain: this executable as `serve` on the strip's port, with
-/// the strip's home, marked with BELLWETHER_PARENT_PID so it exits within a second of the
-/// strip dying, even by SIGKILL. A brain started by launchd or by hand never has it.
-pub fn child_command(exe: &std::path::Path, cfg: &BrainConfig, token: &str, parent: u32) -> Command {
+/// the strip's home. No console window on Windows.
+fn brain_command(exe: &std::path::Path, cfg: &BrainConfig, token: &str) -> Command {
     let mut cmd = Command::new(exe);
     cmd.args(["serve", "--port", &cfg.port.to_string()]);
     for (k, v) in &cfg.child_env {
@@ -390,10 +487,18 @@ pub fn child_command(exe: &std::path::Path, cfg: &BrainConfig, token: &str, pare
         cmd.env("BELLWETHER_HOOK_TOKEN", token);
     }
     // The brain writes its own log (brain.log); stdout and stderr would only repeat it.
-    cmd.env("BELLWETHER_PARENT_PID", parent.to_string()).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    // Windows: no console window for it (a development build is a console program).
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut cmd, CREATE_NO_WINDOW);
+    cmd
+}
+
+/// The strip's own child brain: [`brain_command`], marked with BELLWETHER_PARENT_PID so it
+/// exits within a second of the strip dying, even by SIGKILL. A brain started by launchd,
+/// a Run value or by hand never has it.
+pub fn child_command(exe: &std::path::Path, cfg: &BrainConfig, token: &str, parent: u32) -> Command {
+    let mut cmd = brain_command(exe, cfg, token);
+    cmd.env("BELLWETHER_PARENT_PID", parent.to_string());
     cmd
 }
 

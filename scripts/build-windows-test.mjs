@@ -31,7 +31,9 @@
  * .cmd files point BELLWETHER_AGENT_DIR at the folder and BELLWETHER_HOME at `home\` in it
  * (deviation W1-3). The test build itself refuses what would reach the live install
  * (cli.rs `test_build_refusal`, deviation W2-2): `hooks install|uninstall`, `token rotate`
- * and `migrate` without --settings, `autostart install|uninstall`, and port 47417.
+ * and `migrate` without --settings, and port 47417. Its start at login (W6) uses Run values
+ * of its own, and its exes find the folder's home themselves (winstart.rs), as a Run value
+ * gives them no environment.
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -214,13 +216,24 @@ export function readme(port = TEST_PORT) {
     'you are reporting on. --dump-desktop adds its outcome to the current shell.log, and',
     'exits with a non-zero code if the file could not be written.',
     '',
+    'Start at login (W6): first .\\cli token init (once), then .\\cli autostart install --write.',
+    'At each sign-in Windows starts the strip and its brain from this folder, with its own',
+    'home and port: real sessions all day, no .cmd needed. They are under their own names,',
+    '"Bellwether (test)" and "Bellwether Brain (test)", never an installed Bellwether\'s.',
+    '  .\\cli autostart status          whether they are on, or turned off in Task Manager',
+    '  .\\cli autostart settings        opens Settings > Apps > Startup',
+    '  .\\cli shell stop | start | restart    the strip; the brain keeps running',
+    '  .\\cli autostart uninstall --write     removes both and stops them',
+    'Run autostart uninstall --write before you delete or move this folder. While the strip',
+    'runs, it starts the brain again within about 15 s if the brain stops.',
+    '',
     'sharing-check.cmd: start it, then share your screen in a meeting app when it asks, and',
     'stop when it asks again. It prints the programs that ran only while you shared (W5).',
     '',
     'Windows may warn that the app is unrecognised (it is unsigned): More info, Run anyway.',
     '',
-    'Cleaning up: delete this folder, and %LOCALAPPDATA%\\local.bellwether.p' + port,
-    '(WebView2\'s files for this test build).',
+    'Cleaning up: .\\cli autostart uninstall --write, then delete this folder, and',
+    '%LOCALAPPDATA%\\local.bellwether.p' + port + ' (WebView2\'s files for this test build).',
     '',
   ].join('\r\n');
 }
