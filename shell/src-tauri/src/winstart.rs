@@ -12,7 +12,7 @@
 //!   `bin\`, so it never writes a Run value.
 //! - **The test folder finds its own home** ([`adopt_test_folder`]): a Run value gets no
 //!   environment, so the test build, started outside its `.cmd` files, sets the folder's
-//!   home, config and agent directory itself, as `cli.cmd` does.
+//!   home itself, as `cli.cmd` does. Its config is that home's `config.json` (W7-1).
 //! - **The running strip** is found by the single-instance plugin's hidden window
 //!   (`<id>-sic`, `<id>-siw`; tauri-plugin-single-instance 2.5.2), and asked to quit through
 //!   it: the same `WM_COPYDATA` a second launch sends, with `--quit` in its arguments.
@@ -137,16 +137,18 @@ pub fn same_install(exe: &Path, ours: &Path) -> bool {
 }
 
 /// The test folder an exe is in: `<dir>` holding `run-test.cmd` (the exe in it, or in its
-/// `bin\`). Its (home, config, agent dir) are what `cli.cmd` and `run-test.cmd` set.
-pub fn test_folder_of(current: &Path, exists: &dyn Fn(&Path) -> bool) -> Option<(PathBuf, PathBuf, PathBuf)> {
+/// `bin\`). Its home, `<dir>\home`, is what `cli.cmd` and `run-test.cmd` set; the
+/// folder's `config.json` (the test port) is in that home (W7-1).
+pub fn test_folder_of(current: &Path, exists: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
     let parent = current.parent()?;
     let dir = if parent.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("bin")) { parent.parent()? } else { parent };
     let dir = plain(dir);
-    exists(&dir.join("run-test.cmd")).then(|| (dir.join("home"), dir.join("config.json"), dir))
+    exists(&dir.join("run-test.cmd")).then(|| dir.join("home"))
 }
 
-/// The test build, started without BELLWETHER_HOME (by a Run value at login, or from
-/// Explorer), sets its test folder's home, config and agent directory, as `cli.cmd` does.
+/// The test build, started without BELLWETHER_HOME (by a Run value at login, from
+/// Explorer, or as `bellwether` from PATH after the setup window's command-line step), sets
+/// its test folder's home, as `cli.cmd` does, and clears what would point it elsewhere.
 /// Called first thing in `main`, before any thread exists. A release never does this, and
 /// a BELLWETHER_HOME already set is left as it is.
 pub fn adopt_test_folder() {
@@ -154,22 +156,22 @@ pub fn adopt_test_folder() {
         return;
     }
     let Ok(me) = std::env::current_exe() else { return };
-    if let Some((home, config, agent)) = test_folder_of(&me, &|p| p.is_file()) {
+    if let Some(home) = test_folder_of(&me, &|p| p.is_file()) {
         let _ = std::fs::create_dir_all(&home);
         std::env::set_var("BELLWETHER_HOME", &home);
-        std::env::set_var("BELLWETHER_CONFIG", &config);
-        std::env::set_var("BELLWETHER_AGENT_DIR", &agent);
-        std::env::remove_var("BELLWETHER_DATA_DIR");
+        for v in ["BELLWETHER_CONFIG", "BELLWETHER_AGENT_DIR", "BELLWETHER_DATA_DIR"] {
+            std::env::remove_var(v);
+        }
     }
 }
 
 /// The home a process started by a Run value will use: the test folder's (test build), or
 /// `%APPDATA%\Bellwether` (it gets no BELLWETHER_HOME).
-pub fn run_home(test: bool, test_folder: Option<&(PathBuf, PathBuf, PathBuf)>, default: PathBuf) -> Result<PathBuf, String> {
+pub fn run_home(test: bool, test_folder: Option<&PathBuf>, default: PathBuf) -> Result<PathBuf, String> {
     if !test {
         return Ok(default);
     }
-    test_folder.map(|(h, _, _)| h.clone()).ok_or_else(|| "refused: this test build isn't in its test folder (no run-test.cmd beside it), so at login it wouldn't find its home or its test port. Start at login from the unzipped folder".into())
+    test_folder.cloned().ok_or_else(|| "refused: this test build isn't in its test folder (no run-test.cmd beside it), so at login it wouldn't find its home or its test port. Start at login from the unzipped folder".into())
 }
 
 /// The checks before a Run value is written (as `login_items::preflight` on macOS): the
@@ -423,7 +425,7 @@ mod imp {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        Err(format!("the strip didn't start within 10 s; its log (shell.log in {}) says why", bellwether_brain::home::dir().display()))
+        Err(format!("the strip didn't start within 10 s; its log (shell.log in {}) says why", bellwether_brain::home::log_dir().display()))
     }
 
     /// `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`: no console, and outlives whoever
@@ -488,13 +490,14 @@ mod tests {
     fn the_test_folder_finds_its_own_home_and_a_run_value_never_needs_the_environment() {
         let exists = |p: &Path| same_path(p, Path::new("C:/T/run-test.cmd"));
         for exe in ["C:/T/Bellwether.exe", "C:/T/bin/bellwether.exe"] {
-            let (home, config, agent) = test_folder_of(Path::new(exe), &exists).unwrap();
-            assert!(same_path(&home, Path::new("C:/T/home")) && same_path(&config, Path::new("C:/T/config.json")) && same_path(&agent, Path::new("C:/T")), "{exe}");
+            let home = test_folder_of(Path::new(exe), &exists).unwrap();
+            assert!(same_path(&home, Path::new("C:/T/home")), "{exe}");
         }
         assert_eq!(test_folder_of(Path::new("C:/Elsewhere/Bellwether.exe"), &exists), None);
         let src = include_str!("winstart.rs");
         let adopt = src.split("pub fn adopt_test_folder()").nth(1).unwrap().split("\n}\n").next().unwrap();
         assert!(adopt.contains("if !test_build() ||"), "a release never adopts a folder");
+        assert!(adopt.contains("\"BELLWETHER_CONFIG\", \"BELLWETHER_AGENT_DIR\"") && !adopt.contains("set_var(\"BELLWETHER_CONFIG"), "the config is the home's, never another file");
 
         let folder = test_folder_of(Path::new("C:/T/Bellwether.exe"), &exists);
         let default = PathBuf::from("C:/Users/me/AppData/Roaming/Bellwether");

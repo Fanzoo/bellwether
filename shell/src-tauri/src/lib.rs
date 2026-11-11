@@ -39,6 +39,7 @@ mod watchdog;
 mod win;
 #[cfg(windows)]
 mod winlocate;
+pub mod winpath;
 pub mod winstart;
 
 use serde::Serialize;
@@ -670,7 +671,9 @@ pub fn run() {
         // Where bundled pets are: the app's Resources, or a repository's checkout (its pets/).
         resources: if app_layout { settings.resources.clone() } else { settings.agent_dir.clone() },
         user_home: bellwether_core::paths::user_home().unwrap_or_default(),
-        claude_dir: std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(PathBuf::from),
+        // The Windows test folder's build installs hooks only into a scratch settings file in
+        // its own home, never the user's (deviation W7-3; the CLI needs --settings, W2-2).
+        claude_dir: if cfg!(feature = "test-build") { Some(settings.data_dir.join("scratch-claude")) } else { std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(PathBuf::from) },
         env_config: std::env::var("BELLWETHER_CONFIG").ok().filter(|c| !c.is_empty()),
         env_token: std::env::var("BELLWETHER_HOOK_TOKEN").ok().filter(|t| !t.is_empty()),
     };

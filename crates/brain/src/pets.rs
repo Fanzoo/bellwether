@@ -49,21 +49,31 @@ pub fn bundled_sha(name: &str) -> Option<String> {
     lock.get("bundled").get(name).get("sha256").as_str().map(str::to_string)
 }
 
-/// Where this binary's bundled pet file is: the app's `Contents/Resources/pets/<name>/`,
-/// or, for a build that isn't in an app bundle (a repository's dev build), the checkout's
-/// `pets/<name>/`, as the strip finds them: `BELLWETHER_AGENT_DIR` when it is set (the
-/// Windows test folder's cli.cmd sets it to the folder, W2), else the checkout it was built
-/// from.
+/// Where this binary's bundled pet file is: the app's `Contents/Resources/pets/<name>/`, a
+/// Windows install's `<dir>\pets\<name>\` (the installer's folder or the test folder, W7-1),
+/// or, for a build that is neither (a repository's dev build), the checkout's
+/// `pets/<name>/`, as the strip finds them: `BELLWETHER_AGENT_DIR` when it is set, else the
+/// checkout it was built from.
 pub fn bundled_file(name: &str) -> PathBuf {
     let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
     let contents = exe.as_ref().and_then(|e| e.parent()).filter(|d| d.file_name().is_some_and(|n| n == "MacOS")).and_then(Path::parent).filter(|c| c.file_name().is_some_and(|n| n == "Contents"));
-    match contents {
-        Some(c) => c.join("Resources").join("pets").join(name).join("animations.xml"),
-        None => {
+    let install = exe.as_deref().filter(|_| cfg!(windows)).and_then(|e| windows_install_dir(e, &|p| p.is_file()));
+    match (contents, install) {
+        (Some(c), _) => c.join("Resources").join("pets").join(name).join("animations.xml"),
+        (None, Some(dir)) => dir.join("pets").join(name).join("animations.xml"),
+        (None, None) => {
             let checkout = std::env::var_os("BELLWETHER_AGENT_DIR").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(".."));
             checkout.join("pets").join(name).join("animations.xml")
         }
     }
+}
+
+/// A Windows install's folder, from either of its exes: `<dir>\Bellwether.exe` with
+/// `<dir>\bin\bellwether.exe` beside it (the shell's `winstart::install_exe_of`).
+pub fn windows_install_dir(exe: &Path, exists: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    let parent = exe.parent()?;
+    let dir = if parent.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("bin")) { parent.parent()? } else { parent };
+    (exists(&dir.join("Bellwether.exe")) && exists(&dir.join("bin").join("bellwether.exe"))).then(|| dir.to_path_buf())
 }
 
 /// What doctor says about `pets.default` when it names (or nearly names) a bundled pet,
@@ -596,6 +606,17 @@ mod tests {
 
     fn pet(extra: &str, tiles: &str) -> String {
         format!("<?xml version=\"1.0\"?>\n<animations xmlns=\"http://x\"><header><title>T &amp; co</title></header><image>{tiles}<png>{PNG}</png></image><animations><animation id=\"1\"><name>walk</name></animation><animation id='2'><name>Eat</name></animation><animation id=\"3\"><name>sleep1a</name></animation><animation id=\"4\"><name>sleep1b</name></animation>{extra}</animations></animations>")
+    }
+
+    #[test]
+    fn a_windows_install_keeps_its_own_pets_beside_its_exes() {
+        let have = ["C:/I/Bellwether.exe", "C:/I/bin/bellwether.exe"];
+        let exists = |p: &Path| have.iter().any(|h| Path::new(h) == p);
+        for exe in ["C:/I/Bellwether.exe", "C:/I/bin/bellwether.exe", "C:/I/BIN/bellwether.exe"] {
+            let dir = windows_install_dir(Path::new(exe), &|p| exists(&PathBuf::from(p.to_string_lossy().replace("BIN", "bin"))));
+            assert_eq!(dir.as_deref(), Some(Path::new("C:/I")), "{exe}");
+        }
+        assert_eq!(windows_install_dir(Path::new("C:/R/target-dev/release/bellwether-shell.exe"), &exists), None, "a development build has no bin\\");
     }
 
     #[test]

@@ -1,9 +1,11 @@
 //! Where the strip's settings come from. Read-only: the shell never writes config.json,
 //! the token or a `.env`. Two layouts (distribution plan M5, deviation 45):
 //!
-//! - **App**: the executable is inside an app bundle (`Bellwether.app/Contents/MacOS`).
+//! - **App**: the executable is inside an app bundle (`Bellwether.app/Contents/MacOS`), or
+//!   on Windows in an install (`<dir>\Bellwether.exe` with `<dir>\bin\bellwether.exe`: the
+//!   installer's folder, or the test folder, W7-1), whose bundled pets are `<dir>\pets`.
 //!   Its home is `BELLWETHER_HOME`, else a test build's bundled home, else
-//!   `~/Library/Application Support/Bellwether`: `config.json` there (every key optional,
+//!   `~/Library/Application Support/Bellwether` (`%APPDATA%\Bellwether`): `config.json` there (every key optional,
 //!   checked as the Rust brain checks it), the token from `BELLWETHER_HOOK_TOKEN` or the
 //!   home's `hook-token`, `shell-state.json`, imported pets. It logs to
 //!   `~/Library/Logs/Bellwether/shell.log` (`<home>/logs/` for any other home).
@@ -58,9 +60,10 @@ enum TokenSource {
 
 static TOKEN_SOURCE: std::sync::OnceLock<TokenSource> = std::sync::OnceLock::new();
 
-/// The layout this process runs in: the app inside a bundle, the repository otherwise.
+/// The layout this process runs in: the app inside a bundle (or a Windows install), the
+/// repository otherwise.
 pub fn layout() -> Layout {
-    if crate::identity::in_app_bundle() {
+    if crate::identity::in_app_bundle() || (cfg!(windows) && crate::winstart::install_exe().is_some()) {
         Layout::App
     } else {
         Layout::Repository
@@ -94,7 +97,7 @@ impl Settings {
             config: json,
             brain_env,
             brain_gets_token: false,
-            resources: crate::identity::bundle_path().map(|b| b.join("Contents").join("Resources")),
+            resources: crate::identity::bundle_path().map(|b| b.join("Contents").join("Resources")).or_else(|| crate::winstart::install_exe().and_then(|e| e.parent().map(Path::to_path_buf))),
         })
     }
 

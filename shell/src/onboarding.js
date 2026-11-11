@@ -56,13 +56,25 @@ async function refresh() {
 
 // ---------------------------------------------------------------- steps
 
+const windows = () => status?.platform === 'windows';
+
 function stepList() {
+  // Windows (plan WD10): no earlier install, and no permission for the taskbar or a click.
+  if (windows()) return ['login', 'hooks', 'pet', 'cli', 'done'];
   // Step 1 (moving an earlier install) replaces steps 2–3 (plan D6).
   if (status.migration?.found || moved) return ['earlier', 'dock', 'focus', 'pet', 'cli', 'done'];
   return ['login', 'hooks', 'dock', 'focus', 'pet', 'cli', 'done'];
 }
 
 const LOGIN_WORDS = { enabled: 'on', notRegistered: 'off', notFound: 'off', requiresApproval: 'waiting for your approval', unavailable: 'not available here', unknown: 'unknown' };
+const LOGIN_WORDS_WINDOWS = { ...LOGIN_WORDS, requiresApproval: 'turned off in Task Manager', elsewhere: 'set to another copy of Bellwether' };
+const WINDOWS_TEXT = {
+  approve: 'Open Startup apps',
+  cliIntro: 'For a terminal: bellwether status, bellwether doctor and the rest. This adds Bellwether\'s bin folder (where bellwether.exe is) to your own PATH; no administrator rights are needed, and Remove takes it out again.',
+  cliInstall: 'Add to PATH',
+  permissions: 'Windows needs no permissions: sheep stand on the taskbar, and clicking one brings its session\'s terminal forward.',
+  tray: 'The sheep icon in the notification area has Set up Bellwether… to come back here, Quiet (alerts only) to keep only the "!" of a session that needs you, and Hide everything (for screen sharing). Windows 11 may put a new icon under the ^ beside the clock: drag it onto the taskbar to keep it in view.',
+};
 const AUTOMATION_WORDS = {
   allowed: 'allowed',
   denied: 'refused (System Settings > Privacy & Security > Automation can change it)',
@@ -94,8 +106,11 @@ function render() {
   if (!login) {
     lines('login-lines', ['This is a development build: it has no start at login (docs/DEVELOPMENT.md).']);
   } else {
-    lines('login-lines', [`Brain at login: ${LOGIN_WORDS[login.brain] ?? login.brain}`, `Strip at login: ${LOGIN_WORDS[login.app] ?? login.app}`, ...(login.waiting || login.stale ? login.lines : [])]);
+    const words = windows() ? LOGIN_WORDS_WINDOWS : LOGIN_WORDS;
+    const explain = login.waiting || login.stale || login.brain === 'elsewhere' || login.app === 'elsewhere';
+    lines('login-lines', [`Brain at login: ${words[login.brain] ?? login.brain}`, `Strip at login: ${words[login.app] ?? login.app}`, ...(explain ? login.lines : [])]);
   }
+  if (windows()) $('login-approve').textContent = WINDOWS_TEXT.approve;
   $('login-on').disabled = !login || earlier;
   $('login-off').disabled = !login;
   $('login-approve').hidden = !login?.waiting;
@@ -132,22 +147,24 @@ function render() {
 
   // CLI tool.
   const c = status.cliTool;
-  $('cli-state').textContent = {
-    installed: `Installed: ${c.path}.`,
-    homebrew: c.detail,
-    otherApp: `${c.path} points at another copy of Bellwether.app; installing points it at this one.`,
-    foreign: `${c.path} is already there and isn't Bellwether's; it is left alone.`,
-    absent: 'Not installed.',
-    unavailable: c.detail,
-  }[c.state] ?? c.state;
-  $('cli-install').disabled = ['installed', 'homebrew', 'foreign', 'unavailable'].includes(c.state);
+  if (windows()) {
+    renderPath(c);
+  } else {
+    renderLink(c);
+  }
 
   // Done: doctor in plain words.
   const checks = status.doctor ?? [];
   const fails = checks.filter((x) => x.status === 'FAIL');
+  const where = windows() ? 'the taskbar' : 'the Dock';
   $('done-summary').textContent = fails.length
     ? `Almost there: ${fails.length === 1 ? 'one thing needs' : `${fails.length} things need`} fixing before sheep appear (below).`
-    : 'Everything needed is in place. Start a new Claude Code session: its sheep appears above the Dock.';
+    : `Everything needed is in place. Start a new Claude Code session: its sheep appears above ${where}.`;
+  $('done-windows').hidden = !windows();
+  if (windows()) {
+    $('done-windows').textContent = WINDOWS_TEXT.permissions;
+    $('done-tray').textContent = WINDOWS_TEXT.tray;
+  }
   const shown = checks.filter((x) => x.name !== 'next' || fails.length);
   $('doctor').replaceChildren(...shown.map((x) => {
     const li = document.createElement('li');
@@ -157,6 +174,33 @@ function render() {
     li.append(word, `${x.name}: ${x.detail}`);
     return li;
   }));
+}
+
+/** macOS: the ~/.local/bin link. */
+function renderLink(c) {
+  $('cli-state').textContent = {
+    installed: `Installed: ${c.path}.`,
+    homebrew: c.detail,
+    otherApp: `${c.path} points at another copy of Bellwether.app; installing points it at this one.`,
+    foreign: `${c.path} is already there and isn't Bellwether's; it is left alone.`,
+    absent: 'Not installed.',
+    unavailable: c.detail,
+  }[c.state] ?? c.state;
+  $('cli-install').disabled = ['installed', 'homebrew', 'foreign', 'unavailable'].includes(c.state);
+}
+
+/** Windows (plan WD7): the install's bin folder on the user's PATH, the change shown first. */
+function renderPath(c) {
+  $('cli-intro').textContent = WINDOWS_TEXT.cliIntro;
+  $('cli-install').textContent = WINDOWS_TEXT.cliInstall;
+  const others = (c.others ?? []).length ? ` Also on your PATH with a bellwether.exe: ${c.others.join(', ')}; a terminal uses whichever comes first.` : '';
+  $('cli-state').textContent = {
+    installed: `On your PATH: ${c.path}. ${c.change}${others}`,
+    absent: `Not on your PATH yet. ${c.change}${others}`,
+    unavailable: c.detail,
+  }[c.state] ?? c.state;
+  $('cli-install').disabled = c.state !== 'absent';
+  $('cli-remove').hidden = c.state !== 'installed';
 }
 
 function renderPets() {
@@ -368,6 +412,11 @@ $('cli-install').addEventListener('click', () => act('cli-result', async () => {
   say('cli-result', r.detail ?? r.state);
   await refresh();
 }));
+$('cli-remove').addEventListener('click', () => act('cli-result', async () => {
+  const r = await invoke('cli_tool_install', { remove: true });
+  say('cli-result', r.detail ?? r.state);
+  await refresh();
+}));
 
 // ---------------------------------------------------------------- start
 
@@ -375,7 +424,7 @@ $('cli-install').addEventListener('click', () => act('cli-result', async () => {
   try {
     await refresh();
     render();
-    if (status.migration?.found) await showMove();
+    if (status.migration?.found && !windows()) await showMove();
   } catch (e) {
     document.body.textContent = `Bellwether couldn't read its setup: ${e?.message ?? e}`;
   }
