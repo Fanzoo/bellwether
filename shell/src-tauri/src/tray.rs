@@ -327,7 +327,8 @@ mod tests {
         assert_eq!(n.len(), 2);
         assert_eq!(n[0].text, "Legacy agents: local.bellwether.brain (running), local.pasture.shell (starts at login) (see bellwether doctor)");
         assert!(!n[0].opens_login_items, "information only");
-        assert_eq!(n[1], Notice { text: "Approve the brain agent in Login Items…".into(), opens_login_items: true });
+        let ask = if cfg!(windows) { "Turn the brain agent on in Startup apps…" } else { "Approve the brain agent in Login Items…" };
+        assert_eq!(n[1], Notice { text: ask.into(), opens_login_items: true });
         // The click opens the pane, through SMAppService; the menu never registers or
         // unregisters an item. (tester-m3 checks that tray.rs runs no command and writes
         // no file.)

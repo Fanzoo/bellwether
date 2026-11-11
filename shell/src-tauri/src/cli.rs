@@ -1046,7 +1046,8 @@ mod tests {
         assert_eq!(login_verdict(Service::Brain, Status::Enabled, Session::Current, Some(4242)).0, "PASS");
         let (status, detail) = login_verdict(Service::Brain, Status::NotFound, Session::Current, None);
         assert_eq!(status, "INFO");
-        assert!(detail.contains("never had it registered"));
+        let never = if cfg!(windows) { "unavailable here" } else { "never had it registered" };
+        assert!(detail.contains(never), "{detail}");
     }
 
     #[test]
@@ -1082,7 +1083,11 @@ mod tests {
                 a.extend(s(extra));
                 let (message, code) = autostart(&a).unwrap_err();
                 assert_eq!(code, exit::NOT_RUNNING, "{sub} {extra:?}");
-                assert!(message.starts_with("not running from Bellwether.app") && message.contains("nothing was registered or written"), "{message}");
+                if cfg!(windows) {
+                    assert_eq!(message, crate::winstart::NOT_AN_INSTALL);
+                } else {
+                    assert!(message.starts_with("not running from Bellwether.app") && message.contains("nothing was registered or written"), "{message}");
+                }
             }
         }
         assert_eq!(autostart(&s(&["status", "--write"])).unwrap_err().1, exit::BAD_CONFIG);
@@ -1095,7 +1100,8 @@ mod tests {
     fn waiting_for_approval_says_what_to_do_and_offers_the_pane() {
         for s in [Service::Brain, Service::MainApp] {
             let line = login_items::advice(s, Status::RequiresApproval);
-            assert!(line.contains("System Settings > General > Login Items") && line.contains("Allow in the Background") && line.contains("bellwether autostart settings"), "{line}");
+            let pane = if cfg!(windows) { ["Task Manager", "Settings > Apps > Startup"] } else { ["System Settings > General > Login Items", "Allow in the Background"] };
+            assert!(line.contains(pane[0]) && line.contains(pane[1]) && line.contains("bellwether autostart settings"), "{line}");
             let (status, detail) = login_verdict(s, Status::RequiresApproval, Session::Current, None);
             assert_eq!((status, detail.as_str()), ("WARN", line.as_str()), "doctor reports it as a WARN with the same advice");
         }
