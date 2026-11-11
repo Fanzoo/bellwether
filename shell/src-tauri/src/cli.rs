@@ -725,7 +725,7 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
         (crate::privacy::sharing_warnings_for(v, os), count)
     });
     let input = Input {
-        settings_file: settings_file.unwrap_or_else(doctor::user_settings),
+        settings_file: settings_file.unwrap_or_else(|| default_settings(home, cfg!(feature = "test-build"))),
         home: home.to_path_buf(),
         user_home: bellwether_core::paths::user_home().unwrap_or_default(),
         env_token: std::env::var("BELLWETHER_HOOK_TOKEN").ok(),
@@ -798,10 +798,13 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
     // from a terminal is the terminal's (deviation 135). The strip logs its own answer at
     // start and on every change; that line (`dock`, from the brain's log checks) becomes
     // this one, with whether a strip runs now.
+    // Windows asks no permission for the taskbar (WD10): no line there.
     let dock = checks.iter().position(|c| c.name == "dock").map(|i| checks.remove(i));
-    let strips = crate::identity::in_app_bundle().then(own_strips);
-    let (status, detail) = accessibility_verdict(strips.as_deref(), dock.as_ref().map(|c| (c.status, c.detail.as_str())));
-    add(&mut checks, status, "accessibility", detail);
+    if !cfg!(windows) {
+        let strips = crate::identity::in_app_bundle().then(own_strips);
+        let (status, detail) = accessibility_verdict(strips.as_deref(), dock.as_ref().map(|c| (c.status, c.detail.as_str())));
+        add(&mut checks, status, "accessibility", detail);
+    }
 
     // A brain of another version than this app's (deviation 135): WARN, with the fix.
     if let doctor::Health::Bellwether(h) = doctor::probe_health(checked_port, input.probe_timeout) {
@@ -840,7 +843,11 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
         add(&mut checks, status, "login: brain", detail);
     }
     let mut report = doctor::finish(&input, checks);
+    let scratch = cfg!(feature = "test-build").then(|| input.settings_file.clone());
     for c in &mut report.checks {
+        if let Some(file) = &scratch {
+            c.detail = test_build_hooks_wording(&c.detail, file);
+        }
         if !installed() {
             c.detail = dev_binary_wording(&c.detail);
         } else if cfg!(windows) {
@@ -848,6 +855,23 @@ pub fn doctor_report(home: &Path, settings_file: Option<PathBuf>, port: Option<u
         }
     }
     report
+}
+
+/// The settings file doctor reads when none is given: the user's ~/.claude/settings.json,
+/// or for the Windows test folder's build, the scratch file its setup window installs
+/// hooks into (W7-3), since it never edits the user's.
+pub fn default_settings(home: &Path, test_build: bool) -> PathBuf {
+    if test_build {
+        home.join("scratch-claude").join("settings.json")
+    } else {
+        bellwether_brain::doctor::user_settings()
+    }
+}
+
+/// The test build refuses `hooks install` without --settings (W2-2), so doctor's advice
+/// names the file it checked, and the setup window's step.
+fn test_build_hooks_wording(detail: &str, file: &Path) -> String {
+    detail.replace("`bellwether hooks install`", &format!("the setup window's Hooks step, or `bellwether hooks install --settings \"{}\"`", file.display()))
 }
 
 /// Doctor, Windows: the brain's Run value is on but no brain answers.
@@ -1153,6 +1177,20 @@ mod tests {
         let body = src.split("pub fn doctor_report(").nth(1).unwrap().split("\n}\n").next().unwrap();
         assert!(!body.contains("ax::trusted"), "the CLI's own trust is the terminal's, not the strip's");
         assert!(body.contains(r#"checks.iter().position(|c| c.name == "dock").map(|i| checks.remove(i))"#));
+    }
+
+    #[test]
+    fn the_test_build_checks_its_scratch_settings_and_says_how_to_fill_them() {
+        let home = Path::new("/t/home");
+        assert_eq!(default_settings(home, true), home.join("scratch-claude").join("settings.json"));
+        assert_eq!(default_settings(home, false), bellwether_brain::doctor::user_settings());
+        let file = default_settings(home, true);
+        let d = test_build_hooks_wording("no bellwether entries in x. Run `bellwether hooks install` to see the diff, then add --write", &file);
+        assert!(d.contains("the setup window's Hooks step, or `bellwether hooks install --settings \"") && d.contains("scratch-claude") && d.ends_with("then add --write"), "{d}");
+        // Windows has no Accessibility line: no permission there (WD10).
+        let src = include_str!("cli.rs");
+        let body = src.split("pub fn doctor_report(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(body.contains("if !cfg!(windows) {\n        let strips"));
     }
 
     #[test]
