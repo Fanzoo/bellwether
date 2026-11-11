@@ -83,6 +83,7 @@ const AUTOMATION_WORDS = {
   unknown: 'unknown',
 };
 const DOCTOR_WORDS = { PASS: 'OK', INFO: 'Note', WARN: 'Worth a look', FAIL: 'Needs fixing' };
+const DOCTOR_ORDER = { FAIL: 0, WARN: 1, PASS: 2, INFO: 3 };
 
 function render() {
   if (!status) return;
@@ -165,13 +166,22 @@ function render() {
     $('done-windows').textContent = WINDOWS_TEXT.permissions;
     $('done-tray').textContent = WINDOWS_TEXT.tray;
   }
-  const shown = checks.filter((x) => x.name !== 'next' || fails.length);
+  // What needs you first (stable within each group); `next` only when something fails.
+  const shown = checks.filter((x) => x.name !== 'next' || fails.length).map((x, i) => [x, i]).sort(([a, i], [b, j]) => (DOCTOR_ORDER[a.status] ?? 9) - (DOCTOR_ORDER[b.status] ?? 9) || i - j).map(([x]) => x);
   $('doctor').replaceChildren(...shown.map((x) => {
     const li = document.createElement('li');
     const word = document.createElement('span');
-    word.className = 'word';
+    word.className = `word ${String(x.status).toLowerCase()}`;
     word.textContent = DOCTOR_WORDS[x.status] ?? x.status;
-    li.append(word, `${x.name}: ${x.detail}`);
+    const body = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = x.name;
+    const detail = document.createElement('div');
+    detail.className = 'detail';
+    detail.textContent = x.detail;
+    body.append(name, detail);
+    li.append(word, body);
     return li;
   }));
 }

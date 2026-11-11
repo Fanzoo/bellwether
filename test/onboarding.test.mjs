@@ -141,8 +141,11 @@ describe('the onboarding page (plan D6)', () => {
     assert.equal(w.el('finish').hidden, false);
     assert.match(w.el('done-summary').textContent, /one thing needs fixing/);
     const doctor = w.el('doctor').text();
-    assert.match(doctor, /OK config: the defaults/);
-    assert.match(doctor, /Needs fixing brain: brain not running/);
+    assert.match(doctor, /OK\s+config\s+the defaults/);
+    assert.match(doctor, /Needs fixing\s+brain\s+brain not running/);
+    // What needs fixing comes first, however doctor ordered it.
+    assert.deepEqual(w.el('doctor').children.map((li) => li.children[0].textContent), ['Needs fixing', 'OK']);
+    assert.equal(w.el('doctor').children[0].children[0].className, 'word fail');
     await w.click('finish');
     assert.deepEqual(w.calls.at(-1), ['setup_close', {}]);
   });
