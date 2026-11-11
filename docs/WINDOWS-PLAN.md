@@ -9,8 +9,8 @@ Status: proposal, with the maintainer's decisions of 2026-10-20 applied (see "De
 the maintainer's PC; W2's first part is built; W3 is built, its click and hover
 checks passed on the PC, the rest of its by-hand list open; W4 is built and its PC
 re-run was stable, a few checks open; W5 is built, Zoom and a full-screen video checked,
-the rest left to daily use; W6 is built and awaits its PC checks (their status sections);
-nothing else is built yet. Items marked
+the rest left to daily use; W6 and W7 are built and await their PC checks (their status
+sections); nothing else is built yet. Items marked
 **ASSUMPTION** are technical guesses that a milestone proves. Bracketed numbers such as
 [4] point to the Sources list at the end. Crate versions were read from `Cargo.lock` and
 crates.io on 2026-10-19 [21]. The Tauri, tao and wry behaviour quoted here was read from
@@ -1986,6 +1986,69 @@ Builds:
 - the tray menu's items all work, and the icon is readable on light and dark taskbars.
 
 **By hand (about 15 minutes):** the items above, in light and dark mode.
+
+#### W7 status (developer, 2026-11-11): built; the cargo and Node suites green on the Mac, the Windows build checked with cargo-xwin; CI and the PC checks open
+
+What it built:
+
+- **The setup window on Windows**, with the same eleven commands and capability files
+  (the capability tests are unchanged). `setup_status` says `platform`; on Windows the page
+  shows five steps: start at login, hooks, pet, the `bellwether` command, Done. The earlier
+  install, Dock and Automation steps are left out (`migration.found` is always false on
+  Windows), and Done says in one line that Windows needs no permissions.
+- **Start at login** is W6's Run values, in Windows' words: "turned off in Task Manager",
+  "set to another copy of Bellwether", and an *Open Startup apps* button.
+- **Import…** is the system's Open dialog (`GetOpenFileNameW`, owned by the setup window,
+  on a thread of its own with COM initialised), then the same `pets import` checks.
+- **The `bellwether` command** (`winpath.rs`, pure parts tested on the Mac): the step shows
+  the exact change (the install's `bin\` appended to `HKCU\Environment\Path`), and names
+  any other folder on the PATH that has a `bellwether.exe`. *Add to PATH* writes it (the
+  value's type kept, `REG_EXPAND_SZ` when there was none; no other entry touched) and
+  broadcasts `WM_SETTINGCHANGE`; *Remove from PATH* takes it out the same way. The
+  command takes an optional `remove` (still one of the eleven).
+- **The tray** gets *Set up Bellwether…* on Windows, and the Done step says how to keep the
+  icon in view (Windows 11 puts a new one under the `^`).
+
+Deviations:
+
+- **W7-1, the test folder runs in the app layout.** W1-3 and W2-2 kept the test folder in
+  the repository layout; the setup window, its tray item, imported pets and an editable
+  config are the app layout's. A Windows install (`Bellwether.exe` with
+  `bin\bellwether.exe`, the test folder included) now runs in it, as the installer's
+  folder will: bundled pets from `<install>\pets`, the config and everything else in the
+  home. So the folder's `config.json` moved to `home\config.json`, the `.cmd` files and
+  `adopt_test_folder` set only BELLWETHER_HOME (and clear the rest), and the strip logs to
+  `home\logs\shell.log` (W6's by-hand list said `home\shell.log`). CI's smoke runs copy the
+  config into their scratch homes. A development build in `target-dev\` stays in the
+  repository layout.
+- **W7-2, the tray icon is drawn, not an `.ico`.** Since W1 the tray sheep is drawn at run
+  time, white with a dark outline off macOS, which reads on light and dark taskbars; no
+  icon file is needed.
+- **W7-3, the test build's hooks go into a scratch file.** Its setup window edits
+  `home\scratch-claude\settings.json`, never `%USERPROFILE%\.claude\settings.json` (the CLI
+  needs `--settings`, W2-2). Claude Code uses it with `claude --settings <that file>`.
+  Its PATH step does change the user's real PATH (to the folder's `bin\`): the done-when
+  needs it, and *Remove from PATH* undoes it.
+- **W7-4, `GetOpenFileNameW`, not `rfd`.** `rfd` isn't in the tree; the Win32 dialog is one
+  call in `windows-sys` (two more features), with no new dependency.
+
+By hand on the PC (about 15 minutes, a fresh test folder; light mode, then dark):
+
+1. `run-test.cmd --sessions`: the setup window opens (Step 1 of 5: start at login).
+   *Turn on start at login*; both lines say on. Turn the brain off in Task Manager and
+   reopen the window from the tray: "turned off in Task Manager", and *Open Startup apps*
+   opens the page.
+2. Hooks: *Show the changes* names `home\scratch-claude\settings.json`; *Install* writes it.
+   `claude --settings <folder>\home\scratch-claude\settings.json`: a sheep walks on.
+3. Pet: *Import…* opens the Windows dialog; cancelling changes nothing; a desktopPet
+   `animations.xml` imports and can be chosen (the strip redraws with it).
+4. The `bellwether` command: the step shows the change; *Add to PATH*; a new Windows
+   Terminal tab runs `bellwether doctor` (this folder's home, port 47491); a tab opened
+   before doesn't. *Remove from PATH*, a new tab: `bellwether` isn't found.
+5. Done: doctor's checks in plain words; *Done* closes it, and the next start doesn't open
+   it again (the tray's *Set up Bellwether…* does).
+6. The tray: every item works (Quiet, Hide everything, Show labels, Set up Bellwether…,
+   Quit), and the icon reads on the light and the dark taskbar.
 
 ### W8. The installer and the updater (unsigned)
 

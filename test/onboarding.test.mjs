@@ -81,6 +81,7 @@ function page() {
 
 function status(over = {}) {
   return {
+    platform: 'macos',
     layout: 'app',
     port: 47431,
     onboarded: false,
@@ -144,6 +145,65 @@ describe('the onboarding page (plan D6)', () => {
     assert.match(doctor, /Needs fixing brain: brain not running/);
     await w.click('finish');
     assert.deepEqual(w.calls.at(-1), ['setup_close', {}]);
+  });
+
+  test('on Windows: no Dock or Automation steps, the Run values in Windows words, and the PATH change shown before it is made', async () => {
+    const bin = 'C:\\Users\\new\\AppData\\Local\\Bellwether\\bin';
+    let path = 'absent';
+    const cli = () => (path === 'absent'
+      ? { state: 'absent', path: bin, change: `Adds ${bin} to the end of your PATH (HKCU\\Environment\\Path); nothing else in it changes.`, others: ['C:\\Test\\bin'] }
+      : { state: 'installed', path: bin, change: `Remove takes ${bin} out of your PATH.`, others: [] });
+    const win = () => status({
+      platform: 'windows',
+      // An earlier install is macOS's: even if one were reported, Windows never shows step 1.
+      migration: { found: true, agents: ['local.bellwether.brain'] },
+      login: { stale: false, brain: 'requiresApproval', app: 'elsewhere', waiting: true, lines: ['brain agent: turned off in Task Manager', 'app at login: another copy'] },
+      cliTool: cli(),
+      doctor: [{ status: 'PASS', name: 'config', detail: 'the defaults' }],
+    });
+    const w = await load((cmd, args) => {
+      if (cmd === 'setup_status') return win();
+      if (cmd === 'cli_tool_install') {
+        path = args.remove ? 'absent' : 'installed';
+        return { ...cli(), detail: args.remove ? 'Took it out.' : 'Added it.' };
+      }
+      return {};
+    });
+    assert.deepEqual(w.visible(), ['login']);
+    assert.equal(w.el('progress').textContent, 'Step 1 of 5');
+    const login = w.el('login-lines').text();
+    assert.match(login, /Brain at login: turned off in Task Manager/);
+    assert.match(login, /Strip at login: set to another copy of Bellwether/);
+    assert.equal(w.el('login-approve').hidden, false);
+    assert.equal(w.el('login-approve').textContent, 'Open Startup apps');
+    const seen = [];
+    for (let i = 0; i < 4; i++) {
+      seen.push(w.visible()[0]);
+      await w.click('next');
+    }
+    seen.push(w.visible()[0]);
+    assert.deepEqual(seen, ['login', 'hooks', 'pet', 'cli', 'done']);
+    assert.match(w.el('done-summary').textContent, /appears above the taskbar/);
+    assert.equal(w.el('done-windows').hidden, false);
+    assert.match(w.el('done-windows').textContent, /needs no permissions/);
+    assert.match(w.el('done-tray').textContent, /notification area.*drag it onto the taskbar/);
+    // The PATH step: the exact change first; Add makes it; Remove takes it out again.
+    await w.click('back');
+    assert.deepEqual(w.visible(), ['cli']);
+    assert.match(w.el('cli-state').textContent, /^Not on your PATH yet\. Adds C:\\Users.*bin to the end of your PATH \(HKCU\\Environment\\Path\)/);
+    assert.match(w.el('cli-state').textContent, /C:\\Test\\bin; a terminal uses whichever comes first/);
+    assert.equal(w.el('cli-install').textContent, 'Add to PATH');
+    assert.equal(w.el('cli-remove').hidden, true);
+    await w.click('cli-install');
+    assert.deepEqual(w.calls.find((c) => c[0] === 'cli_tool_install'), ['cli_tool_install', {}]);
+    assert.equal(w.el('cli-result').textContent, 'Added it.');
+    assert.match(w.el('cli-state').textContent, /^On your PATH: /);
+    assert.equal(w.el('cli-install').disabled, true);
+    assert.equal(w.el('cli-remove').hidden, false);
+    await w.click('cli-remove');
+    assert.deepEqual(w.calls.filter((c) => c[0] === 'cli_tool_install').at(-1), ['cli_tool_install', { remove: true }]);
+    assert.equal(w.el('cli-remove').hidden, true);
+    assert.ok(!w.calls.some((c) => c[0] === 'migration_preview' || c[0] === 'permission_request'), 'nothing of macOS is asked');
   });
 
   test('without start at login, the hooks step warns (Q12), and an earlier install adds step 1 and disables both', async () => {

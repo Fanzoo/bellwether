@@ -228,8 +228,9 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$dir\hooks.json")) { exit 1 }
           & cmd /c "$dir\cli.cmd status"
           if ($LASTEXITCODE -ne 2) { Write-Output "::error::status with no brain should exit 2, got $LASTEXITCODE"; exit 1 }
-          # The folder ships without a home or a token: the next steps' smoke runs, and the artifact, start clean.
-          Remove-Item -Recurse -Force "$dir\home", "$dir\hooks.json"
+          # The folder ships with only its config in home\ (W7-1): no token, no logs, no hooks.json.
+          Get-ChildItem "$dir\home" -Exclude config.json | Remove-Item -Recurse -Force
+          Remove-Item -Force "$dir\hooks.json"
           # The expected exit 2 above would otherwise become this step's result.
           $global:LASTEXITCODE = 0
       # The demo flock with a scratch home on the test port, for 25 s. A runner without an
@@ -242,10 +243,11 @@ jobs:
           $dir = "shell/src-tauri/target-dev/windows-test/bellwether-windows-test"
           $bwhome = Join-Path $env:RUNNER_TEMP "bw-smoke"
           New-Item -ItemType Directory -Force $bwhome | Out-Null
-          $env:BELLWETHER_AGENT_DIR = (Resolve-Path $dir).Path
+          # The app layout (W7-1): the scratch home has the folder's config (the test port).
+          Copy-Item "$dir/home/config.json" $bwhome
           $env:BELLWETHER_HOME = $bwhome
           $p = Start-Process -FilePath "$dir/Bellwether.exe" -ArgumentList "--demo","--demo-monitors","--heartbeat","--quit-after","25" -PassThru -Wait
-          $log = Join-Path $bwhome "shell.log"
+          $log = Join-Path $bwhome "logs/shell.log"
           $text = if (Test-Path $log) { Get-Content -Raw $log } else { "" }
           Write-Output "exit code $($p.ExitCode)"
           Write-Output $text
@@ -263,8 +265,10 @@ jobs:
         run: |
           $dir = "shell/src-tauri/target-dev/windows-test/bellwether-windows-test"
           $out = Join-Path $env:RUNNER_TEMP "desktop.json"
-          $env:BELLWETHER_AGENT_DIR = (Resolve-Path $dir).Path
-          $env:BELLWETHER_HOME = Join-Path $env:RUNNER_TEMP "bw-dump"
+          $bwhome = Join-Path $env:RUNNER_TEMP "bw-dump"
+          New-Item -ItemType Directory -Force $bwhome | Out-Null
+          Copy-Item "$dir/home/config.json" $bwhome
+          $env:BELLWETHER_HOME = $bwhome
           $p = Start-Process -FilePath "$dir/Bellwether.exe" -ArgumentList "--dump-desktop","$out" -PassThru -Wait
           if ($p.ExitCode -ne 0 -or -not (Test-Path $out)) { Write-Output "::error::--dump-desktop exited $($p.ExitCode)"; exit 1 }
           $d = Get-Content -Raw $out | ConvertFrom-Json

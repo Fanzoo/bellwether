@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { AGENT_DIR } from './helpers.mjs';
-import { PETS, TEST_PORT, cliCmd, readme, runTestCmd, sharingCheckCmd, testConfig } from '../scripts/build-windows-test.mjs';
+import { CONFIG_PATH, PETS, TEST_PORT, cliCmd, readme, runTestCmd, sharingCheckCmd, testConfig } from '../scripts/build-windows-test.mjs';
 
 /**
  * Windows plan W1: the test folder the maintainer runs on his PC (scripts/build-windows-test.mjs)
@@ -32,6 +32,8 @@ describe('the Windows test folder (W1, WD12)', () => {
     const changed = cfg.split('\n').filter((l, i) => l !== example.split('\n')[i]);
     assert.deepEqual(changed, [`  "port": ${TEST_PORT},`], 'only the port line differs');
     assert.throws(() => testConfig('{"nested": {"port": 1}}'), /top-level "port"/);
+    // W7-1: the app layout reads the home's config.json, which the setup window may edit.
+    assert.deepEqual(CONFIG_PATH, ['home', 'config.json']);
   });
 
   test('run-test.cmd: CRLF, a scratch home beside it, and only the demo, the sessions or the dump', () => {
@@ -39,8 +41,11 @@ describe('the Windows test folder (W1, WD12)', () => {
     assert.ok(cmd.endsWith('\r\n') && !/[^\r]\n/.test(cmd), 'CRLF line endings throughout');
     const lines = cmd.split('\r\n');
     assert.ok(lines.includes('set "BELLWETHER_HOME=%HERE%home"'));
-    assert.ok(lines.includes('set "BELLWETHER_AGENT_DIR=%HERE:~0,-1%"'));
-    for (const v of ['BELLWETHER_CONFIG', 'BELLWETHER_DATA_DIR', 'BELLWETHER_HOOK_TOKEN']) assert.ok(lines.includes(`set "${v}="`), `${v} cleared`);
+    // W7-1: the app layout, as an install: no checkout, and the config is the home's.
+    for (const v of ['BELLWETHER_AGENT_DIR', 'BELLWETHER_CONFIG', 'BELLWETHER_DATA_DIR', 'BELLWETHER_HOOK_TOKEN']) assert.ok(lines.includes(`set "${v}="`), `${v} cleared`);
+    // The app logs to its home's logs\ (settings.rs, a custom home).
+    assert.ok(lines.includes('set "LOGS=%BELLWETHER_HOME%\\logs"'));
+    assert.ok(!lines.some((l) => l.includes('%BELLWETHER_HOME%\\shell')), 'no log at the home\'s top level');
     const runs = lines.filter((l) => l.includes('Bellwether.exe"'));
     assert.equal(runs.length, 3);
     // `--demo` comes first, so whatever is passed after it is the app's flags, never a CLI
@@ -80,7 +85,7 @@ describe('the Windows test folder (W1, WD12)', () => {
     const cmd = cliCmd();
     assert.ok(cmd.endsWith('\r\n') && !/[^\r]\n/.test(cmd), 'CRLF line endings throughout');
     const lines = cmd.split('\r\n');
-    for (const l of ['setlocal', 'set "BELLWETHER_HOME=%HERE%home"', 'set "BELLWETHER_CONFIG=%HERE%config.json"', 'set "BELLWETHER_AGENT_DIR=%HERE:~0,-1%"', 'set "BELLWETHER_DATA_DIR="', 'set "BELLWETHER_HOOK_TOKEN="', '"%HERE%bin\\bellwether.exe" %*', 'exit /b %ERRORLEVEL%']) {
+    for (const l of ['setlocal', 'set "BELLWETHER_HOME=%HERE%home"', 'set "BELLWETHER_CONFIG="', 'set "BELLWETHER_AGENT_DIR="', 'set "BELLWETHER_DATA_DIR="', 'set "BELLWETHER_HOOK_TOKEN="', '"%HERE%bin\\bellwether.exe" %*', 'exit /b %ERRORLEVEL%']) {
       assert.ok(lines.includes(l), l);
     }
     assert.ok(!/APPDATA|USERPROFILE|\.claude|47417/.test(lines.filter((l) => !l.startsWith('rem')).join('\n')));

@@ -16,9 +16,15 @@
 //! login and installing hooks stay refused (deviation 63): two brains would fight over one
 //! port, and the app's hooks would carry a token the old brain refuses.
 //!
-//! Bellwether.app only. A repository debug build opens it only when asked (`--onboarding`),
-//! to test the window; a repository release build (the strip a repository LaunchAgent
-//! runs) never does.
+//! Bellwether.app only (or a Windows install, the test folder included: Windows plan W7).
+//! A repository debug build opens it only when asked (`--onboarding`), to test the window;
+//! a repository release build (the strip a repository LaunchAgent runs) never does.
+//!
+//! On Windows (WD10) the same eleven commands answer; `setup_status` says `platform`, and
+//! the page leaves out the steps Windows has no use for (an earlier install, the Dock, the
+//! Automation permission). Start at login is the Run values (winstart.rs), Import… is the
+//! system's Open dialog, and the command-line tool is the install's `bin\` on the user's
+//! PATH (winpath.rs).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +61,9 @@ pub const COMMANDS: [&str; 11] = [
     "cli_tool_install",
     "setup_close",
 ];
+
+/// The OS the page adapts its steps to.
+pub const PLATFORM: &str = if cfg!(windows) { "windows" } else if cfg!(target_os = "macos") { "macos" } else { "linux" };
 
 /// The second wall: a command answers only the onboarding window.
 pub fn guard(label: &str) -> Result<(), String> {
@@ -272,6 +281,10 @@ impl Onboarding {
     /// Whether step 1 has anything to offer: the old LaunchAgents, or anything else of an
     /// earlier install the migration would move (hook entries alone, D9).
     fn migration_found(&self, earlier: &[bellwether_brain::legacy::Agent]) -> bool {
+        // An earlier install is the macOS repository version's: Windows never had one.
+        if cfg!(windows) {
+            return false;
+        }
         if !earlier.is_empty() {
             return true;
         }
@@ -432,6 +445,7 @@ impl Onboarding {
     /// D6 steps 4 and 5 (and the Login Items pane for an item waiting for approval).
     pub fn permission_request(&self, kind: &str) -> Result<Value, String> {
         let (ok, message) = match kind {
+            "accessibility" | "automation-iterm2" | "automation-terminal" if cfg!(windows) => (true, "Windows needs no permission for this: sheep stand on the taskbar, and a click brings the session's terminal forward".to_string()),
             "accessibility" => {
                 if crate::ax::trusted() {
                     (true, "Accessibility is already allowed: sheep stand on the Dock".to_string())
@@ -447,7 +461,11 @@ impl Onboarding {
             "automation-terminal" => crate::actions::automation("com.apple.Terminal", "Terminal"),
             "login-items" => {
                 login_items::open_settings();
-                (true, "opened System Settings > General > Login Items & Extensions: turn Bellwether on under \"Allow in the Background\"".to_string())
+                if cfg!(windows) {
+                    (true, "opened Settings > Apps > Startup: turn Bellwether on there (Task Manager's Startup apps tab does the same)".to_string())
+                } else {
+                    (true, "opened System Settings > General > Login Items & Extensions: turn Bellwether on under \"Allow in the Background\"".to_string())
+                }
             }
             other => return Err(format!("unknown permission {other:?}")),
         };
@@ -555,8 +573,20 @@ impl Onboarding {
 
     // ------------------------------------------------------------ the CLI tool
 
-    /// D6 step 7: `~/.local/bin/bellwether`, a link to this app's executable.
-    pub fn cli_tool_install(&self) -> Result<Value, String> {
+    /// D6 step 7: `~/.local/bin/bellwether`, a link to this app's executable. On Windows,
+    /// the install's `bin\` on the user's PATH; `remove` takes it out again (WD7).
+    pub fn cli_tool_install(&self, remove: bool) -> Result<Value, String> {
+        #[cfg(windows)]
+        return crate::winpath::apply(remove);
+        #[cfg(not(windows))]
+        self.cli_tool_link(remove)
+    }
+
+    #[cfg_attr(windows, allow(dead_code))]
+    fn cli_tool_link(&self, remove: bool) -> Result<Value, String> {
+        if remove {
+            return Err("the command-line link is removed by hand on macOS (rm ~/.local/bin/bellwether)".into());
+        }
         let exe = crate::identity::bundle_executable().ok_or("the command-line tool links to Bellwether.app; this is a development build (docs/DEVELOPMENT.md)")?;
         let state = install_cli_link(&self.ctx.user_home, &exe, &homebrew_links())?;
         log(&format!("onboarding: command-line tool: {}", state["state"]));
@@ -564,6 +594,9 @@ impl Onboarding {
     }
 
     pub fn cli_tool_state(&self) -> Value {
+        #[cfg(windows)]
+        return crate::winpath::state_here();
+        #[cfg(not(windows))]
         match crate::identity::bundle_executable() {
             Some(exe) => cli_state(&self.ctx.user_home, &exe, &homebrew_links()),
             None => json!({ "state": "unavailable", "detail": "a development build: run it from target-dev/ (docs/DEVELOPMENT.md)" }),
@@ -585,6 +618,7 @@ impl Onboarding {
             Err(e) => json!({ "file": file.display().to_string(), "groups": 0, "events": installer::EVENTS.len(), "upToDate": false, "problem": e.message }),
         };
         json!({
+            "platform": PLATFORM,
             "layout": if self.ctx.layout == Layout::App { "app" } else { "repository" },
             "port": self.ctx.port,
             "onboarded": bellwether_core::shellstate::onboarded(&self.ctx.home),
@@ -906,9 +940,52 @@ fn choose_pet_file<R: Runtime>(app: &AppHandle<R>) -> Result<Option<PathBuf>, St
     rx.recv().map_err(|e| e.to_string())?
 }
 
-#[cfg(not(target_os = "macos"))]
+/// The system's Open dialog (`GetOpenFileNameW`), owned by the setup window, on a thread of
+/// its own (COM initialised there, as the dialog wants). The chosen file, or None.
+#[cfg(windows)]
+fn choose_pet_file<R: Runtime>(app: &AppHandle<R>) -> Result<Option<PathBuf>, String> {
+    let owner = app.get_webview_window(LABEL).and_then(|w| w.hwnd().ok()).map(|h| h.0 as usize).unwrap_or(0);
+    std::thread::spawn(move || win_open_dialog(owner)).join().map_err(|_| "the Open dialog stopped unexpectedly".to_string())?
+}
+
+#[cfg(windows)]
+fn win_open_dialog(owner: usize) -> Result<Option<PathBuf>, String> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
+    use windows_sys::Win32::UI::Controls::Dialogs::{CommDlgExtendedError, GetOpenFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW};
+    let wide = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+    // Pairs of (label, pattern), each ending in a NUL, the list in a second one.
+    let mut filter = wide("Pet files (animations.xml)\0animations.xml;*.xml\0All files\0*.*\0");
+    filter.push(0);
+    let mut title = wide("Import a pet: choose its animations.xml (it is checked before anything is copied)");
+    title.push(0);
+    let mut file = vec![0u16; 32768];
+    let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+    ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    ofn.hwndOwner = owner as _;
+    ofn.lpstrFilter = filter.as_ptr();
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = file.as_mut_ptr();
+    ofn.nMaxFile = file.len() as u32;
+    ofn.lpstrTitle = title.as_ptr();
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    let com = unsafe { CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32) };
+    let chosen = unsafe { GetOpenFileNameW(&mut ofn) };
+    let err = if chosen == 0 { unsafe { CommDlgExtendedError() } } else { 0 };
+    if com >= 0 {
+        unsafe { CoUninitialize() };
+    }
+    if chosen == 0 {
+        // 0: cancelled; anything else is the dialog's own error.
+        return if err == 0 { Ok(None) } else { Err(format!("the Open dialog failed (error {err:#x})")) };
+    }
+    let n = file.iter().position(|&c| c == 0).unwrap_or(file.len());
+    Ok(Some(PathBuf::from(std::ffi::OsString::from_wide(&file[..n]))))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn choose_pet_file<R: Runtime>(_app: &AppHandle<R>) -> Result<Option<PathBuf>, String> {
-    Err("the file panel is macOS-only for now".into())
+    Err("the file panel is for macOS and Windows".into())
 }
 
 /// Reloads every strip window so it asks for its pet again.
@@ -1035,9 +1112,9 @@ pub async fn migration_apply(window: tauri::WebviewWindow, app: AppHandle, plan_
 }
 
 #[tauri::command]
-pub async fn cli_tool_install(window: tauri::WebviewWindow, app: AppHandle) -> Out {
+pub async fn cli_tool_install(window: tauri::WebviewWindow, app: AppHandle, remove: Option<bool>) -> Out {
     guard(window.label())?;
-    blocking(move || app.state::<Onboarding>().cli_tool_install()).await?
+    blocking(move || app.state::<Onboarding>().cli_tool_install(remove.unwrap_or(false))).await?
 }
 
 #[tauri::command]
@@ -1181,7 +1258,8 @@ mod tests {
         let e = ob.login_items_set(true).unwrap_err();
         assert!(e.contains("earlier Bellwether"), "{e}");
         assert!(ob.hooks_preview(Action::Uninstall).is_ok(), "removing hooks is never refused");
-        assert_eq!(ob.status(&Value::Null)["migration"]["found"], true);
+        // Step 1 is macOS's: Windows never offers the move (W7).
+        assert_eq!(ob.status(&Value::Null)["migration"]["found"], !cfg!(windows));
         let _ = std::fs::remove_dir_all(&base);
         let mut repo = ctx(&base, Some(T));
         repo.layout = Layout::Repository;
@@ -1282,7 +1360,7 @@ mod tests {
         let shared = calls.clone();
         let me = std::process::id() as i32;
         let ob = Onboarding::with_host(c, Box::new(move |_| Ok(Box::new(Rec { calls: shared.clone(), app_agent: Some(me) }))));
-        assert_eq!(ob.status(&Value::Null)["migration"]["found"], true);
+        assert_eq!(ob.status(&Value::Null)["migration"]["found"], !cfg!(windows), "Windows never offers step 1 (W7)");
         let p = ob.migration_preview().unwrap();
         assert_eq!(p["found"], true);
         let text = p["text"].as_str().unwrap();
@@ -1473,7 +1551,7 @@ mod tests {
         let ob = Onboarding::new(ctx(&base, None));
         let s = ob.status(&Value::Null);
         let keys: Vec<&String> = s.as_object().unwrap().keys().collect();
-        let mut want = ["layout", "port", "onboarded", "token", "hooks", "login", "accessibility", "automation", "pets", "migration", "cliTool"];
+        let mut want = ["platform", "layout", "port", "onboarded", "token", "hooks", "login", "accessibility", "automation", "pets", "migration", "cliTool"];
         want.sort();
         let mut keys: Vec<&str> = keys.iter().map(|k| k.as_str()).collect();
         keys.sort();
@@ -1483,6 +1561,7 @@ mod tests {
         assert_eq!(s["hooks"]["groups"], 0);
         assert_eq!(s["hooks"]["upToDate"], false);
         assert_eq!(s["migration"]["found"], false);
+        assert_eq!(s["platform"], PLATFORM);
         assert_eq!(s["pets"]["list"], json!([]));
         assert!(!ob.ctx.home.exists(), "reading the status writes nothing");
         let _ = std::fs::remove_dir_all(&base);

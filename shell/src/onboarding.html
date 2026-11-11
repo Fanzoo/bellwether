@@ -117,7 +117,7 @@
 
       <section data-step="cli" hidden>
         <h2>Optional: the bellwether command</h2>
-        <p>
+        <p id="cli-intro">
           For a terminal: <code>bellwether status</code>, <code>bellwether doctor</code> and the
           rest. This makes a link at <code>~/.local/bin/bellwether</code>; no administrator
           password is needed.
@@ -125,6 +125,7 @@
         <p id="cli-state"></p>
         <div class="actions">
           <button id="cli-install" class="primary">Install the command</button>
+          <button id="cli-remove" hidden>Remove from PATH</button>
         </div>
         <p id="cli-result" class="result"></p>
       </section>
@@ -133,7 +134,8 @@
         <h2>Done</h2>
         <p id="done-summary"></p>
         <ul id="doctor" class="checks"></ul>
-        <p class="quiet">
+        <p id="done-windows" class="quiet" hidden></p>
+        <p id="done-tray" class="quiet">
           The menu-bar sheep has <em>Set up Bellwether…</em> to come back here,
           <em>Quiet (alerts only)</em> to keep only the "!" of a session that needs you, and
           <em>Hide everything (for screen sharing)</em>.
