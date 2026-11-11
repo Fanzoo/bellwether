@@ -643,6 +643,27 @@ describe('the strip: click on release, drag, drop (main.js)', () => {
     }
   });
 
+  test('Quiet: only a sheep that needs you is drawn, still and faded, with its "!" above it', async () => {
+    const strip = await bootStrip([sheep('s1', 0, { state: 'busy', alert: { kind: 'permission', text: 'Bash: ls?', since: 0, confirmed: false } }), sheep('s2', 1), sheep('s3', 2)]);
+    strip.snapshot(strip.flock, { muted: true });
+    strip.S.draw(99_999);
+    const ops = strip.screen;
+    const images = ops.filter((o) => o.op === 'drawImage');
+    assert.ok(images.length >= 1, 'the waiting sheep is drawn');
+    assert.ok(images.every((o) => Math.abs(o.alpha - 0.4) < 1e-9), 'faded, and nothing else drawn at full');
+    assert.ok(!ops.some((o) => o.op === 'fillText' && o.text === 'Bash: ls?'), 'no bubble');
+    const bang = ops.findIndex((o) => o.op === 'fillText' && o.text === '!');
+    assert.ok(bang > ops.indexOf(images.at(-1)), 'the "!" on top of it');
+    const d = strip.entry('s1').sprite.drawInfo();
+    const arc = ops.filter((o) => o.op === 'arc').at(-1);
+    assert.equal(arc.x, d.x + strip.entry('s1').sprite.width / 2, 'centred over it');
+    assert.ok(arc.y < d.y + strip.entry('s1').sprite.height / 2, 'above its middle');
+    // Nobody waiting: an empty strip, as before.
+    strip.snapshot([sheep('s1', 0), sheep('s2', 1), sheep('s3', 2)], { muted: true });
+    strip.S.draw(99_999);
+    assert.deepEqual(strip.screen.filter((o) => o.op === 'drawImage' || o.op === 'arc'), []);
+  });
+
   test('the shell\'s own cancel (its fail-safe, a display change): set back down, no second word to the shell', async () => {
     const strip = await bootStrip();
     const s = strip.entry('s1').sprite;

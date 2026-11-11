@@ -553,11 +553,15 @@ function fadeOf(id) {
   return view.near.has(id) ? display.fadeOpacity ?? 0.25 : 1;
 }
 
+/** Quiet's faded sheep: enough to see whose "!" it is, without the strip coming alive. */
+const MUTED_SHEEP_OPACITY = 0.4;
+
 /**
- * Muted (do-not-disturb): no sheep, no animation; only a small static "!" where a
- * sheep or lamb needs you.
+ * Muted (do-not-disturb): no animation, and only the sheep or lambs that need you, drawn
+ * still and faded with a small "!" above them. The rest of the flock stays hidden.
  */
 function drawMuted() {
+  const waiting = [];
   for (const [, e] of sprites) {
     if (e.removedAt !== undefined || e.sprite.gone) continue;
     // On whoever is waiting: a lamb's prompt badges the lamb, not its parent too,
@@ -565,17 +569,22 @@ function drawMuted() {
     const a = e.actor;
     const lambOnStrip = (a.lambs ?? []).some((l) => l.alert && sprites.has(lambKey(e.key, l.id)));
     const kind = a.alert?.kind ?? (!e.parentId && a.lambAlert && !lambOnStrip ? 'lamb' : null);
-    if (!kind) continue;
+    if (kind) waiting.push([e, kind]);
+  }
+  // Every faded sheep first, then the badges, so a neighbour never covers a "!".
+  for (const [e] of waiting) drawSprite(e, undefined, { full: true, alpha: MUTED_SHEEP_OPACITY });
+  for (const [e, kind] of waiting) {
     const d = e.sprite.drawInfo();
-    badge(d.x + e.sprite.width / 2, stripSize().height - 12, kind);
+    badge(d.x + e.sprite.width / 2, Math.max(9, d.y + 6), kind);
   }
 }
 
-function drawSprite({ key, sprite, actor, colourIndex }, now, { full = false } = {}) {
+function drawSprite({ key, sprite, actor, colourIndex }, now, { full = false, alpha = 1 } = {}) {
   if (sprite.gone) return; // a lamb back inside its parent, or a sheep off the strip
   const d = sprite.drawInfo(now);
-  // The carried sheep is exempt from the cursor-near fade (full).
+  // The carried sheep is exempt from the cursor-near fade (full); Quiet fades its own (alpha).
   if (!full) d.opacity *= fadeOf(key);
+  d.opacity *= alpha;
   const { width: w, height: h } = sprite;
   const sheet = pet.sheets[colourIndex ?? actor.colourIndex] ?? pet.sheets[0];
   const { col, row } = tileOf(pet.model, d.frame);
