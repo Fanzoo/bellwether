@@ -381,7 +381,8 @@ These need your hands, your eyes or a screen permission, so they aren't automate
    5. **Google Meet in Chrome, then in Safari:** present your entire screen and look
       from the other side.
 8. **Tray.** Click the menu-bar sheep.
-   1. *Quiet (alerts only)*: the sheep vanish, and a waiting one shows only a "!". Run
+   1. *Quiet (alerts only)*: the sheep vanish, and a waiting one stays, still and faded,
+      with a "!" above it. Run
       `bellwether status`: it shows MUTED. Quit and restart the shell: still muted.
       *Quiet* again: back.
    2. *Hide everything (for screen sharing)*: the strip disappears, "!" included. Quit
